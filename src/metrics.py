@@ -129,16 +129,27 @@ class MetricCalculator:
 class SPLCalculator(MetricCalculator):
     def calculate(self, voice: np.ndarray, cycle_triggers: np.ndarray) -> np.ndarray:
         logger.info("Calculating SPL...")
-        delay       = int(0.02 * self.sample_rate)
-        v_delayed   = np.concatenate([np.zeros(delay), voice[:-delay]])
+        idx = np.where(cycle_triggers > 0.5)[0]
+        if len(idx) < 2:
+            return np.array([])
 
-        rms_windows = _sliding_rms(v_delayed, self.spl_window_size, self.spl_hop_size)
-        spl_windows = np.where(rms_windows > 0,
-                               20.0 * np.log10(np.maximum(rms_windows, 1e-12)),
-                               -100.0)
+        # Per-cycle RMS, matching SC's AverageOut.ar(in.squared, trig).sqrt
+        # Use vectorised cumsum to avoid Python loop
+        sq = voice * voice
+        cs = np.empty(len(sq) + 1)
+        cs[0] = 0.0
+        np.cumsum(sq, out=cs[1:])
 
-        cycle_idx = np.where(cycle_triggers > 0.5)[0]
-        out = _assign_to_cycles(cycle_idx, spl_windows, self.spl_hop_size)
+        starts = idx[:-1]
+        ends   = idx[1:]
+        lens   = ends - starts
+        valid  = lens >= self.min_samples
+        rms    = np.where(valid,
+                          np.sqrt((cs[ends] - cs[starts]) / np.maximum(lens, 1)),
+                          0.0)
+        out = np.where(valid & (rms > 0),
+                       20.0 * np.log10(np.maximum(rms, 1e-12)),
+                       -100.0)
         logger.info("  SPL: %d cycles  range %.1f – %.1f dB", len(out), out.min(), out.max())
         return out
 
@@ -186,12 +197,24 @@ class ClarityCalculator(MetricCalculator):
         n_prime = cs[:, n - taus] + (cs[:, n:n+1] - cs[:, taus])
         nsdf    = np.where(n_prime > 1e-12,
                            2.0 * m_full[:, taus] / n_prime,
-                           0.0)
+                           0.0)                            # (N_win, L)
 
-        peak_local = np.argmax(nsdf, axis=1)
-        peak_lag   = peak_local + lo
-        clarity_w  = nsdf[np.arange(len(wins)), peak_local]
-        f0_w       = np.where(peak_lag > 0, sr / peak_lag, 0.0)
+        # Global argmax (baseline)
+        peak_local = np.argmax(nsdf, axis=1)               # (N_win,) index in nsdf
+        peak_lag   = peak_local + lo                       # sample lag
+
+        # Octave correction: if nsdf at half-lag is nearly as high, prefer it.
+        # Fixes sub-octave errors where argmax picks 2× the true period.
+        half_lag  = peak_lag // 2
+        in_range  = half_lag >= lo                         # (N_win,) bool
+        half_ix   = np.clip(half_lag - lo, 0, nsdf.shape[1] - 1)
+        nsdf_peak = nsdf[np.arange(len(peak_local)), peak_local]
+        nsdf_half = nsdf[np.arange(len(peak_local)), half_ix]
+        prefer_half = in_range & (nsdf_half > 0.9 * nsdf_peak)
+        peak_lag  = np.where(prefer_half, half_lag, peak_lag)
+        clarity_w = np.where(prefer_half, nsdf_half, nsdf_peak)
+
+        f0_w      = np.where(peak_lag > 0, sr / peak_lag, 0.0)
 
         midi_w    = np.where(f0_w > 0, _hz_to_midi(f0_w), 20.0)
         midi_w    = np.maximum(midi_w, 20.0)
@@ -291,13 +314,33 @@ class CPPCalculator(MetricCalculator):
 # ---------------------------------------------------------------------------
 # SpecBal
 # ---------------------------------------------------------------------------
+def _blp4_sos(freq: float, rq: float, sr: float) -> np.ndarray:
+    """SC BLowPass4 equivalent: two cascaded Audio EQ Cookbook LP biquads, Q=1/rq."""
+    w0 = 2.0 * np.pi * freq / sr
+    cw = np.cos(w0); sw = np.sin(w0)
+    alpha = sw * rq / 2.0
+    b0 = (1.0 - cw) / 2.0; b1 = 1.0 - cw; b2 = b0
+    a0 = 1.0 + alpha;       a1 = -2.0 * cw; a2 = 1.0 - alpha
+    sec = np.array([b0/a0, b1/a0, b2/a0, 1.0, a1/a0, a2/a0])
+    return np.vstack([sec, sec])            # cascade twice → 4th order
+
+def _bhp4_sos(freq: float, rq: float, sr: float) -> np.ndarray:
+    """SC BHiPass4 equivalent: two cascaded Audio EQ Cookbook HP biquads, Q=1/rq."""
+    w0 = 2.0 * np.pi * freq / sr
+    cw = np.cos(w0); sw = np.sin(w0)
+    alpha = sw * rq / 2.0
+    b0 = (1.0 + cw) / 2.0; b1 = -(1.0 + cw); b2 = b0
+    a0 = 1.0 + alpha;        a1 = -2.0 * cw;   a2 = 1.0 - alpha
+    sec = np.array([b0/a0, b1/a0, b2/a0, 1.0, a1/a0, a2/a0])
+    return np.vstack([sec, sec])
+
 class SpecBalCalculator(MetricCalculator):
 
     def __init__(self, config: VoiceMapConfig):
         super().__init__(config)
-        nyq = config.sample_rate / 2
-        self._sos_lo = butter(4, config.specbal_cutoff_low  / nyq, btype='low',  output='sos')
-        self._sos_hi = butter(4, config.specbal_cutoff_high / nyq, btype='high', output='sos')
+        sr = float(config.sample_rate)
+        self._sos_lo = _blp4_sos(config.specbal_cutoff_low,  2.0, sr)
+        self._sos_hi = _bhp4_sos(config.specbal_cutoff_high, 2.0, sr)
 
     def calculate(self, voice: np.ndarray, cycle_triggers: np.ndarray) -> np.ndarray:
         logger.info("Calculating SpecBal (single-pass filter)...")
