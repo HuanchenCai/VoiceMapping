@@ -93,60 +93,94 @@ class SPLCalculator(MetricCalculator):
 
 
 # ---------------------------------------------------------------------------
-# Clarity + MIDI (F0)
+# Clarity + MIDI (F0) — Tartini-style windowed autocorrelation
+#
+# Matches SC:  Tartini.kr(Integrator.ar(in, 0.995), n:2048, k:0, overlap:1024)
+#
+# For each overlapping window of size n (2048) with hop (n - overlap = 1024):
+#   1. Compute normalised autocorrelation (NSDF) via FFT
+#   2. Find the dominant peak in the valid lag range → F0
+#   3. Clarity = normalised ACF value at that peak (0..1)
+# The per-window F0/Clarity are then assigned to EGG cycle boundaries.
 # ---------------------------------------------------------------------------
 class ClarityCalculator(MetricCalculator):
+
+    def __init__(self, config: VoiceMapConfig):
+        super().__init__(config)
+        self._fft_n  = config.clarity_fft_size          # 2048
+        self._hop    = config.clarity_fft_size - config.clarity_overlap  # 1024
+        self._min_lag = max(1, int(config.sample_rate / 1000))  # ~1000 Hz ceiling
+        self._max_lag = int(config.sample_rate / 50)            # 50 Hz floor
+
     def calculate(self, voice: np.ndarray,
                   cycle_triggers: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        logger.info("Calculating Clarity...")
+        logger.info("Calculating Clarity (Tartini autocorrelation)...")
+
+        n     = self._fft_n
+        hop   = self._hop
+        sr    = self.sample_rate
+
+        # Leaky-integrate the voice signal, matching SC Integrator.ar(in, 0.995)
+        from scipy.signal import lfilter as _lfilter
+        v_integr = _lfilter([1.0], [1.0, -0.995], voice.astype(np.float64))
+
+        # Build all windows at once (zero-copy view, then copy to allow writability)
+        n_win = max((len(v_integr) - n) // hop + 1, 0)
+        if n_win == 0:
+            return np.array([]), np.array([])
+
+        wins = np.lib.stride_tricks.sliding_window_view(v_integr, n)[::hop].copy()
+
+        # Subtract mean per window
+        wins -= wins.mean(axis=1, keepdims=True)
+
+        # Linear autocorrelation via zero-padded FFT
+        # Using NSDF (Normalised Square Difference Function, McLeod/Tartini):
+        #   NSDF(τ) = 2·m(τ) / [Σx[i]² for i∈[0,N-τ) + Σx[i]² for i∈[τ,N)]
+        # For a perfectly periodic signal NSDF = 1.0, unlike simple r(τ)/r(0)
+        # which gives (N-τ)/N < 1.0 and causes systematic under-reporting of clarity.
+        fft_size = 2 * n
+        W_fft  = rfft(wins, n=fft_size, axis=1)
+        m_full = irfft(W_fft * np.conj(W_fft), n=fft_size, axis=1)[:, :n]  # (W, n) linear ACF
+
+        # Cumulative sum of squares for NSDF denominator — O(W·N) numpy
+        sq = wins * wins                                  # (W, n)
+        cs = np.zeros((len(wins), n + 1), dtype=np.float64)
+        np.cumsum(sq, axis=1, out=cs[:, 1:])             # cs[:, k] = Σ_{i<k} x[i]²
+
+        lo, hi = self._min_lag, min(self._max_lag, n - 1)
+        taus   = np.arange(lo, hi + 1, dtype=int)        # (n_lags,)
+
+        # n'(τ) = Σ_{[0,N-τ)} x² + Σ_{[τ,N)} x²
+        #       = cs[:, N-τ] + (cs[:, N] - cs[:, τ])
+        n_prime = cs[:, n - taus] + (cs[:, n:n+1] - cs[:, taus])  # (W, n_lags)
+        nsdf    = np.where(n_prime > 1e-12,
+                           2.0 * m_full[:, taus] / n_prime,
+                           0.0)                          # (W, n_lags)
+
+        peak_local = np.argmax(nsdf, axis=1)              # (W,)
+        peak_lag   = peak_local + lo
+        clarity_w  = nsdf[np.arange(len(wins)), peak_local]  # (W,) in (-1,1]
+        f0_w       = np.where(peak_lag > 0, sr / peak_lag, 0.0)
+
+        # Sanitize (SC: Sanitize.kr(freq.cpsmidi, 20) → clamp MIDI to ≥20)
+        midi_w    = np.where(f0_w > 0, _hz_to_midi(f0_w), 20.0)
+        midi_w    = np.maximum(midi_w, 20.0)
+        clarity_w = np.maximum(clarity_w, 0.0)
+
+        # Assign window values to each EGG cycle trigger
         cycle_idx = np.where(cycle_triggers > 0.5)[0]
         if len(cycle_idx) < 2:
             return np.array([]), np.array([])
 
-        clarity_list = []
-        midi_list    = []
+        # Each cycle trigger maps to the window that covers it
+        cycle_midi    = _assign_to_cycles(cycle_idx[:-1], midi_w,    hop)
+        cycle_clarity = _assign_to_cycles(cycle_idx[:-1], clarity_w, hop)
 
-        for i in range(len(cycle_idx) - 1):
-            s, e = cycle_idx[i], cycle_idx[i + 1]
-            L = e - s
-            if L < self.min_samples:
-                continue
-
-            a = voice[s:e].astype(np.float64)
-            b = voice[cycle_idx[i + 1]:cycle_idx[i + 1] + L
-                      if i + 2 < len(cycle_idx)
-                      else len(voice)]
-
-            # Use next cycle at same length
-            n_next = cycle_idx[i + 2] - cycle_idx[i + 1] if i + 2 < len(cycle_idx) else 0
-            if n_next < self.min_samples:
-                b = voice[e:e + L] if e + L <= len(voice) else None
-            else:
-                b = voice[e:e + min(L, n_next)].astype(np.float64)
-
-            if b is None or len(b) == 0:
-                continue
-            n = min(len(a), len(b))
-            a, b = a[:n], b[:n]
-
-            # Normalize
-            std_a, std_b = a.std(), b.std()
-            if std_a < 1e-12 or std_b < 1e-12:
-                continue
-            a = (a - a.mean()) / std_a
-            b = (b - b.mean()) / std_b
-
-            # Cross-correlation at zero lag (faster than corrcoef)
-            corr = float(np.dot(a, b)) / (n - 1) if n > 1 else 0.0
-            clarity_list.append(max(0.0, corr))
-            midi_list.append(float(_hz_to_midi(np.array([self.sample_rate / L]))[0]))
-
-        clarity = np.array(clarity_list)
-        midi    = np.array(midi_list)
-        if len(clarity):
-            logger.info("  Clarity: %d cycles  range %.3f – %.3f",
-                        len(clarity), clarity.min(), clarity.max())
-        return midi, clarity
+        logger.info("  Clarity: %d cycles  range %.3f – %.3f",
+                    len(cycle_clarity), cycle_clarity.min(), cycle_clarity.max())
+        logger.info("  MIDI:    range %.1f – %.1f", cycle_midi.min(), cycle_midi.max())
+        return cycle_midi, cycle_clarity
 
 
 # ---------------------------------------------------------------------------
