@@ -203,16 +203,71 @@ class ClarityCalculator(MetricCalculator):
         peak_local = np.argmax(nsdf, axis=1)               # (N_win,) index in nsdf
         peak_lag   = peak_local + lo                       # sample lag
 
-        # Octave correction: if nsdf at half-lag is nearly as high, prefer it.
-        # Fixes sub-octave errors where argmax picks 2× the true period.
-        half_lag  = peak_lag // 2
-        in_range  = half_lag >= lo                         # (N_win,) bool
-        half_ix   = np.clip(half_lag - lo, 0, nsdf.shape[1] - 1)
-        nsdf_peak = nsdf[np.arange(len(peak_local)), peak_local]
-        nsdf_half = nsdf[np.arange(len(peak_local)), half_ix]
-        prefer_half = in_range & (nsdf_half > 0.9 * nsdf_peak)
-        peak_lag  = np.where(prefer_half, half_lag, peak_lag)
-        clarity_w = np.where(prefer_half, nsdf_half, nsdf_peak)
+        # Iterative octave correction: repeatedly prefer half-lag while it scores
+        # >= 90 % of current peak (handles 2×, 4×, 8× period errors in one pass).
+        N_win  = len(peak_local)
+        ix_arr = np.arange(N_win)
+        nsdf_L = nsdf.shape[1]
+        clarity_w = nsdf[ix_arr, peak_local]
+        for _ in range(4):                                 # up to 3 halvings
+            half_lag = peak_lag // 2
+            in_range = half_lag >= lo
+            half_ix  = np.clip(half_lag - lo, 0, nsdf_L - 1)
+            nsdf_half = nsdf[ix_arr, half_ix]
+            prefer   = in_range & (nsdf_half > 0.85 * clarity_w)
+            if not prefer.any():
+                break
+            peak_lag  = np.where(prefer, half_lag, peak_lag)
+            clarity_w = np.where(prefer, nsdf_half, clarity_w)
+
+        # Targeted McLeod-Wyvill fallback: for windows where corrected lag still
+        # implies MIDI < 39 (lag > SR/78 ≈ 565), find the first local peak in
+        # NSDF before the first negative-going zero crossing.  This handles cases
+        # where the argmax sits at a genuine sub-harmonic whose half-period has
+        # negative NSDF (anti-correlated), so the ratio-based octave correction
+        # cannot fire.
+        mw_thresh = int(sr / 78.0)            # lag corresponding to MIDI 39
+        low_mask  = peak_lag > mw_thresh
+        if low_mask.any():
+            for i in np.where(low_mask)[0]:
+                ns = nsdf[i]                  # (L,) over [lo..hi]
+                # Walk through successive positive regions, picking the best peak
+                # from the FIRST region that ends before the current (wrong) peak.
+                limit_idx = peak_lag[i] - lo   # don't look past current argmax
+                found = False
+                pos_start = None
+                for j in range(len(ns)):
+                    if j >= limit_idx:
+                        break
+                    if ns[j] > 0 and pos_start is None:
+                        pos_start = j
+                    elif ns[j] < 0 and pos_start is not None:
+                        # end of a positive region
+                        sub = ns[pos_start:j]
+                        if len(sub) >= 3:
+                            is_pk = np.concatenate([[False],
+                                (sub[1:-1] >= sub[:-2]) & (sub[1:-1] >= sub[2:]),
+                                [False]])
+                            pix = np.where(is_pk)[0]
+                            best = pix[np.argmax(sub[pix])] if len(pix) else int(np.argmax(sub))
+                            if sub[best] > 0.5:
+                                peak_lag[i]  = pos_start + best + lo
+                                clarity_w[i] = sub[best]
+                                found = True
+                                break
+                        pos_start = None
+                if not found and pos_start is not None and pos_start < limit_idx:
+                    # last positive region extends to limit_idx
+                    sub = ns[pos_start:limit_idx]
+                    if len(sub) >= 3:
+                        is_pk = np.concatenate([[False],
+                            (sub[1:-1] >= sub[:-2]) & (sub[1:-1] >= sub[2:]),
+                            [False]])
+                        pix = np.where(is_pk)[0]
+                        best = pix[np.argmax(sub[pix])] if len(pix) else int(np.argmax(sub))
+                        if sub[best] > 0.5:
+                            peak_lag[i]  = pos_start + best + lo
+                            clarity_w[i] = sub[best]
 
         f0_w      = np.where(peak_lag > 0, sr / peak_lag, 0.0)
 
