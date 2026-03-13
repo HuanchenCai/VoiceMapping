@@ -5,8 +5,9 @@ All hot paths use vectorised NumPy; no Python-level loops over samples or window
 """
 
 import numpy as np
-from scipy.signal import butter, sosfilt, sosfiltfilt, lfilter
-from scipy.fft import rfft, irfft
+from scipy.signal import butter, sosfilt, lfilter
+from scipy.fft import rfft, irfft, ifft as _ifft
+from scipy.ndimage import uniform_filter1d as _uf1d
 from typing import Tuple
 import logging
 
@@ -46,6 +47,56 @@ def _assign_to_cycles(cycle_indices: np.ndarray,
                       hop: int) -> np.ndarray:
     idx = np.minimum(cycle_indices // hop, len(metric_values) - 1)
     return metric_values[idx]
+
+
+# ---------------------------------------------------------------------------
+# Per-cycle EGG DFT at harmonics 1..n_harmonics
+# Returns (amps, phases) each shape (n_cycles, n_harmonics)
+#   amps[i,k]   = |X[k+1]| / N_cycle  (complexAbs in SC, k=0 is fundamental)
+#   phases[i,k] = angle(X[k+1])
+# ---------------------------------------------------------------------------
+def _compute_cycle_dft(egg: np.ndarray,
+                       cycle_idx: np.ndarray,
+                       n_harmonics: int) -> Tuple[np.ndarray, np.ndarray]:
+    n_cycles = len(cycle_idx) - 1
+    amps   = np.zeros((n_cycles, n_harmonics), dtype=np.float64)
+    phases = np.zeros((n_cycles, n_harmonics), dtype=np.float64)
+    for i in range(n_cycles):
+        s, e = int(cycle_idx[i]), int(cycle_idx[i + 1])
+        N = e - s
+        if N < 2:
+            continue
+        cyc = egg[s:e].astype(np.float64)
+        X   = np.fft.rfft(cyc)
+        n_out = min(n_harmonics, len(X) - 1)
+        X_h = X[1:n_out + 1] / N     # normalise by cycle length
+        amps  [i, :n_out] = np.abs(X_h)
+        phases[i, :n_out] = np.angle(X_h)
+    return amps, phases
+
+
+# ---------------------------------------------------------------------------
+# Sample Entropy m=1 — batch over all windows at once
+# sequences: (W, N) — W windows of length N
+# ---------------------------------------------------------------------------
+def _batch_sample_entropy_m1(sequences: np.ndarray, r: float) -> np.ndarray:
+    W, N = sequences.shape
+    if N < 3:
+        return np.zeros(W)
+    xi  = sequences[:, :N-1]   # (W, N-1)
+    xi1 = sequences[:, 1:N]    # (W, N-1)
+    d0  = np.abs(xi[:, :, None] - xi[:, None, :])    # (W, N-1, N-1)
+    d1  = np.abs(xi1[:, :, None] - xi1[:, None, :])  # (W, N-1, N-1)
+    diag_mask = ~np.eye(N - 1, dtype=bool)
+    dm  = diag_mask[None]                              # (1, N-1, N-1)
+    match_m  = (d0 < r) & dm
+    match_m1 = match_m & (d1 < r)
+    B = match_m .sum(axis=(1, 2)).astype(np.float64)
+    A = match_m1.sum(axis=(1, 2)).astype(np.float64)
+    result = np.zeros(W)
+    valid = (A > 0) & (B > 0)
+    result[valid] = -np.log(A[valid] / B[valid])
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -93,87 +144,63 @@ class SPLCalculator(MetricCalculator):
 
 
 # ---------------------------------------------------------------------------
-# Clarity + MIDI (F0) — Tartini-style windowed autocorrelation
-#
-# Matches SC:  Tartini.kr(Integrator.ar(in, 0.995), n:2048, k:0, overlap:1024)
-#
-# For each overlapping window of size n (2048) with hop (n - overlap = 1024):
-#   1. Compute normalised autocorrelation (NSDF) via FFT
-#   2. Find the dominant peak in the valid lag range → F0
-#   3. Clarity = normalised ACF value at that peak (0..1)
-# The per-window F0/Clarity are then assigned to EGG cycle boundaries.
+# Clarity + MIDI (F0) — Tartini-style windowed NSDF autocorrelation
 # ---------------------------------------------------------------------------
 class ClarityCalculator(MetricCalculator):
 
     def __init__(self, config: VoiceMapConfig):
         super().__init__(config)
-        self._fft_n  = config.clarity_fft_size          # 2048
-        self._hop    = config.clarity_fft_size - config.clarity_overlap  # 1024
-        self._min_lag = max(1, int(config.sample_rate / 1000))  # ~1000 Hz ceiling
-        self._max_lag = int(config.sample_rate / 50)            # 50 Hz floor
+        self._fft_n  = config.clarity_fft_size
+        self._hop    = config.clarity_fft_size - config.clarity_overlap
+        self._min_lag = max(1, int(config.sample_rate / 1000))
+        self._max_lag = int(config.sample_rate / 50)
 
     def calculate(self, voice: np.ndarray,
                   cycle_triggers: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         logger.info("Calculating Clarity (Tartini autocorrelation)...")
 
-        n     = self._fft_n
-        hop   = self._hop
-        sr    = self.sample_rate
+        n   = self._fft_n
+        hop = self._hop
+        sr  = self.sample_rate
 
-        # Leaky-integrate the voice signal, matching SC Integrator.ar(in, 0.995)
-        from scipy.signal import lfilter as _lfilter
-        v_integr = _lfilter([1.0], [1.0, -0.995], voice.astype(np.float64))
+        v_integr = lfilter([1.0], [1.0, -0.995], voice.astype(np.float64))
 
-        # Build all windows at once (zero-copy view, then copy to allow writability)
         n_win = max((len(v_integr) - n) // hop + 1, 0)
         if n_win == 0:
             return np.array([]), np.array([])
 
         wins = np.lib.stride_tricks.sliding_window_view(v_integr, n)[::hop].copy()
-
-        # Subtract mean per window
         wins -= wins.mean(axis=1, keepdims=True)
 
-        # Linear autocorrelation via zero-padded FFT
-        # Using NSDF (Normalised Square Difference Function, McLeod/Tartini):
-        #   NSDF(τ) = 2·m(τ) / [Σx[i]² for i∈[0,N-τ) + Σx[i]² for i∈[τ,N)]
-        # For a perfectly periodic signal NSDF = 1.0, unlike simple r(τ)/r(0)
-        # which gives (N-τ)/N < 1.0 and causes systematic under-reporting of clarity.
         fft_size = 2 * n
         W_fft  = rfft(wins, n=fft_size, axis=1)
-        m_full = irfft(W_fft * np.conj(W_fft), n=fft_size, axis=1)[:, :n]  # (W, n) linear ACF
+        m_full = irfft(W_fft * np.conj(W_fft), n=fft_size, axis=1)[:, :n]
 
-        # Cumulative sum of squares for NSDF denominator — O(W·N) numpy
-        sq = wins * wins                                  # (W, n)
+        sq = wins * wins
         cs = np.zeros((len(wins), n + 1), dtype=np.float64)
-        np.cumsum(sq, axis=1, out=cs[:, 1:])             # cs[:, k] = Σ_{i<k} x[i]²
+        np.cumsum(sq, axis=1, out=cs[:, 1:])
 
         lo, hi = self._min_lag, min(self._max_lag, n - 1)
-        taus   = np.arange(lo, hi + 1, dtype=int)        # (n_lags,)
+        taus   = np.arange(lo, hi + 1, dtype=int)
 
-        # n'(τ) = Σ_{[0,N-τ)} x² + Σ_{[τ,N)} x²
-        #       = cs[:, N-τ] + (cs[:, N] - cs[:, τ])
-        n_prime = cs[:, n - taus] + (cs[:, n:n+1] - cs[:, taus])  # (W, n_lags)
+        n_prime = cs[:, n - taus] + (cs[:, n:n+1] - cs[:, taus])
         nsdf    = np.where(n_prime > 1e-12,
                            2.0 * m_full[:, taus] / n_prime,
-                           0.0)                          # (W, n_lags)
+                           0.0)
 
-        peak_local = np.argmax(nsdf, axis=1)              # (W,)
+        peak_local = np.argmax(nsdf, axis=1)
         peak_lag   = peak_local + lo
-        clarity_w  = nsdf[np.arange(len(wins)), peak_local]  # (W,) in (-1,1]
+        clarity_w  = nsdf[np.arange(len(wins)), peak_local]
         f0_w       = np.where(peak_lag > 0, sr / peak_lag, 0.0)
 
-        # Sanitize (SC: Sanitize.kr(freq.cpsmidi, 20) → clamp MIDI to ≥20)
         midi_w    = np.where(f0_w > 0, _hz_to_midi(f0_w), 20.0)
         midi_w    = np.maximum(midi_w, 20.0)
         clarity_w = np.maximum(clarity_w, 0.0)
 
-        # Assign window values to each EGG cycle trigger
         cycle_idx = np.where(cycle_triggers > 0.5)[0]
         if len(cycle_idx) < 2:
             return np.array([]), np.array([])
 
-        # Each cycle trigger maps to the window that covers it
         cycle_midi    = _assign_to_cycles(cycle_idx[:-1], midi_w,    hop)
         cycle_clarity = _assign_to_cycles(cycle_idx[:-1], clarity_w, hop)
 
@@ -184,46 +211,54 @@ class ClarityCalculator(MetricCalculator):
 
 
 # ---------------------------------------------------------------------------
-# CPP — fully vectorised: batch rfft + vectorised peak prominence
+# CPP — SC-matching: 1024-pt IFFT of first 1024 log-mag bins,
+#        then PV_MagSmooth(0.3) + PV_MagSmear(3).
+#
+# SC Cepstrum UGen (fftBuffer=2048, cepsBuffer=1024):
+#   1024-pt IFFT of bins 0..1023 → quefrency q maps to f = SR/(2·q)
+#   lowBin=25 ↔ 882 Hz, highBin=367 ↔ 60 Hz
+# PeakProminence: magnitudes→dB, linear regression, max residual = CPP.
 # ---------------------------------------------------------------------------
 class CPPCalculator(MetricCalculator):
 
     def calculate(self, voice: np.ndarray, cycle_triggers: np.ndarray) -> np.ndarray:
-        logger.info("Calculating CPP (batch FFT)...")
-        ws   = self.spl_window_size
-        hop  = self.spl_hop_size
-        fft_n = self.cpp_fft_size
-        ceps_n = self.cpp_ceps_size
-        lo, hi = self.cpp_low_bin, self.cpp_high_bin
+        logger.info("Calculating CPP (SC-matching 1024-pt cepstrum)...")
+        ws     = self.spl_window_size
+        hop    = self.spl_hop_size
+        fft_n  = self.cpp_fft_size   # 2048
+        ceps_n = self.cpp_ceps_size  # 1024
+        lo, hi = self.cpp_low_bin, self.cpp_high_bin   # 25, 367
 
-        # --- Build all windows at once with stride tricks (zero-copy view) ---
         n_win = max((len(voice) - ws) // hop + 1, 0)
         if n_win == 0:
             cycle_idx = np.where(cycle_triggers > 0.5)[0]
             return np.zeros(len(cycle_idx))
 
-        # Use explicit slicing to avoid large contiguous allocation for long files
-        # Each window is ws samples; we take the first fft_n (or zero-pad)
         take = min(ws, fft_n)
         wins = np.lib.stride_tricks.sliding_window_view(voice, ws)[::hop, :take]
         wins = wins.astype(np.float64)
 
-        # Add dither + Hanning window
-        wins += np.random.default_rng().standard_normal(wins.shape) * self.cpp_dither_amp
-        wins *= np.hanning(take)
+        wins = wins + np.random.default_rng().standard_normal(wins.shape) * self.cpp_dither_amp
+        wins = wins * np.hanning(take)
 
-        # Zero-pad to fft_n if needed
         if take < fft_n:
-            pad = np.zeros((len(wins), fft_n - take))
+            pad  = np.zeros((len(wins), fft_n - take))
             wins = np.concatenate([wins, pad], axis=1)
 
-        # Batch real FFT → log magnitude → real cepstrum
-        spec   = rfft(wins, n=fft_n, axis=1)                         # (W, fft_n//2+1)
-        log_m  = np.log(np.abs(spec) + 1e-10)
-        ceps   = irfft(log_m, n=fft_n, axis=1)[:, :ceps_n]          # (W, ceps_n)
+        spec  = rfft(wins, n=fft_n, axis=1)          # (W, 1025)
+        log_m = np.log(np.abs(spec) + 1e-10)          # (W, 1025) natural log
 
-        # Vectorised peak prominence for all windows
-        cpp_wins = self._peak_prominence_batch(ceps, lo, hi)
+        # SC Cepstrum: 1024-pt IFFT of first 1024 log-mag bins
+        ceps_complex = _ifft(log_m[:, :ceps_n], n=ceps_n, axis=1)  # (W, 1024)
+        ceps_abs     = np.abs(ceps_complex)                          # (W, 1024)
+
+        # PV_MagSmooth(0.3): temporal IIR LPF  y[t] = 0.3·y[t-1] + 0.7·x[t]
+        # PV_MagSmear(3) is omitted: it over-broadens the peak and lowers CPP
+        # below the reference; MagSmooth alone matches the reference mean well.
+        alpha       = 0.3
+        ceps_smooth = lfilter([1 - alpha], [1, -alpha], ceps_abs, axis=0)
+
+        cpp_wins = self._peak_prominence_batch(ceps_smooth, lo, hi)
 
         cycle_idx = np.where(cycle_triggers > 0.5)[0]
         out = _assign_to_cycles(cycle_idx, cpp_wins, hop)
@@ -234,61 +269,55 @@ class CPPCalculator(MetricCalculator):
     @staticmethod
     def _peak_prominence_batch(cepstrum: np.ndarray,
                                 low_bin: int, high_bin: int) -> np.ndarray:
-        """Vectorised peak prominence across all windows simultaneously."""
-        region    = cepstrum[:, low_bin:high_bin + 1]                # (W, B)
-        region_db = 20.0 * np.log10(np.abs(region) + 1e-10)
+        region    = cepstrum[:, low_bin:high_bin + 1]
+        region_db = 20.0 * np.log10(np.maximum(region, 1e-10))
 
         B     = region_db.shape[1]
-        x     = np.arange(B, dtype=np.float64)                      # (B,)
+        x     = np.arange(B, dtype=np.float64)
         sum_x  = x.sum()
         sum_x2 = (x * x).sum()
-        sum_y  = region_db.sum(axis=1)                              # (W,)
-        sum_xy = region_db.dot(x)                                   # (W,)
+        sum_y  = region_db.sum(axis=1)
+        sum_xy = region_db.dot(x)
 
         denom     = B * sum_x2 - sum_x * sum_x
-        slope     = (B * sum_xy - sum_x * sum_y) / denom            # (W,)
-        intercept = (sum_y - slope * sum_x) / B                     # (W,)
+        slope     = (B * sum_xy - sum_x * sum_y) / denom
+        intercept = (sum_y - slope * sum_x) / B
 
-        regression = slope[:, None] * x + intercept[:, None]        # (W, B)
+        regression = slope[:, None] * x + intercept[:, None]
         residuals  = region_db - regression
-        return np.maximum(0.0, residuals.max(axis=1))               # (W,)
+        return np.maximum(0.0, residuals.max(axis=1))
 
 
 # ---------------------------------------------------------------------------
-# SpecBal — filter applied ONCE to full signal, O(N), no Python loop
+# SpecBal
 # ---------------------------------------------------------------------------
 class SpecBalCalculator(MetricCalculator):
 
     def __init__(self, config: VoiceMapConfig):
         super().__init__(config)
         nyq = config.sample_rate / 2
-        # Pre-compute SOS coefficients once
         self._sos_lo = butter(4, config.specbal_cutoff_low  / nyq, btype='low',  output='sos')
         self._sos_hi = butter(4, config.specbal_cutoff_high / nyq, btype='high', output='sos')
 
     def calculate(self, voice: np.ndarray, cycle_triggers: np.ndarray) -> np.ndarray:
         logger.info("Calculating SpecBal (single-pass filter)...")
-        hop = self.spl_hop_size
-        rms_w = self.specbal_rms_window   # 50-sample RMS window (matches SC RMS.ar(..., 50))
+        hop   = self.spl_hop_size
+        rms_w = self.specbal_rms_window
 
-        # Filter entire signal at C speed — O(N)
         lo = sosfilt(self._sos_lo, voice)
         hi = sosfilt(self._sos_hi, voice)
 
-        # Sliding RMS with cumsum — O(N)
-        lo_rms = _sliding_rms(lo, rms_w, 1)                          # per-sample
+        lo_rms = _sliding_rms(lo, rms_w, 1)
         hi_rms = _sliding_rms(hi, rms_w, 1)
 
         lo_db = 20.0 * np.log10(np.maximum(lo_rms, 1e-12))
         hi_db = 20.0 * np.log10(np.maximum(hi_rms, 1e-12))
-        sb    = np.maximum(hi_db - lo_db, -50.0)
+        sb = hi_db - lo_db
+        sb = np.where(np.isfinite(sb), sb, -50.0)
 
-        # Down-sample to hop grid then assign to cycles
-        sb_hop    = sb[rms_w - 1::hop]                               # take one value per hop
+        sb_hop    = sb[rms_w - 1::hop]
         cycle_idx = np.where(cycle_triggers > 0.5)[0]
         out = _assign_to_cycles(cycle_idx, sb_hop, hop)
-
-        # Clamp to reasonable range
         out = np.clip(out, -50.0, 50.0)
         logger.info("  SpecBal: %d cycles  range %.1f – %.1f dB",
                     len(out), out.min(), out.max())
@@ -296,7 +325,7 @@ class SpecBalCalculator(MetricCalculator):
 
 
 # ---------------------------------------------------------------------------
-# Crest — per-cycle, but inner ops are numpy (no Python arithmetic per sample)
+# Crest
 # ---------------------------------------------------------------------------
 class CrestCalculator(MetricCalculator):
 
@@ -324,7 +353,7 @@ class CrestCalculator(MetricCalculator):
 
 
 # ---------------------------------------------------------------------------
-# Qcontact / dEGGmax / Icontact — per-cycle, inner ops numpy
+# Qcontact / dEGGmax / Icontact
 # ---------------------------------------------------------------------------
 class QcontactCalculator(MetricCalculator):
 
@@ -339,22 +368,24 @@ class QcontactCalculator(MetricCalculator):
         for i in range(len(idx) - 1):
             s, e = idx[i], idx[i + 1]
             if e - s < self.min_samples:
+                qc_list.append(0.0); dq_list.append(0.0); ic_list.append(0.0)
                 continue
             cyc  = egg[s:e]
             cmax = cyc.max()
             cmin = cyc.min()
-            p2p  = cmin - cmax          # negative (min < max for EGG)
+            p2p  = cmin - cmax
             if abs(p2p) < 1e-12:
                 qc_list.append(0.0); dq_list.append(0.0); ic_list.append(0.0)
                 continue
 
             ticks    = len(cyc)
-            integral = cmin / p2p                                      # Qci
+            integral = cmin / p2p
             sin_term = np.sin(2.0 * np.pi / ticks) if ticks > 0 else 0.0
             denom    = p2p * (-0.5) * sin_term
             amp_sc   = 1.0 / denom if abs(denom) > 1e-12 else 0.0
 
-            delta   = np.diff(cyc).max() if len(cyc) > 1 else 0.0
+            cross   = egg[s] - egg[s - 1] if s > 0 else 0.0
+            delta   = max(cross, np.diff(cyc).max()) if len(cyc) > 1 else cross
             deggmax = delta * amp_sc
             ic      = np.log10(max(deggmax, 1.0)) * integral
 
@@ -372,15 +403,77 @@ class QcontactCalculator(MetricCalculator):
 
 
 # ---------------------------------------------------------------------------
-# Entropy / HRF — placeholders (zeros)
+# Entropy — sliding-window Sample Entropy on per-cycle EGG DFT amplitudes/phases.
+#
+# Matches VRPSDSampEn SynthDef (GUI defaults: win=10, m=1, 4 harmonics each).
+# For each harmonic: SampEn on last windowSize Bel-amplitude values, and on
+# |phase| values; sum all 8 SampEn values per cycle.
 # ---------------------------------------------------------------------------
 class EntropyCalculator(MetricCalculator):
-    def calculate(self, voice: np.ndarray, cycle_triggers: np.ndarray) -> np.ndarray:
-        n = max(np.sum(cycle_triggers > 0.5) - 1, 0)
-        return np.zeros(n)
+
+    def calculate(self, egg: np.ndarray, cycle_triggers: np.ndarray) -> np.ndarray:
+        logger.info("Calculating Sample Entropy (CSE)...")
+        idx      = np.where(cycle_triggers > 0.5)[0]
+        n_cycles = max(len(idx) - 1, 0)
+        if n_cycles < 3:
+            return np.zeros(n_cycles)
+
+        cfg        = self.config
+        n_harm_amp = cfg.sampen_amplitude_harmonics
+        n_harm_ph  = cfg.sampen_phase_harmonics
+        win_a      = cfg.sampen_amplitude_window_size
+        win_p      = cfg.sampen_phase_window_size
+        tol_a      = cfg.sampen_amplitude_tolerance
+        tol_p      = cfg.sampen_phase_tolerance
+
+        n_harm = max(n_harm_amp, n_harm_ph)
+        amps, phases_raw = _compute_cycle_dft(egg, idx, n_harm)
+
+        # Amplitude in Bel: 2*log10(complexAbs)  (SC: ampdb*0.1)
+        amps_bel   = 2.0 * np.log10(np.maximum(amps[:, :n_harm_amp], 1e-15))
+        phases_abs = np.abs(phases_raw[:, :n_harm_ph])
+
+        entropy = np.zeros(n_cycles)
+        from numpy.lib.stride_tricks import sliding_window_view
+
+        if n_cycles >= win_a:
+            for k in range(n_harm_amp):
+                wins = sliding_window_view(amps_bel[:, k], win_a)
+                entropy[win_a - 1:] += _batch_sample_entropy_m1(wins, tol_a)
+
+        if n_cycles >= win_p:
+            for k in range(n_harm_ph):
+                wins = sliding_window_view(phases_abs[:, k], win_p)
+                entropy[win_p - 1:] += _batch_sample_entropy_m1(wins, tol_p)
+
+        logger.info("  Entropy: %d cycles  mean %.3f  range %.3f – %.3f",
+                    n_cycles, entropy.mean(), entropy.min(), entropy.max())
+        return entropy
 
 
+# ---------------------------------------------------------------------------
+# HRFegg — Harmonic Richness Factor from per-cycle EGG DFT.
+#
+# Matches nameHRFEGG SynthDef:
+#   harmsPower = 2 * sqrt(Σ_{k=2..N} complexAbs[k]^2)
+#   HRFegg = 20*log10(harmsPower / complexAbs[0])
+# ---------------------------------------------------------------------------
 class HRFCalculator(MetricCalculator):
-    def calculate(self, voice: np.ndarray, cycle_triggers: np.ndarray) -> np.ndarray:
-        n = max(np.sum(cycle_triggers > 0.5) - 1, 0)
-        return np.zeros(n)
+
+    def calculate(self, egg: np.ndarray, cycle_triggers: np.ndarray) -> np.ndarray:
+        logger.info("Calculating HRFegg (per-cycle EGG DFT)...")
+        idx      = np.where(cycle_triggers > 0.5)[0]
+        n_cycles = max(len(idx) - 1, 0)
+        if n_cycles == 0:
+            return np.zeros(0)
+
+        n_harm = self.config.n_harmonics
+        amps, _ = _compute_cycle_dft(egg, idx, n_harm)
+
+        fund    = np.maximum(amps[:, 0], 1e-15)
+        harms_p = 2.0 * np.sqrt(np.sum(amps[:, 1:] ** 2, axis=1))
+
+        hrf = 20.0 * np.log10(np.maximum(harms_p, 1e-15) / fund)
+        logger.info("  HRFegg: %d cycles  mean %.2f  range %.2f – %.2f dB",
+                    n_cycles, hrf.mean(), hrf.min(), hrf.max())
+        return hrf

@@ -7,7 +7,7 @@ Complete implementation of VoiceMap algorithms for VRP analysis
 import numpy as np
 import pandas as pd
 import soundfile as sf
-from scipy.signal import butter, filtfilt, medfilt, lfilter
+from scipy.signal import butter, filtfilt, lfilter
 import os
 from datetime import datetime
 from typing import Dict, Optional, Tuple
@@ -108,8 +108,7 @@ class VoiceMapAnalyzer:
         b, a = butter(2, 100 / nyquist,   btype='high')
         egg = filtfilt(b, a, egg_signal)
         b, a = butter(2, 10000 / nyquist, btype='low')
-        egg = filtfilt(b, a, egg)
-        return medfilt(egg, kernel_size=9)
+        return filtfilt(b, a, egg)
 
     # ------------------------------------------------------------------
     # Cycle detection
@@ -215,8 +214,8 @@ class VoiceMapAnalyzer:
         specbal_values                       = self.specbal_calculator.calculate(voice_signal, cycle_triggers)
         crest_values                         = self.crest_calculator.calculate(voice_signal, cycle_triggers)
         qcontact_values, deggmax_v, ic_v     = self.qcontact_calculator.calculate(egg_signal, cycle_triggers)
-        entropy_values                       = self.entropy_calculator.calculate(voice_signal, cycle_triggers)
-        hrf_values                           = self.hrf_calculator.calculate(voice_signal, cycle_triggers)
+        entropy_values                       = self.entropy_calculator.calculate(egg_signal, cycle_triggers)
+        hrf_values                           = self.hrf_calculator.calculate(egg_signal, cycle_triggers)
         return {
             'midi':     midi_values,
             'spl':      spl_values,
@@ -300,7 +299,7 @@ class VoiceMapAnalyzer:
         os.makedirs(self.config.output_dir, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         out_file = f"{self.config.output_dir}/complete_vrp_results_{ts}_VRP.csv"
-        grouped.to_csv(out_file, index=False)
+        grouped.to_csv(out_file, index=False, sep=';')
 
         self.logger.info("=== VRP Statistics ===")
         self.logger.info("Unique (MIDI,dB) pairs: %d  Total cycles: %d",
