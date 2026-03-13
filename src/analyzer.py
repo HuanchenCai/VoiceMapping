@@ -114,8 +114,40 @@ class VoiceMapAnalyzer:
     # ------------------------------------------------------------------
     # Cycle detection
     # ------------------------------------------------------------------
+    def phase_portrait_cycle_detection(self, egg_signal: np.ndarray) -> np.ndarray:
+        """Phase Portrait method — matches current SC namePhasePortrait SynthDef.
+
+        SC algorithm (VRPSDCSDFT.sc):
+          integr = Integrator.ar(in, 0.999)   # leaky integrator
+          inLP   = HPF.ar(integr, 50)          # remove integrated DC
+          phi    = atan2(in, inLP)             # analytic phase
+          z      = Dolansky.ar(phi, tau, 0.99) # cycle trigger from phase
+        """
+        self.logger.info("Using Phase Portrait method for cycle detection...")
+        cfg = self.config
+        egg = egg_signal.astype(np.float64)
+
+        # Leaky integrator: y[n] = coeff*y[n-1] + x[n]
+        integr = lfilter([1.0], [1.0, -cfg.phase_integr_coeff], egg)
+
+        # HPF at 50 Hz to suppress integrated DC drift
+        nyq = cfg.sample_rate / 2
+        b, a = butter(2, cfg.phase_hpf_hz / nyq, btype='high')
+        inLP = lfilter(b, a, integr)
+
+        # Analytic phase
+        phi = np.arctan2(egg, inLP)
+
+        # Dolansky on phase signal
+        cycle_triggers = self.dolansky_algorithm(phi, cfg.phase_tau, cfg.phase_dolansky_coeff)
+        cycle_triggers = np.concatenate([cycle_triggers, [0]])
+        return self.filter_cycles(cycle_triggers)
+
     def peak_follower_cycle_detection(self, egg_signal: np.ndarray) -> np.ndarray:
-        self.logger.info("Using PeakFollower method for cycle detection...")
+        """Deprecated PeakFollower method — kept for reference only.
+        SC has this commented out in favour of Phase Portrait.
+        """
+        self.logger.info("Using PeakFollower method for cycle detection (deprecated)...")
         degg = np.diff(egg_signal).astype(np.float64)
         cycle_triggers = self.dolansky_algorithm(
             degg, self.config.dolansky_decay, self.config.dolansky_coeff
@@ -298,7 +330,7 @@ class VoiceMapAnalyzer:
         egg_p   = self.preprocess_egg(egg)
 
         self.logger.info("Cycle detection...")
-        cycle_triggers = self.peak_follower_cycle_detection(egg_p)
+        cycle_triggers = self.phase_portrait_cycle_detection(egg_p)
         cycle_count = int(np.sum(cycle_triggers > 0.5))
         self.logger.info("Detected cycles: %d", cycle_count)
 
