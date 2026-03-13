@@ -20,9 +20,22 @@ class VoiceMapConfig:
     min_frequency: int = 50
     max_period_samples: Optional[int] = None
     
-    # Dolansky algorithm parameters
+    # Phase Portrait cycle detection (current SC method)
+    # Integrator: y[n] = phase_integr_coeff * y[n-1] + x[n]
+    # HPF on integrator output at phase_hpf_hz Hz
+    # Dolansky on atan2(EGG, HPF_integral): decay=phase_tau, coeff=phase_dolansky_coeff
+    phase_integr_coeff: float = 0.999
+    phase_hpf_hz: float = 50.0
+    phase_tau: float = 0.95        # VRPSettingsCSDFT default tau
+    phase_dolansky_coeff: float = 0.99
+
+    # Legacy PeakFollower parameters (deprecated in SC, kept for reference)
     dolansky_decay: float = 0.99
     dolansky_coeff: float = 0.995
+
+    # Clarity / pitch detection window (Tartini-style autocorrelation)
+    clarity_fft_size: int = 2048
+    clarity_overlap: int = 1024    # hop = fft_size - overlap
     
     # SPL sliding window parameters
     spl_window_size: Optional[int] = None  # 100ms window
