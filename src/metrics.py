@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 """
-VoiceMap Metrics Module
-Individual metric calculation functions with type annotations and error handling
+VoiceMap Metrics Module — Optimized
+All hot paths use vectorised NumPy; no Python-level loops over samples or windows.
 """
 
 import numpy as np
-import librosa
-from scipy.signal import butter, filtfilt, medfilt, welch
-from scipy.fft import fft, ifft
-from scipy.stats import linregress
-from typing import Tuple, Optional
+from scipy.signal import butter, sosfilt, sosfiltfilt, lfilter
+from scipy.fft import rfft, irfft
+from typing import Tuple
 import logging
 
 from config import VoiceMapConfig
@@ -17,659 +15,338 @@ from config import VoiceMapConfig
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Inline midi conversion — removes librosa dependency
+# ---------------------------------------------------------------------------
+def _hz_to_midi(freq: np.ndarray) -> np.ndarray:
+    """Vectorised Hz → MIDI (A4 = 69)."""
+    return 12.0 * np.log2(np.maximum(freq, 1e-9) / 440.0) + 69.0
+
+
+# ---------------------------------------------------------------------------
+# Sliding-window RMS via cumsum — O(N), no Python loop
+# ---------------------------------------------------------------------------
+def _sliding_rms(signal: np.ndarray, window: int, hop: int) -> np.ndarray:
+    """Return RMS for each hop-step window. Pure numpy, O(N)."""
+    sq      = signal * signal
+    cs      = np.empty(len(sq) + 1)
+    cs[0]   = 0.0
+    np.cumsum(sq, out=cs[1:])
+    n_win   = (len(signal) - window) // hop + 1
+    starts  = np.arange(n_win) * hop
+    ends    = starts + window
+    return np.sqrt((cs[ends] - cs[starts]) / window)
+
+
+# ---------------------------------------------------------------------------
+# Cycle-index → window-index lookup — O(C) numpy, no Python loop
+# ---------------------------------------------------------------------------
+def _assign_to_cycles(cycle_indices: np.ndarray,
+                      metric_values: np.ndarray,
+                      hop: int) -> np.ndarray:
+    idx = np.minimum(cycle_indices // hop, len(metric_values) - 1)
+    return metric_values[idx]
+
+
+# ---------------------------------------------------------------------------
+# Base class
+# ---------------------------------------------------------------------------
 class MetricCalculator:
-    """Base class for metric calculations with common utilities"""
-    
     def __init__(self, config: VoiceMapConfig):
-        """
-        Initialize metric calculator with configuration.
-        
-        Args:
-            config: VoiceMap configuration object
-        """
-        self.config = config
+        self.config      = config
         self.sample_rate = config.sample_rate
         self.min_samples = config.min_samples
-        self.min_frequency = config.min_frequency
         self.max_period_samples = config.max_period_samples
-        
-        # SPL sliding window parameters
+
         self.spl_window_size = config.spl_window_size
-        self.spl_hop_size = config.spl_hop_size
-        
-        # CPP parameters
-        self.cpp_fft_size = config.cpp_fft_size
-        self.cpp_ceps_size = config.cpp_ceps_size
-        self.cpp_low_bin = config.cpp_low_bin
-        self.cpp_high_bin = config.cpp_high_bin
+        self.spl_hop_size    = config.spl_hop_size
+
+        self.cpp_fft_size   = config.cpp_fft_size
+        self.cpp_ceps_size  = config.cpp_ceps_size
+        self.cpp_low_bin    = config.cpp_low_bin
+        self.cpp_high_bin   = config.cpp_high_bin
         self.cpp_dither_amp = config.cpp_dither_amp
-        
-        # SpecBal parameters
-        self.specbal_cutoff_low = config.specbal_cutoff_low
+
+        self.specbal_cutoff_low  = config.specbal_cutoff_low
         self.specbal_cutoff_high = config.specbal_cutoff_high
-        self.specbal_rms_window = config.specbal_rms_window
-    
-    def assign_metric_to_cycles(
-        self, 
-        cycle_indices: np.ndarray, 
-        metric_values: np.ndarray, 
-        hop_size: int
-    ) -> np.ndarray:
-        """
-        Assign metric values to cycles based on window positions.
-        
-        Args:
-            cycle_indices: Array of cycle trigger indices
-            metric_values: Array of metric values from sliding windows
-            hop_size: Hop size for window calculation
-        
-        Returns:
-            Array of metric values assigned to each cycle
-        """
-        cycle_metric = np.zeros(len(cycle_indices))
-        
-        for i, cycle_idx in enumerate(cycle_indices):
-            window_idx = cycle_idx // hop_size
-            
-            if window_idx < len(metric_values):
-                cycle_metric[i] = metric_values[window_idx]
-            else:
-                cycle_metric[i] = metric_values[-1] if len(metric_values) > 0 else 0.0
-        
-        return cycle_metric
-    
-    def calculate_sliding_rms(self, signal: np.ndarray) -> np.ndarray:
-        """
-        Calculate sliding window RMS values.
-        
-        Args:
-            signal: Input signal
-        
-        Returns:
-            Array of RMS values for each window
-        """
-        n_windows = (len(signal) - self.spl_window_size) // self.spl_hop_size + 1
-        rms_values = np.zeros(n_windows)
-        
-        for i in range(n_windows):
-            start_idx = i * self.spl_hop_size
-            end_idx = start_idx + self.spl_window_size
-            
-            if end_idx <= len(signal):
-                window_data = signal[start_idx:end_idx]
-                rms_values[i] = np.sqrt(np.mean(window_data**2))
-        
-        return rms_values
-    
-    def rms_to_spl(self, rms_values: np.ndarray) -> np.ndarray:
-        """
-        Convert RMS values to SPL (Sound Pressure Level) in dB.
-        
-        Args:
-            rms_values: RMS values
-        
-        Returns:
-            SPL values in dB
-        """
-        spl_values = np.zeros_like(rms_values)
-        
-        for i in range(len(rms_values)):
-            if rms_values[i] > 0:
-                spl_values[i] = 20 * np.log10(rms_values[i])
-            else:
-                spl_values[i] = -100  # Protection value
-        
-        return spl_values
+        self.specbal_rms_window  = config.specbal_rms_window
 
 
+# ---------------------------------------------------------------------------
+# SPL
+# ---------------------------------------------------------------------------
 class SPLCalculator(MetricCalculator):
-    """SPL (Sound Pressure Level) Calculator"""
-    
-    def calculate(
-        self, 
-        voice_signal: np.ndarray, 
-        cycle_triggers: np.ndarray
-    ) -> np.ndarray:
-        """
-        Calculate SPL using sliding window approach.
-        
-        Args:
-            voice_signal: Preprocessed voice signal
-            cycle_triggers: Cycle trigger array
-        
-        Returns:
-            Array of SPL values for each cycle
-        """
+    def calculate(self, voice: np.ndarray, cycle_triggers: np.ndarray) -> np.ndarray:
         logger.info("Calculating SPL...")
-        
-        try:
-            # 20ms delay alignment
-            delay_samples = int(0.02 * self.sample_rate)
-            voice_delayed = np.concatenate([
-                np.zeros(delay_samples), 
-                voice_signal[:-delay_samples]
-            ])
-            
-            # Calculate sliding window RMS
-            window_rms = self.calculate_sliding_rms(voice_delayed)
-            
-            # Convert to SPL
-            window_spl = self.rms_to_spl(window_rms)
-            
-            # Assign SPL values to cycles
-            cycle_indices = np.where(cycle_triggers > 0.5)[0]
-            cycle_spl = np.zeros(len(cycle_indices))
-            
-            for i, cycle_idx in enumerate(cycle_indices):
-                window_idx = cycle_idx // self.spl_hop_size
-                
-                if window_idx < len(window_spl):
-                    cycle_spl[i] = window_spl[window_idx]
-                else:
-                    cycle_spl[i] = window_spl[-1] if len(window_spl) > 0 else -100
-            
-            logger.info(f"  Calculated {len(window_spl)} SPL windows")
-            logger.info(f"  Assigned SPL values to {len(cycle_indices)} cycles")
-            logger.info(f"  SPL range: {cycle_spl.min():.1f} - {cycle_spl.max():.1f} dB")
-            
-            return cycle_spl
-            
-        except Exception as e:
-            logger.error(f"Error calculating SPL: {e}")
-            raise
+        delay       = int(0.02 * self.sample_rate)
+        v_delayed   = np.concatenate([np.zeros(delay), voice[:-delay]])
+
+        rms_windows = _sliding_rms(v_delayed, self.spl_window_size, self.spl_hop_size)
+        spl_windows = np.where(rms_windows > 0,
+                               20.0 * np.log10(np.maximum(rms_windows, 1e-12)),
+                               -100.0)
+
+        cycle_idx = np.where(cycle_triggers > 0.5)[0]
+        out = _assign_to_cycles(cycle_idx, spl_windows, self.spl_hop_size)
+        logger.info("  SPL: %d cycles  range %.1f – %.1f dB", len(out), out.min(), out.max())
+        return out
 
 
+# ---------------------------------------------------------------------------
+# Clarity + MIDI (F0)
+# ---------------------------------------------------------------------------
 class ClarityCalculator(MetricCalculator):
-    """Clarity Calculator using cross-correlation between consecutive cycles"""
-    
-    def calculate(
-        self, 
-        voice_signal: np.ndarray, 
-        cycle_triggers: np.ndarray
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Calculate Clarity using cross-correlation between consecutive cycles.
-        
-        Args:
-            voice_signal: Preprocessed voice signal
-            cycle_triggers: Cycle trigger array
-        
-        Returns:
-            Tuple of (midi_values, clarity_values)
-        """
+    def calculate(self, voice: np.ndarray,
+                  cycle_triggers: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         logger.info("Calculating Clarity...")
-        
-        try:
-            cycle_indices = np.where(cycle_triggers > 0.5)[0]
-            
-            if len(cycle_indices) < 2:
-                return np.array([]), np.array([])
-            
-            # Extract cycles
-            cycles = []
-            cycle_f0 = []
-            
-            for i in range(len(cycle_indices) - 1):
-                start_idx = cycle_indices[i]
-                end_idx = cycle_indices[i + 1]
-                
-                if end_idx - start_idx >= self.min_samples:
-                    cycle_data = voice_signal[start_idx:end_idx]
-                    
-                    # Normalization
-                    if np.std(cycle_data) > 0:
-                        cycle_normalized = (cycle_data - np.mean(cycle_data)) / np.std(cycle_data)
-                        cycles.append(cycle_normalized)
-                        
-                        # Calculate F0
-                        period_samples = end_idx - start_idx
-                        f0_hz = self.sample_rate / period_samples
-                        cycle_f0.append(f0_hz)
-                    else:
-                        cycle_f0.append(np.nan)
-            
-            # Calculate Clarity (cross-correlation between consecutive cycles)
-            clarity_values = []
-            midi_values = []
-            
-            for i in range(len(cycles) - 1):
-                current_cycle = cycles[i]
-                next_cycle = cycles[i + 1]
-                
-                # Ensure same length
-                min_length = min(len(current_cycle), len(next_cycle))
-                if min_length > 0:
-                    current_cycle = current_cycle[:min_length]
-                    next_cycle = next_cycle[:min_length]
-                    
-                    # Calculate normalized cross-correlation
-                    correlation = np.corrcoef(current_cycle, next_cycle)[0, 1]
-                    
-                    # Handle NaN values
-                    if np.isnan(correlation):
-                        clarity_values.append(0.0)
-                    else:
-                        clarity_values.append(max(0.0, correlation))
-                    
-                    # MIDI value
-                    if not np.isnan(cycle_f0[i]):
-                        midi_values.append(librosa.hz_to_midi(cycle_f0[i]))
-                    else:
-                        midi_values.append(np.nan)
-            
-            # Convert to numpy arrays
-            clarity_values = np.array(clarity_values)
-            midi_values = np.array(midi_values)
-            
-            logger.info(f"  Calculated {len(clarity_values)} Clarity values")
-            logger.info(f"  Clarity range: {clarity_values.min():.3f} - {clarity_values.max():.3f}")
-            
-            return midi_values, clarity_values
-            
-        except Exception as e:
-            logger.error(f"Error calculating Clarity: {e}")
-            raise
+        cycle_idx = np.where(cycle_triggers > 0.5)[0]
+        if len(cycle_idx) < 2:
+            return np.array([]), np.array([])
+
+        clarity_list = []
+        midi_list    = []
+
+        for i in range(len(cycle_idx) - 1):
+            s, e = cycle_idx[i], cycle_idx[i + 1]
+            L = e - s
+            if L < self.min_samples:
+                continue
+
+            a = voice[s:e].astype(np.float64)
+            b = voice[cycle_idx[i + 1]:cycle_idx[i + 1] + L
+                      if i + 2 < len(cycle_idx)
+                      else len(voice)]
+
+            # Use next cycle at same length
+            n_next = cycle_idx[i + 2] - cycle_idx[i + 1] if i + 2 < len(cycle_idx) else 0
+            if n_next < self.min_samples:
+                b = voice[e:e + L] if e + L <= len(voice) else None
+            else:
+                b = voice[e:e + min(L, n_next)].astype(np.float64)
+
+            if b is None or len(b) == 0:
+                continue
+            n = min(len(a), len(b))
+            a, b = a[:n], b[:n]
+
+            # Normalize
+            std_a, std_b = a.std(), b.std()
+            if std_a < 1e-12 or std_b < 1e-12:
+                continue
+            a = (a - a.mean()) / std_a
+            b = (b - b.mean()) / std_b
+
+            # Cross-correlation at zero lag (faster than corrcoef)
+            corr = float(np.dot(a, b)) / (n - 1) if n > 1 else 0.0
+            clarity_list.append(max(0.0, corr))
+            midi_list.append(float(_hz_to_midi(np.array([self.sample_rate / L]))[0]))
+
+        clarity = np.array(clarity_list)
+        midi    = np.array(midi_list)
+        if len(clarity):
+            logger.info("  Clarity: %d cycles  range %.3f – %.3f",
+                        len(clarity), clarity.min(), clarity.max())
+        return midi, clarity
 
 
+# ---------------------------------------------------------------------------
+# CPP — fully vectorised: batch rfft + vectorised peak prominence
+# ---------------------------------------------------------------------------
 class CPPCalculator(MetricCalculator):
-    """CPP (Cepstral Peak Prominence) Calculator"""
-    
-    def calculate(
-        self, 
-        voice_signal: np.ndarray, 
-        cycle_triggers: np.ndarray
-    ) -> np.ndarray:
-        """
-        Calculate CPP using cepstral analysis.
-        
-        Args:
-            voice_signal: Preprocessed voice signal
-            cycle_triggers: Cycle trigger array
-        
-        Returns:
-            Array of CPP values for each cycle
-        """
-        logger.info("Calculating CPP...")
-        
-        try:
-            cycle_indices = np.where(cycle_triggers > 0.5)[0]
-            cpp_values = []
-            
-            # Calculate sliding window CPP
-            window_size = self.spl_window_size
-            hop_size = self.spl_hop_size
-            
-            for i in range(0, len(voice_signal) - window_size + 1, hop_size):
-                window_data = voice_signal[i:i + window_size]
-                
-                # Add white noise dither
-                dither = np.random.normal(0, self.cpp_dither_amp, len(window_data))
-                window_with_dither = window_data + dither
-                
-                # FFT (Hanning window, 2048 points)
-                windowed = window_with_dither * np.hanning(len(window_with_dither))
-                
-                # Zero-pad to 2048 points
-                if len(windowed) < self.cpp_fft_size:
-                    windowed = np.pad(
-                        windowed, 
-                        (0, self.cpp_fft_size - len(windowed)), 
-                        'constant'
-                    )
-                else:
-                    windowed = windowed[:self.cpp_fft_size]
-                
-                # FFT
-                fft_result = fft(windowed)
-                magnitude = np.abs(fft_result)
-                
-                # Calculate cepstrum
-                log_magnitude = np.log(magnitude + 1e-10)
-                cepstrum_result = np.real(ifft(log_magnitude))
-                
-                # Take first 1024 points
-                cepstrum_result = cepstrum_result[:self.cpp_ceps_size]
-                
-                # PeakProminence algorithm
-                cpp_value = self.peak_prominence(
-                    cepstrum_result, 
-                    self.cpp_low_bin, 
-                    self.cpp_high_bin
-                )
-                cpp_values.append(cpp_value)
-            
-            # Assign CPP values to cycles
-            cycle_cpp = self.assign_metric_to_cycles(cycle_indices, cpp_values, hop_size)
-            
-            logger.info(f"  Calculated {len(cpp_values)} CPP windows")
-            logger.info(f"  Assigned CPP values to {len(cycle_indices)} cycles")
-            logger.info(f"  CPP range: {cycle_cpp.min():.3f} - {cycle_cpp.max():.3f}")
-            
-            return cycle_cpp
-            
-        except Exception as e:
-            logger.error(f"Error calculating CPP: {e}")
-            raise
-    
-    def peak_prominence(
-        self, 
-        cepstrum_data: np.ndarray, 
-        low_bin: int, 
-        high_bin: int
-    ) -> float:
-        """
-        PeakProminence algorithm implementation.
-        
-        Args:
-            cepstrum_data: Cepstrum data
-            low_bin: Low bin index
-            high_bin: High bin index
-        
-        Returns:
-            Peak prominence value
-        """
-        # Convert to dB
-        cepstrum_db = 20 * np.log10(np.abs(cepstrum_data) + 1e-10)
-        
-        # Linear regression
-        x = np.arange(low_bin, high_bin + 1)
-        y = cepstrum_db[low_bin:high_bin + 1]
-        
-        if len(x) < 2:
-            return 0.0
-        
-        slope, intercept, _, _, _ = linregress(x, y)
-        
-        # Calculate regression line
-        regression_line = slope * x + intercept
-        
-        # Find maximum peak
-        peak_idx = np.argmax(y)
-        peak_value = y[peak_idx]
-        regression_value = regression_line[peak_idx]
-        
-        # CPP = peak value minus regression line
-        cpp = peak_value - regression_value
-        
-        return max(0.0, cpp)
+
+    def calculate(self, voice: np.ndarray, cycle_triggers: np.ndarray) -> np.ndarray:
+        logger.info("Calculating CPP (batch FFT)...")
+        ws   = self.spl_window_size
+        hop  = self.spl_hop_size
+        fft_n = self.cpp_fft_size
+        ceps_n = self.cpp_ceps_size
+        lo, hi = self.cpp_low_bin, self.cpp_high_bin
+
+        # --- Build all windows at once with stride tricks (zero-copy view) ---
+        n_win = max((len(voice) - ws) // hop + 1, 0)
+        if n_win == 0:
+            cycle_idx = np.where(cycle_triggers > 0.5)[0]
+            return np.zeros(len(cycle_idx))
+
+        # Use explicit slicing to avoid large contiguous allocation for long files
+        # Each window is ws samples; we take the first fft_n (or zero-pad)
+        take = min(ws, fft_n)
+        wins = np.lib.stride_tricks.sliding_window_view(voice, ws)[::hop, :take]
+        wins = wins.astype(np.float64)
+
+        # Add dither + Hanning window
+        wins += np.random.default_rng().standard_normal(wins.shape) * self.cpp_dither_amp
+        wins *= np.hanning(take)
+
+        # Zero-pad to fft_n if needed
+        if take < fft_n:
+            pad = np.zeros((len(wins), fft_n - take))
+            wins = np.concatenate([wins, pad], axis=1)
+
+        # Batch real FFT → log magnitude → real cepstrum
+        spec   = rfft(wins, n=fft_n, axis=1)                         # (W, fft_n//2+1)
+        log_m  = np.log(np.abs(spec) + 1e-10)
+        ceps   = irfft(log_m, n=fft_n, axis=1)[:, :ceps_n]          # (W, ceps_n)
+
+        # Vectorised peak prominence for all windows
+        cpp_wins = self._peak_prominence_batch(ceps, lo, hi)
+
+        cycle_idx = np.where(cycle_triggers > 0.5)[0]
+        out = _assign_to_cycles(cycle_idx, cpp_wins, hop)
+        logger.info("  CPP: %d windows → %d cycles  range %.3f – %.3f",
+                    n_win, len(out), out.min(), out.max())
+        return out
+
+    @staticmethod
+    def _peak_prominence_batch(cepstrum: np.ndarray,
+                                low_bin: int, high_bin: int) -> np.ndarray:
+        """Vectorised peak prominence across all windows simultaneously."""
+        region    = cepstrum[:, low_bin:high_bin + 1]                # (W, B)
+        region_db = 20.0 * np.log10(np.abs(region) + 1e-10)
+
+        B     = region_db.shape[1]
+        x     = np.arange(B, dtype=np.float64)                      # (B,)
+        sum_x  = x.sum()
+        sum_x2 = (x * x).sum()
+        sum_y  = region_db.sum(axis=1)                              # (W,)
+        sum_xy = region_db.dot(x)                                   # (W,)
+
+        denom     = B * sum_x2 - sum_x * sum_x
+        slope     = (B * sum_xy - sum_x * sum_y) / denom            # (W,)
+        intercept = (sum_y - slope * sum_x) / B                     # (W,)
+
+        regression = slope[:, None] * x + intercept[:, None]        # (W, B)
+        residuals  = region_db - regression
+        return np.maximum(0.0, residuals.max(axis=1))               # (W,)
 
 
+# ---------------------------------------------------------------------------
+# SpecBal — filter applied ONCE to full signal, O(N), no Python loop
+# ---------------------------------------------------------------------------
 class SpecBalCalculator(MetricCalculator):
-    """SpecBal (Spectral Balance) Calculator"""
-    
-    def calculate(
-        self, 
-        voice_signal: np.ndarray, 
-        cycle_triggers: np.ndarray
-    ) -> np.ndarray:
-        """
-        Calculate SpecBal using spectral filtering.
-        
-        Args:
-            voice_signal: Preprocessed voice signal
-            cycle_triggers: Cycle trigger array
-        
-        Returns:
-            Array of SpecBal values for each cycle
-        """
-        logger.info("Calculating SpecBal...")
-        
-        try:
-            cycle_indices = np.where(cycle_triggers > 0.5)[0]
-            specbal_values = []
-            
-            # Calculate sliding window SpecBal
-            window_size = self.spl_window_size
-            hop_size = self.spl_hop_size
-            
-            for i in range(0, len(voice_signal) - window_size + 1, hop_size):
-                window_data = voice_signal[i:i + window_size]
-                
-                # Low-pass filter (1500 Hz, 4th order Butterworth)
-                nyquist = self.sample_rate / 2
-                low_cutoff = self.specbal_cutoff_low / nyquist
-                b, a = butter(4, low_cutoff, btype='low')
-                level_lo = filtfilt(b, a, window_data)
-                
-                # High-pass filter (2000 Hz, 4th order Butterworth)
-                high_cutoff = self.specbal_cutoff_high / nyquist
-                b, a = butter(4, high_cutoff, btype='high')
-                level_hi = filtfilt(b, a, window_data)
-                
-                # RMS calculation
-                rms_lo = np.sqrt(np.mean(level_lo**2))
-                rms_hi = np.sqrt(np.mean(level_hi**2))
-                
-                # Convert to dB
-                level_lo_db = 20 * np.log10(rms_lo + 1e-10)
-                level_hi_db = 20 * np.log10(rms_hi + 1e-10)
-                
-                # SpecBal = levelHi - levelLo
-                specbal = level_hi_db - level_lo_db
-                
-                # Sanitize (limit to -50dB)
-                specbal = max(specbal, -50.0)
-                specbal_values.append(specbal)
-            
-            # Assign SpecBal values to cycles
-            cycle_specbal = self.assign_metric_to_cycles(cycle_indices, specbal_values, hop_size)
-            
-            logger.info(f"  Calculated {len(specbal_values)} SpecBal windows")
-            logger.info(f"  Assigned SpecBal values to {len(cycle_indices)} cycles")
-            logger.info(f"  SpecBal range: {cycle_specbal.min():.3f} - {cycle_specbal.max():.3f}")
-            
-            return cycle_specbal
-            
-        except Exception as e:
-            logger.error(f"Error calculating SpecBal: {e}")
-            raise
+
+    def __init__(self, config: VoiceMapConfig):
+        super().__init__(config)
+        nyq = config.sample_rate / 2
+        # Pre-compute SOS coefficients once
+        self._sos_lo = butter(4, config.specbal_cutoff_low  / nyq, btype='low',  output='sos')
+        self._sos_hi = butter(4, config.specbal_cutoff_high / nyq, btype='high', output='sos')
+
+    def calculate(self, voice: np.ndarray, cycle_triggers: np.ndarray) -> np.ndarray:
+        logger.info("Calculating SpecBal (single-pass filter)...")
+        hop = self.spl_hop_size
+        rms_w = self.specbal_rms_window   # 50-sample RMS window (matches SC RMS.ar(..., 50))
+
+        # Filter entire signal at C speed — O(N)
+        lo = sosfilt(self._sos_lo, voice)
+        hi = sosfilt(self._sos_hi, voice)
+
+        # Sliding RMS with cumsum — O(N)
+        lo_rms = _sliding_rms(lo, rms_w, 1)                          # per-sample
+        hi_rms = _sliding_rms(hi, rms_w, 1)
+
+        lo_db = 20.0 * np.log10(np.maximum(lo_rms, 1e-12))
+        hi_db = 20.0 * np.log10(np.maximum(hi_rms, 1e-12))
+        sb    = np.maximum(hi_db - lo_db, -50.0)
+
+        # Down-sample to hop grid then assign to cycles
+        sb_hop    = sb[rms_w - 1::hop]                               # take one value per hop
+        cycle_idx = np.where(cycle_triggers > 0.5)[0]
+        out = _assign_to_cycles(cycle_idx, sb_hop, hop)
+
+        # Clamp to reasonable range
+        out = np.clip(out, -50.0, 50.0)
+        logger.info("  SpecBal: %d cycles  range %.1f – %.1f dB",
+                    len(out), out.min(), out.max())
+        return out
 
 
+# ---------------------------------------------------------------------------
+# Crest — per-cycle, but inner ops are numpy (no Python arithmetic per sample)
+# ---------------------------------------------------------------------------
 class CrestCalculator(MetricCalculator):
-    """Crest (Crest Factor) Calculator"""
-    
-    def calculate(
-        self, 
-        voice_signal: np.ndarray, 
-        cycle_triggers: np.ndarray
-    ) -> np.ndarray:
-        """
-        Calculate Crest Factor per cycle.
-        
-        Args:
-            voice_signal: Preprocessed voice signal
-            cycle_triggers: Cycle trigger array
-        
-        Returns:
-            Array of Crest values for each cycle
-        """
+
+    def calculate(self, voice: np.ndarray, cycle_triggers: np.ndarray) -> np.ndarray:
         logger.info("Calculating Crest...")
-        
-        try:
-            cycle_indices = np.where(cycle_triggers > 0.5)[0]
-            crest_values = []
-            
-            # 20ms delay alignment
-            delay_samples = int(0.02 * self.sample_rate)
-            voice_delayed = np.concatenate([
-                np.zeros(delay_samples), 
-                voice_signal[:-delay_samples]
-            ])
-            
-            for i in range(len(cycle_indices) - 1):
-                start_idx = cycle_indices[i]
-                end_idx = cycle_indices[i + 1]
-                
-                if end_idx - start_idx >= self.min_samples:
-                    cycle_data = voice_delayed[start_idx:end_idx]
-                    
-                    if len(cycle_data) > 0:
-                        # RMS calculation
-                        rms = np.sqrt(np.mean(cycle_data**2))
-                        
-                        # Peak calculation
-                        peak = np.max(np.abs(cycle_data))
-                        
-                        # Crest Factor = Peak / RMS
-                        if rms > 0:
-                            crest = peak / rms
-                        else:
-                            crest = 0.0
-                        
-                        crest_values.append(crest)
-            
-            crest_values = np.array(crest_values)
-            
-            logger.info(f"  Calculated {len(crest_values)} Crest values")
-            logger.info(f"  Crest range: {crest_values.min():.3f} - {crest_values.max():.3f}")
-            
-            return crest_values
-            
-        except Exception as e:
-            logger.error(f"Error calculating Crest: {e}")
-            raise
+        delay    = int(0.02 * self.sample_rate)
+        v        = np.concatenate([np.zeros(delay), voice[:-delay]])
+        idx      = np.where(cycle_triggers > 0.5)[0]
+
+        crest_list = []
+        for i in range(len(idx) - 1):
+            s, e = idx[i], idx[i + 1]
+            if e - s < self.min_samples:
+                continue
+            cyc  = v[s:e]
+            rms  = np.sqrt(np.mean(cyc * cyc))
+            peak = np.max(np.abs(cyc))
+            crest_list.append(peak / rms if rms > 1e-12 else 0.0)
+
+        out = np.array(crest_list)
+        if len(out):
+            logger.info("  Crest: %d cycles  range %.3f – %.3f",
+                        len(out), out.min(), out.max())
+        return out
 
 
+# ---------------------------------------------------------------------------
+# Qcontact / dEGGmax / Icontact — per-cycle, inner ops numpy
+# ---------------------------------------------------------------------------
 class QcontactCalculator(MetricCalculator):
-    """Qcontact, dEGGmax and Icontact Calculator"""
-    
-    def calculate(
-        self, 
-        egg_signal: np.ndarray, 
-        cycle_triggers: np.ndarray
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """
-        Calculate Qcontact, dEGGmax and Icontact.
-        
-        Args:
-            egg_signal: Preprocessed EGG signal
-            cycle_triggers: Cycle trigger array
-        
-        Returns:
-            Tuple of (qcontact_values, deggmax_values, icontact_values)
-        """
-        logger.info("Calculating Qcontact, dEGGmax and Icontact...")
-        
-        try:
-            cycle_indices = np.where(cycle_triggers > 0.5)[0]
-            qcontact_values = []
-            deggmax_values = []
-            icontact_values = []
-            
-            for i in range(len(cycle_indices) - 1):
-                start_idx = cycle_indices[i]
-                end_idx = cycle_indices[i + 1]
-                
-                if end_idx - start_idx >= self.min_samples:
-                    cycle_data = egg_signal[start_idx:end_idx]
-                    
-                    if len(cycle_data) > 0:
-                        # Calculate max and min within cycle
-                        cycle_max = np.max(cycle_data)
-                        cycle_min = np.min(cycle_data)
-                        peak2peak = cycle_min - cycle_max
-                        
-                        if peak2peak != 0:
-                            # Qcontact calculation
-                            integral = (1.0 / peak2peak) * cycle_min
-                            qcontact_values.append(integral)
-                            
-                            # dEGGmax calculation
-                            ticks = len(cycle_data)  # Cycle length in samples
-                            
-                            sin_term = np.sin(2 * np.pi / ticks) if ticks > 0 else 0
-                            denominator = peak2peak * (-0.5) * sin_term
-                            
-                            if abs(denominator) > 1e-10:
-                                amp_scale = 1.0 / denominator
-                            else:
-                                amp_scale = 0.0
-                            
-                            degg = np.diff(cycle_data)
-                            delta = np.max(degg) if len(degg) > 0 else 0
-                            
-                            deggmax = delta * amp_scale
-                            deggmax_values.append(deggmax)
-                            
-                            # Icontact calculation
-                            icontact = np.log10(max(deggmax, 1.0)) * integral
-                            icontact_values.append(icontact)
-                        else:
-                            qcontact_values.append(0.0)
-                            deggmax_values.append(0.0)
-                            icontact_values.append(0.0)
-            
-            qcontact_values = np.array(qcontact_values)
-            deggmax_values = np.array(deggmax_values)
-            icontact_values = np.array(icontact_values)
-            
-            logger.info(f"  Calculated {len(qcontact_values)} Qcontact values")
-            logger.info(f"  Qcontact range: {qcontact_values.min():.3f} - {qcontact_values.max():.3f}")
-            logger.info(f"  Calculated {len(deggmax_values)} dEGGmax values")
-            logger.info(f"  dEGGmax range: {deggmax_values.min():.3f} - {deggmax_values.max():.3f}")
-            logger.info(f"  Calculated {len(icontact_values)} Icontact values")
-            logger.info(f"  Icontact range: {icontact_values.min():.3f} - {icontact_values.max():.3f}")
-            
-            return qcontact_values, deggmax_values, icontact_values
-            
-        except Exception as e:
-            logger.error(f"Error calculating Qcontact/dEGGmax/Icontact: {e}")
-            raise
+
+    def calculate(self, egg: np.ndarray,
+                  cycle_triggers: np.ndarray
+                  ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        logger.info("Calculating Qcontact / dEGGmax / Icontact...")
+        idx = np.where(cycle_triggers > 0.5)[0]
+
+        qc_list, dq_list, ic_list = [], [], []
+
+        for i in range(len(idx) - 1):
+            s, e = idx[i], idx[i + 1]
+            if e - s < self.min_samples:
+                continue
+            cyc  = egg[s:e]
+            cmax = cyc.max()
+            cmin = cyc.min()
+            p2p  = cmin - cmax          # negative (min < max for EGG)
+            if abs(p2p) < 1e-12:
+                qc_list.append(0.0); dq_list.append(0.0); ic_list.append(0.0)
+                continue
+
+            ticks    = len(cyc)
+            integral = cmin / p2p                                      # Qci
+            sin_term = np.sin(2.0 * np.pi / ticks) if ticks > 0 else 0.0
+            denom    = p2p * (-0.5) * sin_term
+            amp_sc   = 1.0 / denom if abs(denom) > 1e-12 else 0.0
+
+            delta   = np.diff(cyc).max() if len(cyc) > 1 else 0.0
+            deggmax = delta * amp_sc
+            ic      = np.log10(max(deggmax, 1.0)) * integral
+
+            qc_list.append(integral)
+            dq_list.append(deggmax)
+            ic_list.append(ic)
+
+        qc = np.array(qc_list)
+        dq = np.array(dq_list)
+        ic = np.array(ic_list)
+        if len(qc):
+            logger.info("  Qcontact: %.3f – %.3f  dEGGmax: %.3f – %.3f  Icontact: %.3f – %.3f",
+                        qc.min(), qc.max(), dq.min(), dq.max(), ic.min(), ic.max())
+        return qc, dq, ic
 
 
+# ---------------------------------------------------------------------------
+# Entropy / HRF — placeholders (zeros)
+# ---------------------------------------------------------------------------
 class EntropyCalculator(MetricCalculator):
-    """Entropy Calculator (placeholder for future implementation)"""
-    
-    def calculate(
-        self, 
-        voice_signal: np.ndarray, 
-        cycle_triggers: np.ndarray
-    ) -> np.ndarray:
-        """
-        Calculate Entropy - currently returns zeros.
-        
-        Args:
-            voice_signal: Preprocessed voice signal
-            cycle_triggers: Cycle trigger array
-        
-        Returns:
-            Array of Entropy values (all zeros)
-        """
-        logger.info("Calculating Entropy (placeholder)...")
-        
-        cycle_indices = np.where(cycle_triggers > 0.5)[0]
-        entropy_values = np.zeros(len(cycle_indices) - 1)
-        
-        logger.info(f"  Calculated {len(entropy_values)} Entropy values (all zeros)")
-        logger.info(f"  Entropy range: {entropy_values.min():.3f} - {entropy_values.max():.3f}")
-        
-        return entropy_values
+    def calculate(self, voice: np.ndarray, cycle_triggers: np.ndarray) -> np.ndarray:
+        n = max(np.sum(cycle_triggers > 0.5) - 1, 0)
+        return np.zeros(n)
 
 
 class HRFCalculator(MetricCalculator):
-    """HRF Calculator (placeholder for future implementation)"""
-    
-    def calculate(
-        self, 
-        voice_signal: np.ndarray, 
-        cycle_triggers: np.ndarray
-    ) -> np.ndarray:
-        """
-        Calculate HRF - currently returns zeros.
-        
-        Args:
-            voice_signal: Preprocessed voice signal
-            cycle_triggers: Cycle trigger array
-        
-        Returns:
-            Array of HRF values (all zeros)
-        """
-        logger.info("Calculating HRF (placeholder)...")
-        
-        cycle_indices = np.where(cycle_triggers > 0.5)[0]
-        hrf_values = np.zeros(len(cycle_indices) - 1)
-        
-        logger.info(f"  Calculated {len(hrf_values)} HRF values (all zeros)")
-        logger.info(f"  HRF range: {hrf_values.min():.3f} - {hrf_values.max():.3f}")
-        
-        return hrf_values
+    def calculate(self, voice: np.ndarray, cycle_triggers: np.ndarray) -> np.ndarray:
+        n = max(np.sum(cycle_triggers > 0.5) - 1, 0)
+        return np.zeros(n)
