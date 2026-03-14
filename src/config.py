@@ -52,7 +52,20 @@ class VoiceMapConfig:
     specbal_cutoff_low: int = 1500
     specbal_cutoff_high: int = 2000
     specbal_rms_window: int = 50
-    
+
+    # EGG DFT / HRFegg parameters
+    n_harmonics: int = 10              # Harmonics 1..N per cycle (MetricHRFegg default)
+
+    # SampEn (CSE) parameters — from GUI defaults in VRPViewPlots.sc
+    sampen_amplitude_window_size: int   = 10
+    sampen_amplitude_harmonics: int     = 4
+    sampen_amplitude_seq_length: int    = 1
+    sampen_amplitude_tolerance: float   = 0.2
+    sampen_phase_window_size: int       = 10
+    sampen_phase_harmonics: int         = 4
+    sampen_phase_seq_length: int        = 1
+    sampen_phase_tolerance: float       = 0.4
+
     # VoiceMap standard ranges
     n_min_midi: int = 30
     n_max_midi: int = 96
