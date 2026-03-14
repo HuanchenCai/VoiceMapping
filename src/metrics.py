@@ -338,8 +338,6 @@ class CPPCalculator(MetricCalculator):
 
         cpp_wins = self._peak_prominence_batch(ceps_smooth, lo, hi)
 
-        # Map each cycle trigger to the nearest CPP window (cycle_sample // hop),
-        # clamped to the valid range.
         cycle_idx = np.where(cycle_triggers > 0.5)[0]
         win_idx   = np.clip(cycle_idx // hop, 0, len(cpp_wins) - 1)
         out       = cpp_wins[win_idx]
