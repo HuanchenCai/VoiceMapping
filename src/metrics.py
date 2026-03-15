@@ -5,9 +5,9 @@ All hot paths use vectorised NumPy; no Python-level loops over samples or window
 """
 
 import numpy as np
+from numpy.lib.stride_tricks import sliding_window_view
 from scipy.signal import butter, sosfilt, lfilter
 from scipy.fft import rfft, irfft, ifft as _ifft
-from scipy.ndimage import uniform_filter1d as _uf1d
 from typing import Tuple
 import logging
 
@@ -119,9 +119,7 @@ class MetricCalculator:
         self.cpp_high_bin   = config.cpp_high_bin
         self.cpp_dither_amp = config.cpp_dither_amp
 
-        self.specbal_cutoff_low  = config.specbal_cutoff_low
-        self.specbal_cutoff_high = config.specbal_cutoff_high
-        self.specbal_rms_window  = config.specbal_rms_window
+        self.specbal_rms_window = config.specbal_rms_window
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +179,7 @@ class ClarityCalculator(MetricCalculator):
         if n_win == 0:
             return np.array([]), np.array([])
 
-        wins = np.lib.stride_tricks.sliding_window_view(v_integr, n)[::hop].copy()
+        wins = sliding_window_view(v_integr, n)[::hop].copy()
         wins -= wins.mean(axis=1, keepdims=True)
 
         fft_size = 2 * n
@@ -314,7 +312,7 @@ class CPPCalculator(MetricCalculator):
             return np.zeros(max(len(cycle_idx) - 1, 0))
 
         take = min(ws, fft_n)
-        wins = np.lib.stride_tricks.sliding_window_view(voice, ws)[::hop, :take]
+        wins = sliding_window_view(voice, ws)[::hop, :take]
         wins = wins.astype(np.float64)
 
         wins = wins + _rng.standard_normal(wins.shape) * self.cpp_dither_amp
@@ -331,11 +329,7 @@ class CPPCalculator(MetricCalculator):
         ceps_complex = _ifft(log_m[:, :ceps_n], n=ceps_n, axis=1)  # (W, 1024)
         ceps_abs     = np.abs(ceps_complex)                          # (W, 1024)
 
-        # No temporal smoothing: alpha=0 matches test_VRP.csv reference best
-        # (alpha=0.3 gives mean=-1.029, alpha=0.0 gives mean=-0.062)
-        ceps_smooth = ceps_abs
-
-        cpp_wins = self._peak_prominence_batch(ceps_smooth, lo, hi)
+        cpp_wins = self._peak_prominence_batch(ceps_abs, lo, hi)
 
         cycle_idx = np.where(cycle_triggers > 0.5)[0]
         if len(cycle_idx) < 2:
@@ -538,7 +532,6 @@ class EntropyCalculator(MetricCalculator):
         phases_abs = np.abs(phases_raw[:, :n_harm_ph])
 
         entropy = np.zeros(n_cycles)
-        from numpy.lib.stride_tricks import sliding_window_view
 
         if n_cycles >= win_a:
             for k in range(n_harm_amp):

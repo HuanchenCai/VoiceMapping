@@ -29,10 +29,6 @@ class VoiceMapConfig:
     phase_tau: float = 0.95        # VRPSettingsCSDFT default tau
     phase_dolansky_coeff: float = 0.99
 
-    # Legacy PeakFollower parameters (deprecated in SC, kept for reference)
-    dolansky_decay: float = 0.99
-    dolansky_coeff: float = 0.995
-
     # Clarity / pitch detection window (Tartini-style autocorrelation)
     clarity_fft_size: int = 2048
     clarity_overlap: int = 1024    # hop = fft_size - overlap
@@ -66,11 +62,9 @@ class VoiceMapConfig:
     # SampEn (CSE) parameters — from GUI defaults in VRPViewPlots.sc
     sampen_amplitude_window_size: int   = 10
     sampen_amplitude_harmonics: int     = 4
-    sampen_amplitude_seq_length: int    = 1
     sampen_amplitude_tolerance: float   = 0.2
     sampen_phase_window_size: int       = 10
     sampen_phase_harmonics: int         = 4
-    sampen_phase_seq_length: int        = 1
     sampen_phase_tolerance: float       = 0.4
 
     # VoiceMap standard ranges

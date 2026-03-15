@@ -4,6 +4,7 @@ VoiceMap Voice Range Profile Analyzer
 Complete implementation of VoiceMap algorithms for VRP analysis
 """
 
+import time
 import numpy as np
 import pandas as pd
 import soundfile as sf
@@ -133,7 +134,6 @@ class VoiceMapAnalyzer:
 
     def __init__(self, config: Optional[VoiceMapConfig] = None):
         self.config = config or DEFAULT_CONFIG
-        self.logger = get_logger(__name__)
 
         self.spl_calculator      = SPLCalculator(self.config)
         self.clarity_calculator  = ClarityCalculator(self.config)
@@ -144,20 +144,20 @@ class VoiceMapAnalyzer:
         self.entropy_calculator  = EntropyCalculator(self.config)
         self.hrf_calculator      = HRFCalculator(self.config)
 
-        self.logger.info("VoiceMap analyzer initialized (numba=%s)", _NUMBA)
+        logger.info("VoiceMap analyzer initialized (numba=%s)", _NUMBA)
 
     # ------------------------------------------------------------------
     # Audio I/O
     # ------------------------------------------------------------------
     def load_audio(self, file_path: str) -> Tuple[np.ndarray, np.ndarray, int, float]:
-        self.logger.info("Loading audio file: %s", file_path)
+        logger.info("Loading audio file: %s", file_path)
         signal, sr = sf.read(file_path)
         if signal.ndim == 2:
             voice, egg = signal[:, 0], signal[:, 1]
         else:
             voice, egg = signal, None
         duration = len(signal) / sr
-        self.logger.info("Duration %.1fs  SR=%dHz  Samples=%d", duration, sr, len(signal))
+        logger.info("Duration %.1fs  SR=%dHz  Samples=%d", duration, sr, len(signal))
         return voice, egg, sr, duration
 
     # ------------------------------------------------------------------
@@ -198,7 +198,7 @@ class VoiceMapAnalyzer:
           phi    = atan2(in, inLP)             # analytic phase
           z      = Dolansky.ar(phi, tau, 0.99) # cycle trigger from phase
         """
-        self.logger.info("Using Phase Portrait method for cycle detection...")
+        logger.info("Using Phase Portrait method for cycle detection...")
         cfg = self.config
         egg = egg_signal.astype(np.float64)
 
@@ -215,18 +215,6 @@ class VoiceMapAnalyzer:
 
         # Dolansky on phase signal
         cycle_triggers = self.dolansky_algorithm(phi, cfg.phase_tau, cfg.phase_dolansky_coeff)
-        cycle_triggers = np.concatenate([cycle_triggers, [0]])
-        return self.filter_cycles(cycle_triggers)
-
-    def peak_follower_cycle_detection(self, egg_signal: np.ndarray) -> np.ndarray:
-        """Deprecated PeakFollower method — kept for reference only.
-        SC has this commented out in favour of Phase Portrait.
-        """
-        self.logger.info("Using PeakFollower method for cycle detection (deprecated)...")
-        degg = np.diff(egg_signal).astype(np.float64)
-        cycle_triggers = self.dolansky_algorithm(
-            degg, self.config.dolansky_decay, self.config.dolansky_coeff
-        )
         cycle_triggers = np.concatenate([cycle_triggers, [0]])
         return self.filter_cycles(cycle_triggers)
 
@@ -258,7 +246,7 @@ class VoiceMapAnalyzer:
         )
 
     def filter_cycles(self, cycle_triggers: np.ndarray) -> np.ndarray:
-        self.logger.info("  Filtering cycles...")
+        logger.info("  Filtering cycles...")
         trigger_indices = np.where(cycle_triggers > 0.5)[0]
         if len(trigger_indices) < 2:
             return cycle_triggers
@@ -273,7 +261,7 @@ class VoiceMapAnalyzer:
 
         filtered = np.zeros_like(cycle_triggers)
         filtered[keep] = 1
-        self.logger.info("  Cycles: %d → %d  (%.1f%%)",
+        logger.info("  Cycles: %d → %d  (%.1f%%)",
                          len(trigger_indices), len(keep),
                          100 * len(keep) / len(trigger_indices))
         return filtered
@@ -283,7 +271,7 @@ class VoiceMapAnalyzer:
     # ------------------------------------------------------------------
     def calculate_all_metrics(self, voice_signal, egg_signal,
                                cycle_triggers) -> Dict[str, np.ndarray]:
-        self.logger.info("Calculating all metrics...")
+        logger.info("Calculating all metrics...")
         spl_values                           = self.spl_calculator.calculate(voice_signal, cycle_triggers)
         midi_values, clarity_values          = self.clarity_calculator.calculate(voice_signal, cycle_triggers)
         cpp_values                           = self.cpp_calculator.calculate(voice_signal, cycle_triggers)
@@ -307,11 +295,11 @@ class VoiceMapAnalyzer:
         }
 
     def apply_clarity_filtering(self, metrics: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
-        self.logger.info("Applying Clarity threshold (%.2f)...", self.config.clarity_threshold)
+        logger.info("Applying Clarity threshold (%.2f)...", self.config.clarity_threshold)
         clarity_mask   = metrics['clarity'] >= self.config.clarity_threshold
         total          = len(metrics['midi'])
         kept           = int(np.sum(clarity_mask))
-        self.logger.info("  %d / %d points pass clarity (%.1f%%)",
+        logger.info("  %d / %d points pass clarity (%.1f%%)",
                          kept, total, 100 * kept / total if total else 0)
 
         out = {key: vals[clarity_mask] for key, vals in metrics.items()}
@@ -320,9 +308,8 @@ class VoiceMapAnalyzer:
     # ------------------------------------------------------------------
     # CSV output
     # ------------------------------------------------------------------
-    def output_vrp_csv(self, metrics: Dict[str, np.ndarray],
-                       cycle_count: int, duration: float) -> str:
-        self.logger.info("Outputting VRP CSV...")
+    def output_vrp_csv(self, metrics: Dict[str, np.ndarray]) -> str:
+        logger.info("Outputting VRP CSV...")
         spl_corr = metrics['spl'] + self.config.spl_correction_db
         df = pd.DataFrame({
             'MIDI':     np.round(np.where(metrics['midi'] > 0, metrics['midi'], 0)).astype(int),
@@ -338,14 +325,14 @@ class VoiceMapAnalyzer:
             'Icontact': metrics['icontact'],
             'HRFegg':   metrics['hrf'],
         })
-        self.logger.info("  Raw points: %d", len(df))
+        logger.info("  Raw points: %d", len(df))
 
         range_mask = (
             (df['MIDI'] >= self.config.n_min_midi) & (df['MIDI'] <= self.config.n_max_midi) &
             (df['dB']   >= self.config.n_min_spl)  & (df['dB']   <= self.config.n_max_spl)
         )
         df = df[range_mask].copy()
-        self.logger.info("  After range filter: %d", len(df))
+        logger.info("  After range filter: %d", len(df))
 
         grouped = df.groupby(['MIDI', 'dB']).agg({
             'Clarity': 'mean', 'CPP': 'mean', 'SpecBal': 'mean',
@@ -370,13 +357,13 @@ class VoiceMapAnalyzer:
         out_file = f"{self.config.output_dir}/complete_vrp_results_{ts}_VRP.csv"
         grouped.to_csv(out_file, index=False, sep=';')
 
-        self.logger.info("=== VRP Statistics ===")
-        self.logger.info("Unique (MIDI,dB) pairs: %d  Total cycles: %d",
+        logger.info("=== VRP Statistics ===")
+        logger.info("Unique (MIDI,dB) pairs: %d  Total cycles: %d",
                          len(grouped), grouped['Total'].sum())
-        self.logger.info("MIDI %.1f  SPL %.1f dB  Clarity %.3f",
+        logger.info("MIDI %.1f  SPL %.1f dB  Clarity %.3f",
                          grouped['MIDI'].mean(), grouped['dB'].mean(),
                          grouped['Clarity'].mean())
-        self.logger.info("Saved: %s", out_file)
+        logger.info("Saved: %s", out_file)
         return out_file
 
     # ------------------------------------------------------------------
@@ -384,10 +371,9 @@ class VoiceMapAnalyzer:
     # ------------------------------------------------------------------
     def analyze_and_output_vrp(self, file_path: Optional[str] = None
                                 ) -> Tuple[Dict[str, np.ndarray], str]:
-        import time
-        self.logger.info("=" * 60)
-        self.logger.info("VoiceMap Complete Analysis")
-        self.logger.info("=" * 60)
+        logger.info("=" * 60)
+        logger.info("VoiceMap Complete Analysis")
+        logger.info("=" * 60)
 
         audio_file = file_path or self.config.audio_file
 
@@ -397,18 +383,18 @@ class VoiceMapAnalyzer:
         voice_p = self.preprocess_voice(voice)
         egg_p   = self.preprocess_egg(egg)
 
-        self.logger.info("Cycle detection...")
+        logger.info("Cycle detection...")
         cycle_triggers = self.phase_portrait_cycle_detection(egg_p)
         cycle_count = int(np.sum(cycle_triggers > 0.5))
-        self.logger.info("Detected cycles: %d", cycle_count)
+        logger.info("Detected cycles: %d", cycle_count)
 
         metrics          = self.calculate_all_metrics(voice_p, egg_p, cycle_triggers)
         filtered_metrics = self.apply_clarity_filtering(metrics)
 
-        self.logger.info("Valid data points: %d", len(filtered_metrics['midi']))
-        out_file = self.output_vrp_csv(filtered_metrics, cycle_count, duration)
+        logger.info("Valid data points: %d", len(filtered_metrics['midi']))
+        out_file = self.output_vrp_csv(filtered_metrics)
 
-        self.logger.info("Total wall time: %.2fs  (audio: %.1fs  ratio: %.1fx)",
+        logger.info("Total wall time: %.2fs  (audio: %.1fs  ratio: %.1fx)",
                          time.perf_counter() - t0, duration,
                          duration / max(time.perf_counter() - t0, 1e-9))
         return filtered_metrics, out_file
