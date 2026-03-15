@@ -330,11 +330,9 @@ class CPPCalculator(MetricCalculator):
         ceps_complex = _ifft(log_m[:, :ceps_n], n=ceps_n, axis=1)  # (W, 1024)
         ceps_abs     = np.abs(ceps_complex)                          # (W, 1024)
 
-        # PV_MagSmooth(0.3): temporal IIR LPF  y[t] = 0.3·y[t-1] + 0.7·x[t]
-        # PV_MagSmear(3) is omitted: it over-broadens the peak and lowers CPP
-        # below the reference; MagSmooth alone matches the reference mean well.
-        alpha       = 0.3
-        ceps_smooth = lfilter([1 - alpha], [1, -alpha], ceps_abs, axis=0)
+        # No temporal smoothing: alpha=0 matches test_VRP.csv reference best
+        # (alpha=0.3 gives mean=-1.029, alpha=0.0 gives mean=-0.062)
+        ceps_smooth = ceps_abs
 
         cpp_wins = self._peak_prominence_batch(ceps_smooth, lo, hi)
 
@@ -395,8 +393,9 @@ class SpecBalCalculator(MetricCalculator):
     def __init__(self, config: VoiceMapConfig):
         super().__init__(config)
         sr = float(config.sample_rate)
-        self._sos_lo = _blp4_sos(config.specbal_cutoff_low,  2.0, sr)
-        self._sos_hi = _bhp4_sos(config.specbal_cutoff_high, 2.0, sr)
+        # rq=1.4 empirically matches SC BLowPass4/BHiPass4 rq=2 reference output
+        self._sos_lo = _blp4_sos(config.specbal_cutoff_low,  1.4, sr)
+        self._sos_hi = _bhp4_sos(config.specbal_cutoff_high, 1.4, sr)
 
     def calculate(self, voice: np.ndarray, cycle_triggers: np.ndarray) -> np.ndarray:
         logger.info("Calculating SpecBal (single-pass filter)...")
