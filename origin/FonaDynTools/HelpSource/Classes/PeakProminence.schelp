@@ -1,0 +1,109 @@
+TITLE:: PeakProminence
+summary:: Linear regression and peak detection on a PV_chain buffer
+categories:: UGens>FFT, Tools>UGens, UGens>Analysis
+related:: Classes/Cepstrum
+
+DESCRIPTION::
+The cepstral peak prominence (CPP) is a metric of periodicity that has become popular for assessment of voice status. The CPP can almost but not quite be computed using the standard FFT UGens. The PeakProminence UGen performs the final steps: conversion to dB, linear regression between two bounds, and measuring the height of the highest peak above the regression line.
+The idea is to use this UGen in a SynthDef as in the example below.
+
+In a cepstrum, the bin numbers correspond to the time in samples, divided by two. For instance, if the sampling rate is 44100 Hz, a highest cepstrum peak at bin 100 means that the signal exhibits a strong periodicity at 44100/(2*100) = 220.5 Hz.
+
+In FonaDyn, the cepstrum parameters have been found by informal experimentation to work reasonably with both sustained vowels and connected speech. They are as follows:
+
+- The initial link::Classes/FFT:: is 2048 points, Hanning window.
+
+- The link::Classes/Cepstrum:: is 1024 points, resulting in 512 quefrency bins.
+
+- Only voiced segments are analyzed. As for all other metrics, voicing is selected on the basis of the 'Clarity' metric.
+
+- Voice fundamental frequencies from 60 Hz to 880 Hz are covered (strong::lowBin::=25, strong::highBin::=367).
+
+- Temporal smoothing is implemented with link::Classes/PV_MagSmooth:: set to 0.3, corresponding to a 16 Hz first-order low-pass filter in each quefrency bin. The smoothing is thus exponential rather than averaged over a rectangular time window.
+
+- Quefrency smoothing is implemented with link::Classes/PV_MagSmear:: set to +/- 3 bins, corresponding to a quefrency window of about 0.3 ms.
+
+- The cepstrum is converted to dB before the linear trend line is computed.
+
+- In the interest of real-time computing speed: the cepstrum peak is located as the maximum bin without interpolation between bins. The linear regression is direct and does not implement the 'robust' schemes available in Praat (which require sorting of the data).
+
+Even if you are not interested in the peak, you can use this UGen to compute a regression line between two bounds, in a spectrum, a cepstrum, or any vector, with the consecutive bin numbers as the x values and the buffer contents as the y values. Setting the strong::todB:: argument to zero inhibits the conversion to dB prior to regressing.
+
+CLASSMETHODS::
+
+METHOD:: new
+This is not normally used; it is just a wrapper for the .kr method which has the same arguments.
+
+METHOD:: kr
+This method analyzes the magnitudes only in the PV_Chain buffer. The buffer contents are automatically converted to polar form if necessary. No arguments can be modulated at run time.
+
+ARGUMENT:: buffer
+The buffer from a chain containing link::Classes/FFT:: and link::Classes/Cepstrum:: that are optionally followed by link::Classes/PV_ChainUGen::s for smoothing and smearing, as in the example below.
+
+ARGUMENT:: lowBin
+The index of the bin in the cepstrum where the linear regression is to start.
+
+ARGUMENT:: highBin
+The index of the bin in the cepstrum where the linear regression is to stop.
+
+ARGUMENT:: todB
+1: (default) convert the buffer magnitudes to dB before regressing
+
+0:    do not convert the buffer magnitudes to dB before regressing
+
+returns:: Five numbers:
+
+1. the vertical difference in dB between the height of the maximum peak and the regression line. This is the CPP metric.
+
+2. the slope of the regression line, in dB/sample
+
+3. the intercept of the regression line, in dB at zero samples
+
+4. the height of the maximum peak, in dB
+
+5. the index of the cepstrum bin containing the maximum value
+
+If strong::todB::=0, then just omit "in dB" from the above descriptions.
+
+
+INSTANCEMETHODS::
+
+METHOD:: init
+(internal)
+
+ARGUMENT::  ... theInputs
+(describe argument here)
+
+returns:: (describe returnvalue here)
+
+
+EXAMPLES::
+This is how PeakProminence is used in FonaDyn v3.0.x.  Only the "cpp" output is used here.
+
+code::
+
+SynthDef.new( nameCPPsmoothed,
+	{ | aiBusConditionedMic,
+		coBusCPPsmoothed |
+
+		var in, inWithDither, chain, cepsChain, fftBuffer, cepsBuffer;
+		var cpp, slope, intercept, maxcpp, maxix;
+		var lowBin = 25, highBin = 367;  // 880 Hz down to 60 Hz
+		var ditherAmp = 1000000.reciprocal;   // was 24000.reciprocal until v3.0.6d
+
+		fftBuffer = LocalBuf(2048);		// Tried halving the bufsize but not good
+		cepsBuffer = LocalBuf(1024);
+
+		in = In.ar(aiBusConditionedMic, 1);			// Get the audio signal
+		inWithDither = WhiteNoise.ar(ditherAmp, in);// Prevent divide-by-zero issues later in the chain
+		chain = FFT(fftBuffer, inWithDither, wintype: 1);  // Hanning window
+		cepsChain = Cepstrum(cepsBuffer, chain);	// Both buffers are now in polar form (mag,phase)
+		cepsChain = PV_MagSmooth(cepsChain, 0.3);	// Approx a 16 Hz LP1 filter per bin
+		cepsChain = PV_MagSmear(cepsChain, 3);		// Implements 7-bin smearing (+/- 3 bins mean)
+		#cpp, slope, intercept, maxcpp, maxix = PeakProminence.kr(cepsChain, lowBin, highBin);
+
+		Out.kr(coBusCPPsmoothed, [cpp]);
+	}
+).add(libname);
+
+::

@@ -1,0 +1,87 @@
+TITLE:: MatrixViewer
+summary:: Plotting data in a matrix, as shades of any color.
+categories:: Tools>GUI
+
+DESCRIPTION::
+Plots data from a matrix in a view, the data is presented as colored rectangles over a grid. nil members of the matrix are not drawn.
+
+
+CLASSMETHODS::
+
+METHOD:: new
+
+ARGUMENT:: parent
+The parent view.
+
+ARGUMENT:: grid
+A link::Classes/DrawGrid:: instance or nil. If this parameter is non-nil the specified grid will be drawn in the background.
+
+returns:: The new MatrixViewer instance.
+
+
+INSTANCEMETHODS::
+
+METHOD:: update
+Updates the contents of the drawn grid, and refreshes the view.
+
+ARGUMENT:: matrix
+The matrix data.
+
+ARGUMENT:: palette
+A function that transforms the values in the matrix into a color. nil values are always transparent.
+
+returns:: this
+
+METHOD:: view
+
+returns:: The view where the grid and matrix information is drawn.
+
+METHOD:: init
+See link::#*new::.
+
+EXAMPLES::
+SUBSECTION:: Using nil for transparency
+code::
+(
+var mv = MatrixViewer(
+	Window().background_(Color.white).front,
+	DrawGrid(
+		Rect(),
+		GridLines(\midfreq.asSpec),
+		GridLines(\unipolar.asSpec)
+	)
+);
+mv.view.resize_(5);
+mv.update(
+	// Place nils and random values between 0.3 and 0.7 into the matrix
+	50 collect: { Array.rand(50, -1.0, 0.7) collect: { | x | if ( x > 0.3, x, nil ) } },
+
+	// nils are transparent, and values between 0.3 and 0.7 become a shade of gray:
+	{ | value | Color.gray(value) }
+);
+)
+::
+
+SUBSECTION:: Drawing order example
+Note that the matrix value at (0, 0) is drawn in the lower left corner.
+
+code::
+(
+var matrix = 50 collect: { | x | Array.series(50, x, 1) };
+var mv = MatrixViewer(
+	Window().background_(Color.white).front
+);
+mv.view.resize_(5);
+mv.update(matrix, { | value |
+	switch (value % 6,
+		0, Color.red,
+		1, Color.blue,
+		2, Color.green,
+		3, Color.cyan,
+		4, Color.magenta,
+		5, Color.yellow
+	)
+	}
+);
+)
+::

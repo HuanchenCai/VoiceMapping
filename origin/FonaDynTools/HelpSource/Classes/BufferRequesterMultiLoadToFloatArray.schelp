@@ -1,0 +1,77 @@
+TITLE:: BufferRequesterMultiLoadToFloatArray
+summary:: Implementation of BufferRequester that will use a method similar to Buffer.loadToFloatArray, but with more error handling and guarantees. One major difference is that LoadToFloatArray cannot handle two requests on the same buffer at the same time.
+categories:: Tools>BufferRequester>Implementations
+related:: Classes/BufferRequest, Classes/BufferRequester, Classes/BufferRequesterGetn, Classes/BufferRequesterLoadToFloatArray
+
+DESCRIPTION::
+There are three different implementation classes for grabbing information from a Buffer on the server, that each perform 3 tasks:
+
+1) Splitting a long request into suitable requests for the method used. (asRequests)
+
+2) Sending the actual request to the server, and placing the result of the request into the requests data member. (sendAll)
+
+3) Giving an estimation on the time to wait before assuming that a request to be lost. (lostDuration)
+
+NOTE::
+This class only works with a local server!
+::
+
+CLASSMETHODS::
+
+METHOD:: new
+Creates a BufferRequesterMultiLoadToFloatArray instance.
+
+ARGUMENT:: buffer
+The buffer you wish to read from.
+
+returns::
+One of the implementation classes.
+
+INSTANCEMETHODS::
+METHOD:: asRequests
+Splits a request into a suitable amount of sub-requests. It handles wrapping around to the beginning.
+The class will grab data as a multiple of the frame size. Hence it is safe to assume that each request can be split into channels/frames.
+
+ARGUMENT:: from
+The start index of the read.
+NOTE::
+This value MUST be a multiple of buffer.numChannels.
+::
+
+ARGUMENT:: to
+The end index of the read.
+NOTE::
+This value MUST be a multiple of buffer.numChannels.
+::
+
+METHOD:: sendAll
+Sends all requests in a container to the server. Note that this just sends the asyncronous requests, it will not wait for them to finish, or help with synchronization or failure. Once the data is loaded it will appear in the data member in the corresponding BufferRequest. It will also update the timestamp member in the request, so you can check how long ago it was sent. This can be used to handle failure, since the duration member function in BufferRequest will tell how long ago it was sent.
+
+ARGUMENT:: requestContainer
+Any container with requests. Most likely one returned by asRequests.
+
+METHOD:: lostDuration
+returns:: The estimated time before a request should be deemed as lost.
+
+METHOD:: buffer
+returns:: The buffer.
+
+EXAMPLES::
+
+code::
+(
+fork {
+	var buffer = Buffer.alloc(Server.default, 5000, 2);
+	var br = BufferRequester(buffer);
+	var reqs = br.asRequests(8000, 1000);
+	br.sendAll(reqs);
+
+	br.lostDuration.yield;
+
+	reqs do: { | req |
+		// NOTE: It is not guaranteed that the requests succeeded! nil data means it failed.
+		format("% % % %", req.index, req.count, req.duration, req.data).postln;
+	};
+};
+)
+::

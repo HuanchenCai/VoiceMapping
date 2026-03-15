@@ -1,0 +1,71 @@
+TITLE:: FonaDyn Shortcuts
+summary:: Keyboard shortcuts and mouse actions for FonaDyn
+categories:: FonaDyn
+related:: Classes/FonaDyn
+
+DESCRIPTION::
+This is a list of FonaDyn's shortcut key functions and its popup menu for shortcuts. In FonaDyn, right-click on a panel border to bring up the popup menu.
+
+To find out more about mouse actions, activate the Help Tooltips (key F1) and hold the cursor over the given panel.
+
+table::
+	## strong::Key:: || strong::Main Window::
+
+	## Alt+C || Toggles the display of the EGG cluster graphs
+	## Alt+F || Toggles the display of the phonation type cluster graphs
+	## Alt+H || Toggles the display of the General and Output rows at the top (saving some screen space)
+	## Alt+L || Toggles the display of the audio waveform for listening (when enabled)
+	## Alt+M || Toggles the display of the moving EGG. Add Shift to detach a copy.
+	## Alt+P || Toggles the display of the time-curve plots
+	## Alt+V || Toggles the display of voice maps (single or multiple)
+::
+
+
+table::
+	## strong::Key:: || strong::Multiple voice maps::
+	## Alt+T || Toggles the display of a TWIN map that shows the same real-time data as the NOW map, but in some other layer (another metric).
+	## Alt+Shift+T || Toggles the display of a TWIN » map that shows the same real-time data as the NOW map, but in a separate window. Drag that window to a second display screen, for a participant to see the live map only. Only one TWIN map can be active (docked, or floating).
+	## Alt+B || Toggles the display of a BEFORE map that does not change, but is convenient for reference. It is a static copy of the NOW map, made at the exact time when Alt-B is pressed.
+	## Alt+D ||	Toggles the display of a static DIFF map that shows a snapshot of the cell-by-cell differences between NOW and BEFORE. The DIFF map does not change when NOW changes. Make a BEFORE map first, or DIFF will be empty. To update a DIFF map, close it (maybe save it first) and open a new one.
+	## Alt+S || Toggles the display of a static map that is a smoothed and interpolated version of the first map. This may take one or two seconds. A smoothed map does not change when the original changes. To smooth another map, maybe save the current Smoothed map first; then close it and make a new one.
+	## ╒══╗ || (a button, not a keystroke) Toggles between Stacked or Tiled display of multiple voice maps.
+	## Alt+X || In Tiled mode, toggles whether multiple maps are tiled horizontally or vertically.
+::
+
+
+table::
+	## strong::Key and mouse:: || strong::Signal window:: (* requires a valid Log file)
+	## Ctrl-Z || Zoom in
+	## Ctrl-B || Zoom back. Also restores the previous amplitude scaling.
+	## Ctrl-C || Toggle the display of EGG cycle markers*
+	## left button + drag || Make a selection
+	## left button on selection || Play the selection
+	## right button on selection || Mark that segment in the voice map*
+	## left button anywhere else || Unselect the current selection
+	## Esc || Unselect the current selection
+	## mouse wheel || Zoom in amplitude
+	## right button + horizontal drag || Pan in time
+	## right button + shift + vertical drag || Zoom in time
+	## strong::Key:: || strong::Signal window scrollrange bar:: (when visible)
+	## A || Show the whole file
+	## C || Go to the mid-point of the file
+	## N || Go to the start of the file
+	## X || Go to the end of the file
+	## <- || Move earlier
+	## -> || Move later
+::
+
+table::
+	## strong::Function Key:: || strong::Action::
+	## F1 || Turns the on-screen help tips on or off
+	## F2 || Same as START/STOP
+	## F3 || Same as Pause/Resume
+	## F4 || Turns sonic alerts on or off
+	## F5 || Same as Cluster Reset, acting on both EGG and phon-type clusters
+	## F6 || When part of a signal is selected, plots the active metrics for that part
+	## F7 || Same as "FonaDyn.run" - if a document is active
+	## F8 || Same as "FonaDyn.rerun" - if a document is active
+::
+
+
+

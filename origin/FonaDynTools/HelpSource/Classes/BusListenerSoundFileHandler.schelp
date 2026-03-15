@@ -1,0 +1,41 @@
+TITLE:: BusListenerSoundFileHandler
+summary:: A SoundFile handler for the BusListener class.
+categories:: Tools>BusListener>Handlers
+related:: Classes/BusListener
+
+DESCRIPTION::
+This handler will stream all data into a SoundFile. See link::Classes/SoundFile#-headerFormat:: and link::Classes/SoundFile#-sampleFormat::
+
+EXAMPLES::
+
+code::
+(
+s.waitForBoot{
+    var bl = BusListener();
+    var cbus = Bus.control(Server.default);
+    var abus = Bus.audio(Server.default);
+    var gate = Bus.audio(Server.default);
+	var clock = TempoClock.new(30);
+
+    {
+        Out.kr(cbus, [Saw.kr(2)]);
+        Out.ar(abus, [SinOsc.ar(1)]);
+
+        // Grab values ~7000 times per second
+        Out.ar(gate, [Trig1.ar(SinOsc.ar(7000), 0)]);
+    }.play;
+
+    bl.addHandler(\WriteSaw, \soundfile, [0, 1], thisProcess.platform.recordingsDir +/+ "saw.aiff", "AIFF", "int16");
+
+    fork {
+        bl.prepare(\global, Server.default, [cbus, abus], gate, clock);
+        Server.default.sync;
+        bl.start(Server.default, Server.default.defaultGroup);
+
+        5.yield;
+
+        bl.stop;
+    };
+};
+)
+::

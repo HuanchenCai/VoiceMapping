@@ -1,0 +1,83 @@
+TITLE:: FDcal
+summary:: The FonaDyn SPL calibration tool
+categories:: FonaDyn
+related:: Classes/ServerMeterView, Classes/FreqScopeView, Classes/Stethoscope
+
+DESCRIPTION::
+Evaluating FonaDyn.calibrate will invoke this class. It opens a separate GUI window for performing SPL calibration and for inspecting incoming signals.
+
+
+CLASSMETHODS::
+
+METHOD:: categories
+(describe method here)
+
+returns:: (describe returnvalue here)
+
+METHOD:: run
+(describe method here)
+
+returns:: (describe returnvalue here)
+
+METHOD:: new
+(describe method here)
+
+ARGUMENT:: voiceMic
+This is the number of the input bus on which the voice is acquired. The default is 0, or the one set by FonaDyn.config.
+
+ARGUMENT:: refMic
+This is the number of the input bus on which the reference mic signal is acquired, when applicable. The default is 1.
+
+returns:: (describe returnvalue here)
+
+
+INSTANCEMETHODS::
+
+METHOD:: gotoScenario
+(describe method here)
+
+ARGUMENT:: nScenario
+(describe argument here)
+
+returns:: (describe returnvalue here)
+
+METHOD:: gotoStep
+(describe method here)
+
+ARGUMENT:: nStep
+(describe argument here)
+
+returns:: (describe returnvalue here)
+
+METHOD:: init
+(describe method here)
+
+ARGUMENT:: voiceMic
+(describe argument here)
+
+ARGUMENT:: refMic
+(describe argument here)
+
+returns:: (describe returnvalue here)
+
+METHOD:: compileSynthDefs
+(describe method here)
+
+returns:: (describe returnvalue here)
+
+METHOD:: createPanel
+(describe method here)
+
+returns:: (describe returnvalue here)
+
+METHOD:: trigBus
+(describe method here)
+
+returns:: (describe returnvalue here)
+
+
+EXAMPLES::
+
+code::
+(some example code)
+::

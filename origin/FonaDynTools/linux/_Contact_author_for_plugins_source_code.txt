@@ -1,0 +1,6 @@
+Please contact me at stern@kth.se for the plugin source codes. 
+I am asking this because I would like to know who is using FonaDyn on Linux,
+and also because the build is not trivial. Hope you don't mind.
+/ST
+
+

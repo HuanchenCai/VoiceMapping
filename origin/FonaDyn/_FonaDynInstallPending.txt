@@ -1,0 +1,9 @@
+This is a stub file whose existence in the <userAppSupportDir>
+serves to flag that FonaDyn.install should be performed.
+It is then automatically deleted from that location.
+
+If this file is present in your <userAppSupportDir> folder, 
+then there was a problem with the scripted FonaDyn installation.
+Try instead following the manual installation procedure 
+that is given in the FonaDyn Handbook. 
+

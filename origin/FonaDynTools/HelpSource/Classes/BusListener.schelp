@@ -1,0 +1,185 @@
+TITLE:: BusListener
+summary:: Listens to a set of buses, grabbing their values at any rate.
+categories:: Tools>BusListener
+related:: Classes/BusListenerDataFormatter, Classes/BusListenerPlotHandler, Classes/BusListenerSoundFileHandler, Classes/BusListenerFileHandler, Classes/BusListenerScopeHandler, Classes/BusListenerCustomHandler
+
+DESCRIPTION::
+Listens to a set of buses using a common gate to know when values should be grabbed. Internally it adds the values to a buffer and lets sclang grab values from that buffer. Works with both a local and remote server.
+
+CLASSMETHODS::
+
+METHOD:: newBusAssignmentTool
+Creates an Event that can be used as a tool to assign buses. This tool is useful if you have mutliple handlers that share some buses.
+
+returns:: The Event that acts as a bus assignment tool.
+
+METHOD:: new
+returns:: A new BusListener
+
+INSTANCEMETHODS::
+
+METHOD:: addHandler
+Adds a handler to the BusListener.
+
+WARNING::
+This function can only be called BEFORE link::#-prepare::!
+::
+
+ARGUMENT:: name
+A UNIQUE name of the handler, so it can be retrieved after being added.
+
+ARGUMENT:: type
+The type of handler.
+
+ARGUMENT::  ... args
+table::
+	## strong::Type::   || strong::Arguments:: 					|| strong::Description::
+
+	## \plot        	||
+	table::
+		## The indices of the buses to plot.
+		## A title for the plot window.
+	::	||
+	Plots the selected buses in a new window when the link::#-stop:: is called. See link::Classes/BusListenerPlotHandler:: for more information.
+
+	## \soundfile      	||
+	table::
+		## The indices of the buses to save.
+		## The path to the Output SoundFile.
+		## The Header format of the SoundFile (See link::Classes/SoundFile#-headerFormat::)
+		## The Sample Format of the SoundFile (See link::Classes/SoundFile#-sampleFormat::)
+	:: ||
+	Streams the selected buses to a soundfile with the given header and sample format. See link::Classes/BusListenerSoundFileHandler:: for more information.
+
+	## \file     		||
+	table::
+		## The indices of the buses to save
+		## The path to the output File.
+	:: ||
+	Streams the selected buses to a readable text file. See link::Classes/BusListenerFileHandler:: for more information.
+
+	## \scope			||
+	table::
+		## The indices of the buses to scope.
+		NOTE:: The first index must be a timestamp. ::
+		## Duration in the format of the timestamp.
+		## Function taking a matrix with the current scope data. The timestamp channel is first, followed by the channels of all other buses.
+	:: ||
+	Manages a matrix with scope data, using a timestamp bus (the first of the given indices) to format the time-axis of the scope and remove old data. See link::Classes/BusListenerScopeHandler:: for more information.
+
+	## \custom			||
+	table::
+		## A function taking a link::Classes/BusListenerDataFormatter:: instance.
+	:: ||
+	A completely custom handler that does nothing but forwards the link::Classes/BusListenerDataFormatter:: to the specified function. See link::Classes/BusListenerCustomHandler:: for more information.
+::
+
+returns:: this
+
+METHOD:: handler
+
+ARGUMENT:: name
+The name of the handler to return.
+
+returns:: The handler with the given name.
+
+METHOD:: prepare
+Prepares the BusListener, this will allocate buffers and setup the SynthDef for the BusListener.
+
+NOTE::
+This function should be called AFTER all calls to link::#-addHandler::!
+::
+
+ARGUMENT:: libname
+The libname where the internal SynthDef should be placed.
+
+ARGUMENT:: server
+The server where the buses are.
+
+ARGUMENT:: iBusArray
+An array of SINGLE CHANNEL BUSES that should be grabbed at the rate determined by iBusGate.
+WARNING:: The buses MUST be single channel buses. I suggest you use link::#*newBusAssignmentTool:: if multi-channel buses are used - this tool automatically handles this issue. ::
+
+ARGUMENT:: iBusGate
+A bus that acts as a gate, whenever the gate is open (> 0) values are grabbed from the server.
+
+ARGUMENT:: clock
+The link::Classes/TempoClock:: that is used internally to queue up requests. A faster link::Classes/TempoClock#-tempo:: results in more frequent updates in the handlers. A fast enough tempo is required for the \scope handler. There is also a good idea to not have a too slow tempo even with only a \plot handler. A faster tempo places less pressure on the server since it reduces the amount of work it needs to do at once. A tempo of at least 10 is recommended.
+
+returns:: this
+
+METHOD:: start
+NOTE::
+This function should ONLY be called AFTER a call to link::#-prepare::!
+::
+
+ARGUMENT:: server
+The server that the link::Classes/Synth:: should be sent to.
+
+ARGUMENT:: target
+The link::Classes/Group:: that the internal link::Classes/Synth:: that grabs values from the buses should be placed into (it is being added with \addToTail, see link::Classes/Synth#*new:: for more information).
+
+METHOD:: stop
+Stops the BusListener and frees up all handlers once all data has been grabbed from the buses. Note that this call will not sync. See link::#-sync:: if synchronization is necessary.
+
+NOTE::
+This function should ONLY be called AFTER a call to link::#-start::!
+::
+
+returns:: this
+
+METHOD:: sync
+Yields until link::#-stop:: has finish grabbing data. It has yet to propagate the acquired data to the handlers.
+
+NOTE::
+This function should ONLY be called AFTER a call to link::#-stop::!
+::
+
+EXAMPLES::
+
+SUBSECTION:: Basic Example
+code::
+(
+s.waitForBoot{
+	var bl = BusListener();
+	var cbus = Bus.control(Server.default, 3);
+	var abus = Bus.audio(Server.default, 4);
+	var gate = Bus.audio(Server.default);
+	var tool = BusListener.newBusAssignmentTool;
+
+	{
+		Out.ar(abus, [SinOsc.ar(40), SinOsc.ar(30), SinOsc.ar(50), SinOsc.ar(10)]);
+		Out.kr(cbus, [Saw.kr(2), Saw.kr(4), Saw.kr(10)]);
+
+		// Grab values ~700 times per second
+		Out.ar(gate, [Trig1.ar(SinOsc.ar(700), 0)]);
+	}.play;
+
+	tool.assign(\Saw2, [cbus.subBus(1)]);
+	tool.assign(\AllSaws, [cbus]);
+	tool.assign(\AllSins, [abus]);
+	tool.assign(\Sin1Saw1, [abus.subBus(0), cbus.subBus(0)]);
+
+	bl
+	.addHandler(\PlotSaw2, \plot, tool.indices(\Saw2))
+	.addHandler(\PlotAllSaws, \plot, tool.indices(\AllSaws))
+	.addHandler(\PlotAllSins, \plot, tool.indices(\AllSins))
+	.addHandler(\PlotSin1Saw1, \plot, tool.indices(\Sin1Saw1));
+
+	fork {
+		bl.prepare(\global, Server.default, tool.buses, gate, TempoClock.default);
+		Server.default.sync;
+		bl.start(Server.default, Server.default.defaultGroup);
+
+		5.yield;
+
+		bl.stop;
+		// Should spawn 4 plots with:
+		// 1) saw # 2
+		// 2) all saws
+		// 3) all sins
+		// 4) saw + sin # 1
+	};
+};
+)
+::

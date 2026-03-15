@@ -1,0 +1,134 @@
+TITLE:: VRPMain
+summary:: Main entry point for the FonaDyn project, the code for which is distributed under EUPL v1.2.
+categories:: FonaDyn
+related:: Classes/VRPContext, Classes/VRPController, Classes/VRPViewMain, Classes/VRPData, Classes/VRPSettings
+
+DESCRIPTION::
+Most FonaDyn-specific classes have names prefixed with "VRP" for "voice range profile", a legacy term for voice maps. The reason is that the SuperCollider language does not support separate name spaces, and so each name must be unique in the entire class library. A prefix "VM" could have been confused with "virtual machine".
+
+The link::Classes/VRPMain:: class mainly serves as an entry point and has very few responsibilities.
+
+The class manages two clocks, mClockControllers for the internal updates handled by the Controller classes, and mClockGuiUpdates for the GUI updates. The GUI updates are handled by the View classes.
+
+Since these two clocks are link::Classes/TempoClock::s, the GUI updates can not be handled directly. Therefore these are dispatched
+via link::Classes/Function#-defer:: to the AppClock, where GUI updates can be made. Since this operation may be too fast (if the GUI updates
+take too long), it is vital to use a lock (mMutexGUI) to make sure that we never initiate a new update while a previous one is still in progress.
+Without this the updates can spiral out of control.
+
+The class also manages the link::Classes/VRPContext::, which contains the link::Classes/VRPModel::, link::Classes/BusManager:: and similar classes.
+Although this class does not update the context itself, it mostly dispatches the members of link::Classes/VRPContext:: to the controllers and views in link::#-updateData::.
+
+Finally, since link::Classes/VRPMain:: manages the link::Classes/VRPModel:: it also needs to manage the main window. This is easy to understand since closing the window should result
+in stopping the clocks. Hence it needs to know when the main window is closed. This can obviously be handled in a different manner, but it is fairly logical to have the
+main window managed by link::Classes/VRPMain::. The contents of the main window are still dispatched to link::Classes/VRPViewMain::.
+
+For consistency, all classes are prefixed with their intended job:
+table::
+	## strong::Prefix:: || strong::Main Class:: || strong::Classes:: || strong::Job::
+	## VRPView* || link::Classes/VRPViewMain:: ||
+		link::Classes/VRPViewMainMenu::
+		link::Classes/VRPViewCluster::
+		link::Classes/VRPViewClusterPhon::
+		link::Classes/VRPViewPlots::
+		link::Classes/VRPViewMovingEGG::
+		link::Classes/VRPViewVRP::
+
+		link::Classes/VRPViewMaps::
+		link::Classes/VRPViewPlayer::
+		||
+		The purpose of these classes is to split the work of presenting information in the GUI. These classes have several fixed functions described in link::Classes/VRPViewMain::. The main menu itself is split into 3 sub-views since it contains a large number of settings.
+	## VRPViewMainMenu* || link::Classes/VRPViewMainMenu:: ||
+		link::Classes/VRPViewMainMenuGeneral::
+		link::Classes/VRPViewMainMenuInput::
+		link::Classes/VRPViewMainMenuOutput::
+		||
+		The purpose of these three classes is to split the menu into three sections. These can be seen as three rows of controls in the main window. The top view is the general view, and contains general settings, such as the general output directory and swapping between different styles of presenting the views (Tiled, Gallery, One graph etc). Below this view is the input view, which holds controls connected to input for the program. This can be one of four types of inputs explained in link::Classes/VRPViewMainMenuInput::. Similarly the final output view contains controls controlling what output is written, and where. The formats of all output files are documented in link::Classes/VRPViewMainMenuOutput::.
+	## VRPSD* || strong::None:: ||
+		link::Classes/VRPSDCluster::
+		link::Classes/VRPSDClusterPhon::
+		link::Classes/VRPSDCSDFT::
+
+		link::Classes/VRPSDIO::
+		link::Classes/VRPSDPostProcessing::
+		link::Classes/VRPSDSampEn::
+		link::Classes/VRPSDScope::
+
+		link::Classes/VRPSDVRP::
+		||
+		The purpose of the VRPSD* classes is to keep the link::Classes/SynthDef:: implementations separated from the controllers. This simplifies the management and appearance of the VRPController* classes.
+	## VRPData* || link::Classes/VRPData:: ||
+		link::Classes/VRPDataCluster::
+		link::Classes/VRPDataClusterPhon::
+		link::Classes/VRPDataCSDFT::
+		link::Classes/VRPDataGeneral::
+
+		link::Classes/VRPDataIO::
+		link::Classes/VRPDataScope::
+		link::Classes/VRPDataVRP::
+		link::Classes/VRPDataPlayer::
+		link::Classes/VRPDataClusterMap::
+		||
+		The purpose of the VRPData* classes is to contain all information required by the GUI. This is the way that VRPController*s communicate with the VRPView*s. link::Classes/VRPData:: also contains a deep copy of the link::Classes/VRPSettings::, in order to ensure that we never change the settings while they are being used. Hence the link::Classes/VRPData#-settings:: member should never be updated. Note that this allows us to alter settings in the GUI while the server is running. This behaviour is not recommended though, since the settings in the GUI won't correspond to those used by the server.
+	## VRPSettings* || link::Classes/VRPSettings:: ||
+		link::Classes/VRPSettingsCluster::
+		link::Classes/VRPSettingsClusterPhon::
+		link::Classes/VRPSettingsCSDFT::
+		link::Classes/VRPSettingsGeneral::
+		link::Classes/VRPSettingsIO::
+		link::Classes/VRPSettingsPlots::
+		link::Classes/VRPSettingsSampEn::
+		link::Classes/VRPSettingsScope::
+		link::Classes/VRPSettingsVRP::
+		link::Classes/VRPSettingsPlayer::
+		||
+		The purpose of these classes is to contain all settings required to start the server. It also contains one separate file VRPSettingsSanityCheck.sc, which has two purposes. Before the settings are used, they need to be verified to be correct. An example of this is the number of harmonics used. We need to ensure ourselves that we always generate more harmonics than are being used by the sample entropy and clustering link::Classes/SynthDef::s. Hence this is being fixed by the sanityCheck. It will also return failure if we have any contradicting or invalid settings. This check acts as a final protection against potentially hard to locate bugs, only caused by poor settings (such as a negative amount of harmonics being used or similar).
+	## VRPController* || link::Classes/VRPController:: ||
+		link::Classes/VRPControllerCluster::
+		link::Classes/VRPControllerClusterPhon::
+		link::Classes/VRPControllerCSDFT::
+		link::Classes/VRPControllerIO::
+		link::Classes/VRPControllerPostProcessing::
+		link::Classes/VRPControllerSampEn::
+		link::Classes/VRPControllerPlots::
+		link::Classes/VRPControllerVRP::
+		||
+		The purpose of the VRPController*s is to manage the SynthDefs on the server, and get the data from the server to the client for presentation. This includes allocating and freeing buffers, writing results to files, streaming data from the server to the client for presentation etc. The main functions in the VRPController*s are explained in link::Classes/VRPController::.
+	## VRPMetric* || link::Classes/VRPMetric:: ||
+		link::Classes/MetricClarity::
+		link::Classes/MetricClusterEGG::
+		link::Classes/MetricClusterPhon::
+		link::Classes/MetricCPP::
+		link::Classes/MetricCrest::
+		link::Classes/MetricDensity::
+		link::Classes/MetricHRFegg::
+		link::Classes/MetricIc::
+		link::Classes/MetricQci::
+		link::Classes/MetricQdelta::
+		link::Classes/MetricSampEn::
+		link::Classes/MetricSpecBal::
+		||
+		The purpose of the Metric*s is to collect all the user interface aspects of each metric in one place. The main functions in the Metric*s are explained in link::Classes/VRPMetric::.
+::
+
+image::VRPClasses.png#Figure 1: Settings are information sent to the server to control the processing.
+When the server is started, the settings are deep-copied and cannot be changed during a run.
+Data are results of the processing, sent from the server.::
+
+CLASSMETHODS::
+
+METHOD:: new
+Constructs a link::Classes/VRPMain:: instance and instantly starts its main loop.
+
+returns:: a link::Classes/VRPMain:: instance
+
+
+INSTANCEMETHODS::
+
+METHOD:: updateData
+The main update function for the GUI. It handles starting and stopping the server when settings have been changed in the settings, as well as propagating data to the VRPView*s and VRPController*s. Note that this function should not be called.
+
+EXAMPLES::
+
+code::
+VRPMain();
+::

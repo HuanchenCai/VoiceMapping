@@ -1,0 +1,158 @@
+TITLE:: KMeansRTv2
+summary:: An improved version of KMeansRT.
+categories:: UGens>Analysis
+related:: Classes/KMeansRT
+
+DESCRIPTION::
+Performs online k-means classification, classifying each datapoint that comes in and updating the k-means centroids.
+The method is described in Algorithm B.1 of Brian McFee's 2012 thesis (http://cseweb.ucsd.edu/~bmcfee/papers/bmcfee_dissertation.pdf ). McFee calls it "online Hartigan k-means".
+
+CLASSMETHODS::
+
+METHOD:: allocBuffer
+Allocates a buffer suitable for link::#*ar:: and link::#*kr::.
+
+ARGUMENT:: server
+The server where the buffer should be allocated.
+
+ARGUMENT:: nDimensions
+The dimensionality of the input points.
+
+ARGUMENT:: nClusters
+The number of clusters.
+
+ARGUMENT:: initType
+table::
+	## strong::Tag:: || strong::Description:: || strong::Arguments::
+	## \zero (Default)
+	||
+	Zero's out the buffer. This yields the same result as running with link::Classes/KMeansRT::.
+	||
+	No arguments
+	## \set
+	||
+	Initializes the buffer with the contents of the matrix argument.
+	||
+	table::
+		## strong::#:: || strong::Description::
+		## 0 || An (nDimensions x nClusters) matrix initialized with some values. The matrix should be formatted with nDimensions floats + one count for each row. See the algorithm for more information.
+	::
+::
+
+ARGUMENT::  ... args
+See initType.
+
+returns:: The newly allocated and initialized buffer.
+
+METHOD:: kr
+ARGUMENT:: bufnum
+The buffer number for the buffer allocated with link::#*allocBuffer::.
+
+ARGUMENT:: inputdata
+An array representing the input point - these can be either audio or control rate.
+
+ARGUMENT:: nClusters
+Scalar giving the number of clusters.
+
+ARGUMENT:: gate
+The UGen is active while gate > 0. While <=0, no search is performed and output is held steady. This can be either scalar 1 (always active), control or audio rate.
+
+ARGUMENT:: reset
+If reset is greater than 0, the "flexibility" of the centroids is reset back to initial values (as if no data had been received). This means setting the internal counts to zero. The larger the count, the less impact new points have. This can be either scalar 0 (never reset), control or audio rate.
+
+ARGUMENT:: learn
+Controls whether the unit is learning from its input. If you set this to zero it will not learn, but will still output decisions. This is useful for applying a previously-learned clusterer without modifying it. This argument cannot be modulated (must be scalar 0 or 1).
+
+NOTE::There is a difference from link::Classes/KMeansRT:: here, in that you can continue learning using a pre-learned buffer.::
+
+returns:: The cluster index assigned to the current input point. If multiple points have been read during the control period, the cluster index of the last point is returned.
+
+METHOD:: krGetCentroid
+See link::Classes/KMeansRT#*getCentroid::.
+
+ARGUMENT:: bufnum
+The buffer number for the buffer allocated with link::#*allocBuffer::.
+
+ARGUMENT:: classif
+The classification index from link::#*kr::.
+
+ARGUMENT:: nDimensions
+The dimensionality of the clusters.
+
+returns:: The nDimensions-dimensional centroid of the cluster with index classif.
+
+METHOD:: ar
+ARGUMENT:: bufnum
+The buffer number for the buffer allocated with link::#*allocBuffer::.
+
+ARGUMENT:: inputdata
+An array representing the input point - these can be either audio or control rate.
+
+WARNING::Depending on the gate, the same input point will be used multiple times in the control period if a control rate input is used.::
+
+ARGUMENT:: nClusters
+Scalar giving the number of clusters.
+
+ARGUMENT:: gate
+The UGen is active while gate > 0. While <=0, no search is performed and output is held steady. This can be either scalar 1 (always active), control or audio rate.
+
+ARGUMENT:: reset
+If reset is greater than 0, the "flexibility" of the centroids is reset back to initial values (as if no data had been received). This means setting the internal counts to zero. The larger the count, the less impact new points have. This can be either scalar 0 (never reset), control or audio rate.
+
+ARGUMENT:: learn
+Controls whether the unit is learning from its input. If you set this to zero it will not learn, but will still output decisions. This is useful for applying a previously-learned clusterer without modifying it. This argument cannot be modulated.
+
+NOTE::There is a difference from link::Classes/KMeansRT:: here, in that you can continue learning using a pre-learned buffer.::
+
+returns:: The cluster index assigned to the current input point.
+
+METHOD:: arGetCentroid
+See link::Classes/KMeansRT#*getCentroid::.
+
+ARGUMENT:: bufnum
+The buffer number for the buffer allocated with link::#*allocBuffer::.
+
+ARGUMENT:: classif
+The classification index from link::#*ar::.
+
+ARGUMENT:: nDimensions
+The dimensionality of the clusters.
+
+returns:: The nDimensions-dimensional centroid of the cluster with index classif.
+
+INSTANCEMETHODS::
+
+
+EXAMPLES::
+
+subsection::Modified example from KMeansRT
+code::
+s.boot;
+k = 5;
+~ndims = 1;
+b = Buffer.read(s, Platform.resourceDir +/+ "sounds/a11wlk01.wav");
+~kbuf = KMeansRTv2.allocBuffer(s, ~ndims, k);
+
+(
+x = {
+    var sig, chain, chaintrig, features, kbuf, classif, centroid, resynth;
+
+    // sig = AudioIn.ar;
+    sig = PlayBuf.ar(1, b, loop: 1);
+    chain = FFT(LocalBuf(512), sig);
+    chaintrig = chain > -0.001;
+
+    features = [SpecCentroid.kr(chain)]; // just one 1D feature here
+    classif = KMeansRTv2.kr(~kbuf, features, k, chaintrig);
+    classif.poll(chaintrig);
+
+    // Now we read the centroid position back out of the buffer and sonify
+    centroid = KMeansRTv2.krGetCentroid(~kbuf, classif, ~ndims).at(0);
+
+    resynth = SinOsc.ar(centroid, 0, 0.1);
+    [sig, resynth]
+}.play
+)
+
+x.free
+::

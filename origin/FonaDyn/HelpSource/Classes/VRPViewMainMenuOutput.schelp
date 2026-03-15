@@ -1,0 +1,211 @@
+TITLE:: VRPViewMainMenuOutput
+summary:: The View for the output part of the main menu of the VRP window.
+categories:: FonaDyn>Views
+related:: Classes/VRPViewMain, Classes/VRPViewMainMenu, Classes/VRPViewMainMenuGeneral, Classes/VRPViewMainMenuInput
+
+DESCRIPTION::
+There are six types of time-series outputs. The first output type is simply echoing or playing back the recording. The remaining five are output file formats as explained below.
+The files are written at one of three rates: "Audio Rate" - meaning the system audio sampling rate; "Good Cycle Rate" - one frame from each good cycle, which means the output has a connection to the cycle rather than the EGG signal itself; and "Log Rate" - selectable as Good Cycle Rate; or one of 50, 100 or 300 Hz.
+
+For more information on how these two rates are connected, see "Connection Between Rates via Gates" below.
+
+One reason for storing the information at different rates is hard drive space. We could in theory write all the data at audio rate, but this would be inefficient since the information pertaining to cycles only changes on every new cycle. Another reason behind this choice, is that we are discarding cycles, which complicates things even more. The final reason is that we can store the the information required to connect the two rates with less bits spent on samples. FonaDyn normally uses 24-bit integers to store the audio rate data and 32 bit floating point values to store data at the "Good Cycle Rate".
+
+subsection::Log
+This generates a multichannel file as an AIFF file of 32-bit floats. The file contains the intermediate analysis results for audio and EGG cycle measurements. The file will have "_Log.aiff" as a postfix. The float values are in the units given, that is, they are not constrained to +/- 1.0 as would be the case for an audio file. The frames can be cycle-synchronous, containing only 'good cycles', or fixed-rate at 50, 100 or 300 Hz.
+
+To enable logging, press the "Log off" button. You can cycle the button through the choices of frame rates. If either of the clustering panels has "Learning: On", then a warning is issued that cluster numbers will be inconsistent over the duration of the Log file, since learning shifts the cluster centroids.
+
+Using strong::n:: harmonics to represent the EGG wave shapes, FonaDyn versions 3.0.1 and higher write Log files in the following format. From FonaDyn v3.5, a frame of metadata is added at the beginning of the Log file.
+
+table::
+	## strong::Channel #:: || strong::Content:: || strong::Meta-data:: in frame 0
+	## 0 || The time in seconds from START at the end of the most recent EGG cycle [s]. If the recording is longer than about six minutes, the precision of this value is not high enough to represent a unique audio sample point. || -1.0 indicates that the frame contains metadata. This can happen only in the first frame.
+	## 1 || The fundamental frequency, fo. New fo values are computed every 23 ms. [MIDI note number, with fraction] || The major version of FonaDyn that wrote this Log-file.
+## 2 || The estimated audio signal level when the EGG cycle started. This is in decibels relative to full scale, and is always negative. If the recording level was correctly calibrated, you can obtain the true SPL by adding 120; or, if strong::singerMode:: is true, add 140. || The number of dB to add to get the true SPL (120 or 140).
+	## 3 || The clarity measurement when the EGG cycle ended. [0...1; but cycles below threshold are not stored] || The clarity threshold used
+## 4 || The crest factor estimation when the EGG cycle ended. || (not used)
+## 5 || The spectrum balance value when the EGG cycle ended [dB, usually <0 (as float)] || (not used)
+	## 6 || The CPP value. New CPP values are computed every 23 ms.  [dB, usually +8...+30 (as float)] || -1 for CPP, -2 for CPPs
+	## 7 || The EGG waveshape cluster of this cycle. [integer 0...N-1 (as float)] || The number of EGG clusters
+	## 8 || The phonation type cluster of this cycle. [integer 0...M-1 (as float)] || The number of phonation type clusters
+## 9 || The SampEn (CSE) measurement for this cycle. [a non-negative float] || The scaling factor for CSE (not yet used)
+	## 10 || The iContact (Ic) measurement for this cycle. [a float >= 0] || Check voicing: -1 for off, +1 for on
+## 11 || The dEGGmax (Qdelta) measurement for this cycle. [a float >= 0; rarely <1] || The de-noising threshold used (dBFS)
+## 12 || The qContact (Qci) measurement for this cycle. [a float between 0 and 1] || 1.0 if de-noised, else 0.0
+	## [13,13+strong::n::-1] || The levels in Bels of each of the strong::n:: harmonics produced. || The number of EGG harmonics with which the Log file was made.
+	## 13+strong::n:: || The summed power level in Bels of harmonics 2...n, excluding the first (note *) || :
+	## [13+strong::n::+1, 13+2*strong::n::] || The phases in radians in the range (-pi, pi] for each of the strong::n:: harmonics produced. || :
+	## 13+2*strong::n::+1 || The phase in radians of the fundamental relative to the cycle trigger point || :
+::
+
+With the default number of 10 EGG harmonics, Log files have 35 tracks, indexed as 0..34.
+
+strong::Important::: The track order listed here may change when a new FonaDyn version introduces a new metric. A string array with the current names of tracks 1..12 is returned by the method VRPSDIO.getAllLogMetricNames, but only when FonaDyn is running.
+
+Since this data is not isochronous, or has a low frame rate, channel 0 contains the frame times, to enable external plotting with a time axis in seconds. The file header will contain 44100 Hz as the frame rate, which is strong::not:: the case. The data from this first channel can be used as a time track also to the other 'Good Cycle Rate' file types.
+
+*) The HRF-egg metric is not stored in Log files, but can easily be obtained as (channel_(13+n) - channel_(13))*10 . The HRF-egg value is in Bels relative to the level of the EGG fundamental. HRF stands for "Harmonic Richness Factor".
+
+subsection::Recording
+This file type contains the recording with the following output as a WAV file with 24-bit integers for the samples. These files have "_Voice_EGG.wav" as a postfix.
+table::
+	## strong::Channel #:: || strong::Content::
+	## 0 || The raw Audio input signal.
+	## 1 || The raw EGG input signal.
+::
+
+It is possible to re-record a file when analyzing from a file. In this case, the conditioned signals are written instead (audio: 30Hz HP; EGG: 100 Hz brickwall HP, 10 kHz steep LP, and de-noising by spectral thresholding). This enables you to inspect the effect of the signal conditioning.
+
+subsection::Extra
+This file type contains extra channels taken directly from those hardware inputs, if any, that are listed in the strong::Settings...:: dialog box. The bit width will be 16, and the sampling rate is typically low, as chosen from the drop-down list in that box. The sampling rate can instead be chosen as 44100 Hz, in which case the bit width follows that of the strong::Recording:: file type. Files of this type are given a file name beginning with the same time stamp as for strong::Recording:: files, but ending in "_Extra.wav" rather than "_Voice_EGG.wav".
+
+
+The remaining output file type is accessible only when "Show additional diagnostic features" is checked in the strong::Settings...:: dialog box.
+
+subsection::Cycle Detection
+This file contains the following output as a WAV file with 16 bit integers for the samples. These files have "_CycleDetection.wav" as a postfix.
+table::
+	## strong::Channel #:: || strong::Content::
+	## 0 || The conditioned EGG signal, after all filtering and de-noising.
+	## 1 || The gate signal used to separate the EGG signal into cycles. This signal is one whenever a new cycle begins.
+::
+
+subsection::Connection Between Rates via Gates
+While it might seem strange to split the information into several files, it is not hard to combine the information.
+If the files are written at the same rate - there is no problem, the problems arise when the files are written in different rates.
+There is a final special output file type called "Gates". strong::[This file type is deprecated as of v3.3.1]::. If its output is enabled in the Settings dialog, a Gates file is written when any "Good Cycle Rate" files are written. The Gates file holds the information required to connect a "Good Cycle" to its exact position on the EGG signal.
+
+It accomplishes this task via three gates. The cycle gate holds the cycle separation information. This is the exact same signal written into channel 1 of the CycleDetection file. The delayed cycle gate holds the same information as the first gate in a way. For each spike (1) in the cycle gate gate, the delayed cycle gate will also have a spike, but delayed by an unknown amount. There is one exception, which can be seen in figure 1, namely at the end of the recording. This problem arises since the DFT output did not have enough time on the server to be calculated, hence there is no matching output for this cycle, hence it can be seen as a clipped cycle. Thus the delayed cycle gate tells us when the DFT plugin has computed the results for that cycle, or when it was forced to skip the cycle (due to its length). The filtered DFT gate tells us which cycles were removed from consideration due to other aspects, such as poor clarity. This gate will only have spikes where the delayed cycle gate has spikes. If the delayed cycle gate has a spike where the filtered DFT gate does not, it means that the cycle the spike represented was discarded for some reason.
+
+image::gates.png#Figure 1: The three gates. Note that we have one too short cycle, one discarded cycle and one clipped cycle.::
+
+This gate file contains the following output as a WAV file with 16 bit integers for the samples. These files have "_Gates.wav" as a postfix.
+table::
+	## strong::Channel #:: || strong::Content::
+	## 0 || The raw EGG signal
+	## 1 || The conditioned EGG signal (this is the signal used in the DFT calculations)
+	## 2 || The Cycle Gate
+	## 3 || The Delayed Cycle Gate
+	## 4 || The Filtered DFT Gate
+::
+
+subsection::MATLAB Gate Example
+code::
+% Read data
+[data, samplerate] = audioread(gates);
+[frames, channels] = size(data);
+
+rawegg = data(:, 1);
+condegg = data(:, 2);
+gc = data(:, 3);
+gdc = data(:, 4);
+gfdft = data(:, 5);
+
+% Find # of cycles
+n = 0;
+for i=1:frames
+    if gc(i) > 0
+       n = n + 1;
+    end
+end
+
+% Fill a matrix with cycle ranges
+idx = 1;
+cycles = ones(n, 2);
+first = 1;
+for i=1:frames
+    if gc(i) <= 0
+       continue;
+    end
+
+    cycles(idx, 1) = first;
+    cycles(idx, 2) = i - 1;
+    first = i;
+    idx = idx + 1;
+end
+
+% Allocate matrix for separating good and discarded cycles
+goodc = ones(n, 2);
+discardedc = ones(n, 2);
+
+idx = 1;
+goodidx = 1;
+discardedidx = 1;
+for i=1:frames
+    if gdc(i) <= 0
+        continue;
+    end
+
+    % We have a cycle
+    if gfdft(i) > 0
+        % Good cycle
+        goodc(goodidx, :) = cycles(idx, :);
+        goodidx = goodidx + 1;
+    else
+        % Discarded cycle
+        discardedc(discardedidx, :) = cycles(idx, :);
+        discardedidx = discardedidx + 1;
+    end
+
+    idx = idx + 1;
+end
+
+fprintf('We have %d good, %d discarded and %d clipped cycles!\nPlotting three random good and discarded cycles.\n', ...
+		goodidx - 1, discardedidx - 1, n - (goodidx + discardedidx - 2) );
+
+% Plot good cycles
+figure;
+idx = 1;
+a = 1;
+b = goodidx - 1;
+
+for i = 1:3
+    r = round( (b - a).*rand(1, 1) + a );
+    cycle = goodc( r, : );
+    subplot(3, 2, idx);
+    plot( rawegg( cycle(1):cycle(2) ) );
+    title( sprintf('Raw EGG: Good cycle #%d', ceil( idx / 2 ) ) );
+    idx = idx + 1;
+    subplot(3, 2, idx);
+    plot( condegg( cycle(1):cycle(2) ) );
+    title( sprintf('Conditioned EGG: Good cycle #%d', ceil( idx / 2 ) ) );
+    idx = idx + 1;
+end
+
+% Plot discarded cycles
+figure;
+idx = 1;
+a = 1;
+b = discardedidx - 1;
+
+for i = 1:3
+    r = round( (b - a).*rand(1, 1) + a );
+    cycle = discardedc( r, : );
+    subplot(3, 2, idx);
+    plot( rawegg( cycle(1):cycle(2) ) );
+    title( sprintf('Raw EGG: Discarded cycle #%d', ceil( idx / 2 ) ) );
+    idx = idx + 1;
+    subplot(3, 2, idx);
+    plot( condegg( cycle(1):cycle(2) ) );
+    title( sprintf('Conditioned EGG: Discarded cycle #%d', ceil( idx / 2 ) ) );
+    idx = idx + 1;
+end
+::
+
+INSTANCEMETHODS::
+
+METHOD:: fetch
+The fetch member function has one purpose, to let the VRPView*s update the VRPSettings*.
+
+ARGUMENT:: settings
+An instance of the link::Classes/VRPSettings:: to update.
+
+METHOD:: updateData
+The updateData member function has one purpose, to let the VRPView*s update their contents based on the current VRPData*.
+
+ARGUMENT:: data
+An instance of the link::Classes/VRPData::.
+
+METHOD:: close
+This function is called when the view should close.

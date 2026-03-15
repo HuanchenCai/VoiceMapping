@@ -1,0 +1,137 @@
+TITLE:: VRPViewMaps
+summary:: Manages the display of multiple voice maps
+categories:: FonaDyn>Views
+related:: Classes/VRPViewMain, Classes/VRPViewVRP
+
+DESCRIPTION::
+This class manages the layout and display of multiple voice maps, i.e., multiple instances of link::Classes/VRPViewVRP::.
+To toggle the visibility of more maps, the user can press Alt-key commands.
+
+Alt-T: a Twin map that follows the current (Now) map but can display a different layer.
+
+Alt-Shift-T: also a Twin map, but in a window of its own, that can be moved to another display screen.
+
+Alt-B: a Before map that is a static clone of the the current Now map, and can Load any other existing map.
+
+Alt-D: a Diff map that computes the cell-by-cell difference (or ratio) between Now and Before.
+
+Alt-S: a Smoothed and interpolated version of the Now map, with fewer holes and less noise
+
+CLASSMETHODS::
+
+METHOD:: new
+(describe method here)
+
+ARGUMENT:: view
+(describe argument here)
+
+returns:: (describe returnvalue here)
+
+
+INSTANCEMETHODS::
+
+METHOD:: layout
+(describe method here)
+
+returns:: (describe returnvalue here)
+
+METHOD:: stash
+(describe method here)
+
+ARGUMENT:: settings
+(describe argument here)
+
+returns:: (describe returnvalue here)
+
+METHOD:: removeMap
+(describe method here)
+
+ARGUMENT:: index
+(describe argument here)
+
+returns:: (describe returnvalue here)
+
+METHOD:: updateData
+(describe method here)
+
+ARGUMENT:: data
+(describe argument here)
+
+returns:: (describe returnvalue here)
+
+METHOD:: fetch
+(describe method here)
+
+ARGUMENT:: settings
+(describe argument here)
+
+returns:: (describe returnvalue here)
+
+METHOD:: setStackMode
+(describe method here)
+
+ARGUMENT:: bStacked
+(describe argument here)
+
+returns:: (describe returnvalue here)
+
+METHOD:: update
+(describe method here)
+
+ARGUMENT:: menu
+(describe argument here)
+
+ARGUMENT:: who
+(describe argument here)
+
+ARGUMENT:: whatHappened
+(describe argument here)
+
+ARGUMENT:: newValue
+(describe argument here)
+
+returns:: (describe returnvalue here)
+
+METHOD:: close
+(describe method here)
+
+returns:: (describe returnvalue here)
+
+METHOD:: toggleMap
+(describe method here)
+
+ARGUMENT:: mode
+(describe argument here)
+
+returns:: (describe returnvalue here)
+
+METHOD:: init
+(describe method here)
+
+ARGUMENT:: view
+(describe argument here)
+
+returns:: (describe returnvalue here)
+
+METHOD:: setActiveTab
+(describe method here)
+
+ARGUMENT:: btn
+(describe argument here)
+
+returns:: (describe returnvalue here)
+
+METHOD:: addMap
+(describe method here)
+
+ARGUMENT:: mode
+(describe argument here)
+
+returns:: (describe returnvalue here)
+
+
+EXAMPLES::
+
+code::
+(some example code)
+::

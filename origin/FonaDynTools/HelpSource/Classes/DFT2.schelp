@@ -1,0 +1,46 @@
+TITLE:: DFT2
+summary:: Calculates the Discrete Fourier Transform per cycle.
+categories:: UGens>Analysis
+related:: Classes/FFT
+
+DESCRIPTION::
+Splits an input signal into cycles, and calculates the Discrete Fourier Transform for each cycle. The output is delayed for efficiency reasons. Hence the DFT result is not returned at the end of the cycle, but rather at some later point in time. It is however less than 1/minFrequency seconds after the cycle ended.
+
+The cycle separation is handled by a gate, and two new gates are returned. Two gates are necessary, since we may be required to skip past a cycle if it is too long (more than 1/minFrequency seconds in length). This limitation is required because of internal buffering. The first of the two output gates is open whenever DFT output is available for a valid cycle. The other gate is open whenever a too short/long cycle was skipped. These gates are never open at the same time. The gates can be combined to form a one to one match with the input gate.
+
+image::DFT2Gates.png#Figure 1: An illustration of the relationship between the signal, input gate and output gates.::
+
+CLASSMETHODS::
+
+METHOD:: ar
+
+ARGUMENT:: in
+The input signal.
+
+ARGUMENT:: gate
+A gate indicating when a new cycle begins.
+
+ARGUMENT:: kArray
+An array of the frequencies we are considering for the Discrete Fourier Transform.
+
+ARGUMENT:: minFrequency
+The minimum frequency allowed for the cycle (internally this is converted into the maximum number of samples).
+
+NOTE::This controls the allocation of buffers internally.::
+
+ARGUMENT:: minSamples
+The minimum number of samples required for a cycle to be valid. Shorter cycles are treated as erronous and are skipped.
+
+returns:: This UGen outputs several results. The first two outputs is the two gates described in the description. The first gate is open whenever DFT output is available. The second gate is open whenever a cycle was skipped due to its length. Directly following the gates is the length of the returned cycle (in samples). This length is guaranteed to be in the range [minSamples, SampleRate/minFrequency]. Following the gate is the complex numbers. The complex numbers are represented by two values, the real and imaginary component. Hence it is returned as [real0, imag0, real1, imag1, real2, imag2, ...].
+The code below shows how the returned data can be captured.
+
+code::
+var gDFT; // Open when DFT is available in res
+var gSkipped; // Open when a cycle was skipped due to its length
+var length; // The length of the DFT cycle being returned. This is only valid when gDFT is open.
+var res; // The complex numbers as an array. These are only valid when gDFT is open.
+var complex; // The complex numbers
+
+#gDFT, gSkipped, length ...res = DFT2.ar(in, gate, (1..4), minFrequency, minSamples);
+complex = 4 collect: { | i | Complex(res[2*i], res[2*i+1]) };
+::

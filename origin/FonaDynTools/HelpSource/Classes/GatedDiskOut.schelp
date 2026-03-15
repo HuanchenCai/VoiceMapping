@@ -1,0 +1,53 @@
+TITLE:: GatedDiskOut
+summary:: DiskOut with a gate.
+categories:: UGens>InOut, UGens>Buffer
+related:: Classes/DiskOut
+
+DESCRIPTION::
+Records to a soundfile on disk. Uses a link::Classes/Buffer:: for temporary storage, to avoid many small disk-writes.
+
+There are four differences between link::Classes/DiskOut:: and link::Classes/GatedDiskOut::. The first difference is the use of a gate, to control when the UGen is active. Secondly it does not require link::Classes/Buffer#-numFrames:: to be a power of two. There is also an undocumented limit on the number of channels in link::Classes/DiskOut:: (32), this limitation has been removed in link::Classes/GatedDiskOut::. Finally link::Classes/GatedDiskOut:: will initiate a final write (of the remaining contents of the buffer) when its link::Classes/Synth:: is freed. link::Classes/DiskOut:: simply discards any data still left in the link::Classes/Buffer:: when its link::Classes/Synth:: is freed. Since both classes recommend that the link::Classes/Buffer:: should hold several seconds worth of samples, link::Classes/DiskOut:: will lose this information, while link::Classes/GatedDiskOut:: doesn't. Since this write is only initated, it is vital that you do strong::not:: call link::Classes/Buffer#-close:: or link::Classes/Buffer#-free:: immediately after freeing the link::Classes/Synth::, since this results in a race condition. It is recommended to wait for a short duration to ensure that the disk can write the contents of the buffer to file.
+
+CLASSMETHODS::
+
+METHOD:: ar
+ARGUMENT:: bufnum
+The number of the buffer to write to (prepared with link::Classes/Buffer#-write::).
+
+NOTE::The link::Classes/Buffer::s link::Classes/Buffer#-numFrames:: is strong::NOT:: required to be a power of two, but is recommended to be large enough to hold one or several seconds worth of output. Smaller buffer sizes mean more frequent disk access, which can cause glitches.
+::
+
+ARGUMENT:: gate
+This is the main difference between link::Classes/DiskOut:: and link::Classes/GatedDiskOut::. The gate controls when data is fetched from the channelsArray to be written to disk. With gate = 1 this UGen is strong::almost:: equivalent to link::Classes/DiskOut::.
+
+ARGUMENT:: channelsArray
+An array of channels to write to the file.
+
+NOTE::The number of channels in the link::Classes/Buffer:: and the channelsArray must be the same, otherwise link::Classes/GatedDiskOut:: will fail silently (and not write anything to your file).
+::
+
+INSTANCEMETHODS::
+
+
+EXAMPLES::
+
+code::
+n = 36; // # of channels to write to disk
+(
+s.waitForBoot{
+	var buf = Buffer.alloc(Server.default, 131072, n);
+	var synth;
+	buf.write(thisProcess.platform.recordingsDir +/+ "multiout.aiff", "aiff", "int16", 0, 0, true);
+	synth = {
+		var s = SinOsc.ar();
+		GatedDiskOut.ar(buf, 1, s ! n);
+	}.play;
+
+	10.yield; // ~10 seconds worth of recording.
+	synth.free;
+	1.yield; // Wait one second to ensure that all data has been written to disk
+	buf.close; // ...before we close and free the buffer.
+	buf.free;
+};
+)
+::

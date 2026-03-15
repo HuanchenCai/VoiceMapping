@@ -1,0 +1,27 @@
+TITLE:: VRPViewMainMenuInput
+summary:: The View for the input part of the main menu of the VRP window.
+categories:: FonaDyn>Views
+related:: Classes/VRPViewMain, Classes/VRPViewMainMenu, Classes/VRPViewMainMenuGeneral, Classes/VRPViewMainMenuOutput
+
+DESCRIPTION::
+There are four different ways of getting input: (1) recording, which utilizes a microphone and electroglottograph for input; (2) "From File" to be used when we wish to analyze an existing recording; (3) taking a batch of files and analyzing them in automatic sequence; and (4) using a script file to control a sequence of files and settings. Select the desired input mode using the strong::Source:: list.
+
+By default, the recording requires that the microphone be on audio input channel 0 and EGG signal on audio input channel 1. This can be changed in the Settings dialog, or with FonaDyn.config statements in the SC startup file. When using file input, the file always must contain the acoustic voice signal on channel 0 and the EGG signal on channel 1.
+
+
+INSTANCEMETHODS::
+
+METHOD:: fetch
+The fetch member function has one purpose, to let the VRPView*s update the VRPSettings*.
+
+ARGUMENT:: settings
+An instance of the link::Classes/VRPSettings:: to update.
+
+METHOD:: updateData
+The updateData member function has one purpose, to let the VRPView*s update their contents based on the current VRPData*.
+
+ARGUMENT:: data
+An instance of the link::Classes/VRPData::.
+
+METHOD:: close
+This function is called when the view should close.

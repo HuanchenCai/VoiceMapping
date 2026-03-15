@@ -1,0 +1,121 @@
+TITLE:: FonaDyn
+summary:: Install, configure, run or uninstall the FonaDyn class library
+categories:: FonaDyn
+related:: Classes/VRPMain
+
+DESCRIPTION::
+For guidance on using the FonaDyn application, please read the "FonaDyn Handbook". It is included as a PDF file in the distribution ZIP archive.
+
+This is a wrapper class for convenient installation, starting and calibration of the FonaDyn application. It can not be instantiated.
+
+CLASSMETHODS::
+
+METHOD:: install
+This method assumes that the folders 'FonaDyn' and 'FonaDynTools' from the distribution ZIP file have been saved into the user or system Extensions folder. It performs a few checks and copies a few extra files into better locations.
+
+METHOD:: uninstall
+NOTE: It is important to run this method before updating to a new version of FonaDyn. This method deletes without asking the entire folders 'FonaDyn' and 'FonaDynTools' in whichever Extensions folder they are, and restores files modified by FonaDyn.install.
+
+METHOD:: run
+This is a convenience wrapper method which sets a PATH and then invokes VRPMain.new(false), where false means that previously saved settings are not restored.
+
+METHOD:: rerun
+This is a convenience wrapper method which sets a PATH and then invokes VRPMain.new(true), where true means that previously saved settings are restored.
+
+METHOD:: calibrate
+This method invokes the separate SPL calibration tool, implemented by the link::Classes/FDcal:: class. This tool helps you calibrate the mic gain to actual dB, using one of four scenarios, depending on the equipment at your disposal. It also displays customized versions of link::Classes/ServerMeterView::, link::Classes/Stethoscope:: and link::Classes/FreqScopeView:: that are useful for checking the input signals that FonaDyn will use.
+
+argument::voiceMicInput
+The number of the input bus that will be used during calibration for the voice microphone. The default is 0. This can also be chosen interactively in the tool.
+
+argument::refMicInput
+The number of the input bus that will be used during calibration for the reference microphone. The default is 1. This can also be chosen interactively in the tool.
+
+METHOD:: config
+This method is intended to be invoked in the SC startup file, to specify non-default options of a global nature. Omitting an argument will leave its current value unchanged. The .config method can be invoked multiple times with different arguments, without affecting the other settings. See the FonaDyn Handbook for details.
+
+argument::inputVoice
+The number of the input bus that will be used for the voice microphone. The first hardware input has number 0 (=default). For instance, if you have an audio interface with mic preamps on its inputs 9..12, the first of these would be denoted 8.
+
+argument::inputEGG
+The number of the input bus that will be used for the EGG signal. The default is 1.
+
+argument::sampleFormat
+Set this to "int16" to record with 16 bits per sample. The default is 24 bits per sample.
+
+argument::singerMode
+Controls the SPL range. The value strong::false:: (default) gives 120 dB max SPL. The value strong::true:: gives 140 dB max SPL, and also forces 24-bit resolution when recording. Conversely, opening for analysis a "*_Voice_EGG.wav" file with 16-bit resolution will set this flag to strong::false::.
+
+argument:: metricColors, clusterColors
+This command selects alternative color maps that are used for all continuous metrics (metricColors) or all cluster types (clusterColors). This can make it easier for color-blind persons to interpret the maps. Difference maps will show red-blue instead of red-green. These arguments should be a quoted string with the name of a colormap CSV file. For more information on how to create such a file, see the separate document "Customizing Color Scales.pdf". If only the file name is given (no path), FonaDyn will look for the CSV file in <userExtensionsDir>/FonaDynTools/colormaps, where a selection of alternative color maps can be found. You can experiment with making your own color maps if you wish. Color maps can be specified only in the startup file. You must reboot the interpreter if you change them. See also link::Classes/ColorMap:: and link::Classes/VRPMetric::.cMap. The metrics Clarity and CSE cannot have alternative color maps.
+
+argument:: colorSet
+This argument is used for more detailed customization of the color scales. Its value should be a a quoted string with the name of a CSV file that contains a table of metrics. The file name must end in "_colorset.csv". The table lists for each metric a specific color map file; and optionally also the color subrange and the range of metric values. Metrics not listed in the colorset file will be color-mapped as usual. See also the separate document "Customizing Color Scales.pdf". The metrics Clarity and CSE cannot have alternative color maps.
+
+argument::addEGGNotchFilter
+EGG signals sometimes contain static sidetones at high frequencies that corrupt especially the Qdelta and Ic metrics. To see if this is the case with your device, check the EGG narrowband spectrum. Specify the argument 'addEGGNotchFilter' to pre-process the EGG signal with a notch filter that attenuates a single frequency. The value to this argument must be an array of three values for the filter [frequency, level, Q-factor]. You can add more filters in series by adding more strong::config:: statements. The filter(s) will be active for the rest of the FonaDyn session. Adding a filter with the same properties a second time will NOT remove the first filter. To remove all filters while in session, specify an empty array as the value. Each filter is implemented using a link::Classes/BPeakEQ:: UGen. The filter is inserted before the de-noising mechanism, and only when analyzing pre-recorded files. This feature is intended for suppression of high-frequency tones. If used at low frequencies (e.g., against electrical hum), the EGG waveform may be distorted.
+
+argument::fixedAspectRatio
+If strong::true::, the width:height aspect ratio of voice map cells is constrained to 2, by adding blank margins around the voice map as necessary. The value strong::false:: (default) means that the cells will be plotted at the aspect ratio that fills the available screen space.
+
+argument::runScript
+A quoted string with the full path name of a FonaDyn script that you want FonaDyn to run on startup. Use forward slashes "/".
+
+argument::sonicAlerts
+FonaDyn can issue warning and error messages, which are shown in the Post window. If the Post window is obscured or hidden, these messages can go unnoticed. However, when strong::sonicAlerts:: is set to strong::true::, FonaDyn will also play a "klunk" sound on warnings, and a short alarm bell sound on errors. The playback is on outputs 0 and 1. The default is strong::false::.
+
+METHOD:: refreshMfiles
+This method requires that the folder 'matlab' from the distribution ZIP file has been saved into the user support directory (not in ./Extensions). FonaDyn itself must be running when this method is invoked. See also the file <userSupportDir>/matlab/templates/_Instructions.txt, and the documentation for the class link::Classes/MfSC::.
+
+argument::whereTo
+	A quoted string with the full path name of the directory where FonaDyn should write the refreshed Matlab m-files. Use forward slashes "/". The default is <userSupportDir>/matlab.
+
+argument::bEcho
+If strong::true::, the patched m-file code will be echoed to the post window. The default is strong::false::.
+
+
+INSTANCEMETHODS::
+
+
+EXAMPLES::
+
+code::
+
+---- On the Command Line: ----
+
+FonaDyn.run;  // Start using the default values
+
+FonaDyn.rerun;  // Start using settings saved in the previous session
+
+FonaDyn.calibrate;   // Use the SPL calibration tool, or inspect signals
+
+FonaDyn.calibrate(voiceMicInput: 1, refMicInput: 7); // defaults are 0 and 1
+
+
+---- In the startup file "startup.scd": ----
+
+FonaDyn.config(inputVoice: 8, inputEGG: 9, singerMode: false);
+
+FonaDyn.config(runScript: "C:/Recordings/mydata/exp01-setup.txt");
+
+FonaDyn.refreshMfiles("/my/Matlab/m-files/Directory", true);
+
+// 8 kHz, -20 dB, Q=25
+FonaDyn.config(addEGGNotchFilter: [8000.0, -20, 25]);
+
+FonaDyn.config(metricColors: "cividis256.csv", clusterColors: "IBM5.csv");
+
+FonaDyn.config(colorSet: "MyColors_colorset.csv");
+
+
+----- In a script file: -----------
+
+// Remove all filters from previous runs and the startup file, if any.
+EVAL FonaDyn.config(addEGGNotchFilter: []);
+
+// 8 kHz, -20 dB, Q=25
+EVAL FonaDyn.config(addEGGNotchFilter: [8000.0, -20, 25]);
+
+installColorMappings("MyColors_colorset.csv");  // without EVAL (!)
+
+::
