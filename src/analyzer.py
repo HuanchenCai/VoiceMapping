@@ -7,7 +7,7 @@ Complete implementation of VoiceMap algorithms for VRP analysis
 import numpy as np
 import pandas as pd
 import soundfile as sf
-from scipy.signal import butter, filtfilt, lfilter
+from scipy.signal import butter, filtfilt, lfilter, fftconvolve
 import os
 from datetime import datetime
 from typing import Dict, Optional, Tuple
@@ -32,6 +32,71 @@ except ImportError:
     def _njit(fn):          # identity decorator fallback
         return fn
     _NUMBA = False
+
+
+def _build_fir_bp_impulse() -> np.ndarray:
+    """Build zero-phase FIR impulse response matching SC type=3 EGG bandpass filter.
+
+    SC VRPSDIOfilterCoeffs.sc type=3:
+      skirtHP = [0, 2.14897e-05, 0.061962938, 0.4636971375, 0.9199227347]  (bins 0-4)
+      passband = 1.0 * 465                                                  (bins 5-469)
+      skirtLP  = 10^(-0.01*i) for i=0..553                                 (bins 470-1023)
+    This is a frequency-domain magnitude transfer function for FFT size 2048.
+    """
+    mags = np.zeros(1024)
+    mags[0:5] = [0.0, 2.14897e-05, 0.061962938, 0.4636971375, 0.9199227347]
+    mags[5:470] = 1.0
+    mags[470:1024] = 10.0 ** (-0.01 * np.arange(554))
+    # Add Nyquist bin (bin 1024 for 2048-pt FFT) ≈ 0 (LP already attenuated)
+    mags_full = np.concatenate([mags, [mags[-1]]])
+    # Zero-phase: irfft of real spectrum gives symmetric impulse response
+    h = np.fft.irfft(mags_full, n=2048)
+    return np.fft.fftshift(h)   # center impulse at index 1024
+
+
+# Pre-build FIR impulse response once at module load
+_FIR_BP_IMPULSE = _build_fir_bp_impulse()
+
+
+def _pv_compander(signal: np.ndarray, thresh: float,
+                  slope_below: float = 4.0,
+                  fft_size: int = 2048, hop: int = 1024) -> np.ndarray:
+    """Block-wise downward expander approximating SC PV_Compander.
+
+    SC: PV_Compander(chain, thresh, 4.0, 1.0)
+        "4.0 is dB-expand ratio below thresh"
+    Below threshold, each FFT bin magnitude is scaled by (mag/thresh)^(slope_below-1).
+    Above threshold: unity gain.
+    """
+    if thresh <= 0.0:
+        return signal.copy()
+
+    N = len(signal)
+    output = np.zeros(N + fft_size, dtype=np.float64)
+    norm   = np.zeros(N + fft_size, dtype=np.float64)
+    win    = np.hanning(fft_size)
+    win_sq = win * win
+
+    for i in range(0, N, hop):
+        frame = np.zeros(fft_size, dtype=np.float64)
+        end   = min(i + fft_size, N)
+        frame[:end - i] = signal[i:end]
+        frame_win = frame * win
+
+        X   = np.fft.rfft(frame_win)
+        mag = np.abs(X)
+
+        # Downward expansion below threshold
+        safe = np.maximum(mag, 1e-15)
+        scale = np.where(mag >= thresh, 1.0, (safe / thresh) ** (slope_below - 1))
+        X *= scale
+
+        y = np.fft.irfft(X, n=fft_size)
+        output[i:i + fft_size] += y * win
+        norm  [i:i + fft_size] += win_sq
+
+    norm = np.maximum(norm, 1e-12)
+    return (output / norm)[:N]
 
 
 @_njit
@@ -104,11 +169,22 @@ class VoiceMapAnalyzer:
         return filtfilt(b, a, voice_signal)
 
     def preprocess_egg(self, egg_signal: np.ndarray) -> np.ndarray:
-        nyquist = self.config.sample_rate / 2
-        b, a = butter(2, 100 / nyquist,   btype='high')
-        egg = filtfilt(b, a, egg_signal)
-        b, a = butter(2, 10000 / nyquist, btype='low')
-        return filtfilt(b, a, egg)
+        """Condition EGG signal matching SC VRPSDIO:
+        1. FIR bandpass (type=3: HP~86Hz, LP~10kHz, matching PV_MagMul + bpBuffer)
+        2. PV_Compander (downward expander below noise threshold)
+        """
+        # Step 1: FIR bandpass (zero-phase via fftconvolve 'same')
+        egg = fftconvolve(egg_signal.astype(np.float64), _FIR_BP_IMPULSE, mode='same')
+
+        # Step 2: PV_Compander — compute SC amplitude threshold from dBFS setting
+        # SC: dBthresh.linexp(-120, -50, 0.007, 7)
+        db = self.config.egg_compander_threshold_db
+        thresh = 0.007 * (7.0 / 0.007) ** ((db - (-120.0)) / (-50.0 - (-120.0)))
+        fft_sz = self.config.egg_compander_fft_size
+        egg = _pv_compander(egg, thresh,
+                            slope_below=self.config.egg_compander_slope_below,
+                            fft_size=fft_sz, hop=fft_sz // 2)
+        return egg
 
     # ------------------------------------------------------------------
     # Cycle detection

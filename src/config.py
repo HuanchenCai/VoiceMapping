@@ -53,6 +53,13 @@ class VoiceMapConfig:
     specbal_cutoff_high: int = 2000
     specbal_rms_window: int = 50
 
+    # EGG conditioning: FIR bandpass + PV_Compander (matching SC VRPSDIO)
+    # linexp mapping: thresh = 0.007 * (7/0.007)^((dBthresh+120)/70)
+    # thresh=0.18 corresponds to ~-87.1 dBFS (empirically matched to test_VRP.csv reference)
+    egg_compander_threshold_db: float = -87.1  # dBFS for SC PV_Compander threshold
+    egg_compander_slope_below: float  = 4.0    # SC "4.0 is dB-expand ratio below thresh"
+    egg_compander_fft_size: int       = 2048   # SC FFT block size (bufSize)
+
     # EGG DFT / HRFegg parameters
     n_harmonics: int = 10              # Harmonics 1..N per cycle (MetricHRFegg default)
 
