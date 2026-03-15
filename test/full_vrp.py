@@ -502,12 +502,12 @@ class FullVRP:
         """移除离群值"""
         # 创建有效数据掩码
         valid_mask = (
-            (np.array(results['MIDI']) >= midi_range[0]) & 
+            (np.array(results['MIDI']) >= midi_range[0]) &
             (np.array(results['MIDI']) <= midi_range[1]) &
-            (np.array(results['SPL']) >= spl_range[0]) & 
-            (np.array(results['SPL']) <= spl_range[1]) &
+            (np.array(results['dB']) >= spl_range[0]) &
+            (np.array(results['dB']) <= spl_range[1]) &
             (np.array(results['MIDI']) > 0) &
-            (np.array(results['SPL']) > 0)
+            (np.array(results['dB']) > 0)
         )
         
         # 过滤数据
@@ -616,7 +616,7 @@ def main():
     
     # 保存聚合后的结果到result文件夹
     output_file = f"result/complete_vrp_results_{timestamp}_VRP.csv"
-    grouped.to_csv(output_file, index=False)
+    grouped.to_csv(output_file, index=False, sep=';')
     print(f"结果已保存到: {output_file}")
     
     # 使用聚合后的数据框进行统计

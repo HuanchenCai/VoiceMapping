@@ -15,6 +15,7 @@ from config import VoiceMapConfig
 
 logger = logging.getLogger(__name__)
 
+_rng = np.random.default_rng(seed=0)
 
 # ---------------------------------------------------------------------------
 # Inline midi conversion — removes librosa dependency
@@ -310,13 +311,13 @@ class CPPCalculator(MetricCalculator):
         n_win = max((len(voice) - ws) // hop + 1, 0)
         if n_win == 0:
             cycle_idx = np.where(cycle_triggers > 0.5)[0]
-            return np.zeros(len(cycle_idx))
+            return np.zeros(max(len(cycle_idx) - 1, 0))
 
         take = min(ws, fft_n)
         wins = np.lib.stride_tricks.sliding_window_view(voice, ws)[::hop, :take]
         wins = wins.astype(np.float64)
 
-        wins = wins + np.random.default_rng().standard_normal(wins.shape) * self.cpp_dither_amp
+        wins = wins + _rng.standard_normal(wins.shape) * self.cpp_dither_amp
         wins = wins * np.hanning(take)
 
         if take < fft_n:
@@ -337,7 +338,9 @@ class CPPCalculator(MetricCalculator):
         cpp_wins = self._peak_prominence_batch(ceps_smooth, lo, hi)
 
         cycle_idx = np.where(cycle_triggers > 0.5)[0]
-        win_idx   = np.clip(cycle_idx // hop, 0, len(cpp_wins) - 1)
+        if len(cycle_idx) < 2:
+            return np.zeros(0)
+        win_idx   = np.clip(cycle_idx[:-1] // hop, 0, len(cpp_wins) - 1)
         out       = cpp_wins[win_idx]
         logger.info("  CPP: %d windows → %d cycles  range %.3f – %.3f",
                     n_win, len(out), out.min(), out.max())
@@ -415,7 +418,9 @@ class SpecBalCalculator(MetricCalculator):
 
         sb_hop    = sb[rms_w - 1::hop]
         cycle_idx = np.where(cycle_triggers > 0.5)[0]
-        out = _assign_to_cycles(cycle_idx, sb_hop, hop)
+        if len(cycle_idx) < 2:
+            return np.array([])
+        out = _assign_to_cycles(cycle_idx[:-1], sb_hop, hop)
         out = np.clip(out, -50.0, 50.0)
         logger.info("  SpecBal: %d cycles  range %.1f – %.1f dB",
                     len(out), out.min(), out.max())
@@ -437,6 +442,7 @@ class CrestCalculator(MetricCalculator):
         for i in range(len(idx) - 1):
             s, e = idx[i], idx[i + 1]
             if e - s < self.min_samples:
+                crest_list.append(0.0)
                 continue
             cyc  = v[s:e]
             rms  = np.sqrt(np.mean(cyc * cyc))

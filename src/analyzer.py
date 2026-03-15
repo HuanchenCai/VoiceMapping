@@ -314,14 +314,7 @@ class VoiceMapAnalyzer:
         self.logger.info("  %d / %d points pass clarity (%.1f%%)",
                          kept, total, 100 * kept / total if total else 0)
 
-        out = {}
-        for key, vals in metrics.items():
-            if key == 'midi':
-                valid = ~np.isnan(vals)
-                out[key] = vals[valid][clarity_mask[valid]]
-            else:
-                n = min(len(clarity_mask), len(vals))
-                out[key] = vals[:n][clarity_mask[:n]]
+        out = {key: vals[clarity_mask] for key, vals in metrics.items()}
         return out
 
     # ------------------------------------------------------------------
