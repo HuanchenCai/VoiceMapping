@@ -75,8 +75,3 @@ Cycles with clarity < 0.96 are discarded.
 - numpy, scipy, pandas, soundfile
 - numba (optional — accelerates cycle detection; falls back to pure Python automatically)
 
-## Tests
-
-```bash
-python -m unittest test.test_voicemap
-```
