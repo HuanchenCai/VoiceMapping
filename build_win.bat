@@ -1,14 +1,33 @@
 @echo off
 REM Build FonaDyn.exe for Windows
-REM Requirements: pip install pyinstaller
+REM Uses the miniconda Python at %USERPROFILE%\miniconda3
+REM Builds in an isolated venv to keep the exe small (avoids bundling PyTorch etc.)
 
-echo Installing / updating dependencies...
-pip install pyinstaller numpy scipy pandas soundfile numba
+set PYTHON=%USERPROFILE%\miniconda3\python.exe
+
+echo [1/3] Creating clean build environment...
+"%PYTHON%" -m venv .venv_build
+if errorlevel 1 goto :error
+
+echo [2/3] Installing dependencies...
+.venv_build\Scripts\pip.exe install --quiet numpy scipy pandas soundfile pyinstaller
+if errorlevel 1 goto :error
+
+echo [3/3] Building FonaDyn.exe...
+.venv_build\Scripts\pyinstaller.exe FonaDyn.spec --clean --noconfirm
+if errorlevel 1 goto :error
 
 echo.
-echo Building FonaDyn.exe...
-pyinstaller FonaDyn.spec --clean --noconfirm
-
-echo.
-echo Done! Executable is at:  dist\FonaDyn.exe
+if exist dist\FonaDyn.exe (
+    echo [OK] dist\FonaDyn.exe is ready.
+) else (
+    echo [FAILED] Build did not produce dist\FonaDyn.exe
+)
 pause
+exit /b 0
+
+:error
+echo.
+echo [ERROR] Build failed. See output above.
+pause
+exit /b 1

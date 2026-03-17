@@ -16,7 +16,7 @@ a = Analysis(
     ],
     hiddenimports=[
         'numpy', 'scipy', 'scipy.signal', 'scipy.fft',
-        'pandas', 'soundfile', 'numba', 'llvmlite',
+        'pandas', 'soundfile',
         'analyzer', 'config', 'metrics', 'logger',
         'tkinter', 'tkinter.ttk', 'tkinter.filedialog',
         'tkinter.messagebox',
@@ -24,7 +24,16 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['matplotlib', 'librosa', 'IPython', 'jupyter'],
+    # Exclude heavy/unneeded packages
+    excludes=[
+        'numba', 'llvmlite',
+        'torch', 'torchvision', 'torchaudio',
+        'tensorflow', 'keras',
+        'matplotlib', 'librosa',
+        'IPython', 'jupyter', 'notebook',
+        'sklearn', 'skimage',
+        'cv2', 'PIL',
+    ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
