@@ -173,27 +173,36 @@ class ClarityCalculator(MetricCalculator):
         hop = self._hop
         sr  = self.sample_rate
 
-        v_integr = lfilter([1.0], [1.0, -0.995], voice.astype(np.float64))
+        # HPF at 30 Hz matching SC VRPSDIO: HPF.ar(inMic, 30) - 2nd order Butterworth
+        sos_hpf = butter(2, 30.0, btype='high', fs=sr, output='sos')
+        v_hpf   = sosfilt(sos_hpf, voice.astype(np.float64))
+
+        # Integrator matching SC Integrator.ar(in, 0.995)
+        v_integr = lfilter([1.0], [1.0, -0.995], v_hpf)
 
         n_win = max((len(v_integr) - n) // hop + 1, 0)
         if n_win == 0:
             return np.array([]), np.array([])
 
+        # No DC removal: SC Tartini.kr processes raw buffer without mean subtraction
         wins = sliding_window_view(v_integr, n)[::hop].copy()
-        wins -= wins.mean(axis=1, keepdims=True)
 
+        # McLeod-Wyvill NSDF: 2*m(τ)/n'(τ) — confirmed from sc3-plugins Tartini.cpp
         fft_size = 2 * n
         W_fft  = rfft(wins, n=fft_size, axis=1)
         m_full = irfft(W_fft * np.conj(W_fft), n=fft_size, axis=1)[:, :n]
 
-        # Standard normalised ACF: NSDF(τ) = m(τ) / m(0)
-        # matches SC Tartini.kr internal normalisation (constant denominator)
-        m0 = m_full[:, 0:1]                               # (N_win, 1) = sum(x²)
+        sq = wins * wins
+        cs = np.zeros((len(wins), n + 1), dtype=np.float64)
+        np.cumsum(sq, axis=1, out=cs[:, 1:])
 
         lo, hi = self._min_lag, min(self._max_lag, n - 1)
         taus   = np.arange(lo, hi + 1, dtype=int)
 
-        nsdf = np.where(m0 > 1e-12, m_full[:, taus] / m0, 0.0)  # (N_win, L)
+        n_prime = cs[:, n - taus] + (cs[:, n:n+1] - cs[:, taus])
+        nsdf    = np.where(n_prime > 1e-12,
+                           2.0 * m_full[:, taus] / n_prime,
+                           0.0)                            # (N_win, L)
 
         # Global argmax (baseline)
         peak_local = np.argmax(nsdf, axis=1)               # (N_win,) index in nsdf
