@@ -1,6 +1,6 @@
-# FonaDyn.py
+# Voice Mapping
 
-Python implementation of the [FonaDyn](https://github.com/sternsc/FonaDyn) Voice Range Profile (VRP) analyzer.
+Python implementation of Voice Range Profile (VRP) analysis for voice mapping research.
 
 ## Quick Start
 
@@ -32,10 +32,9 @@ analyzer = VoiceMapAnalyzer(config)
 
 ### 2. Signal Preprocessing
 - **Voice**: 2nd-order Butterworth HPF at 30 Hz (`filtfilt`)
-- **EGG**: FIR bandpass (matching SC `VRPSDIOfilterCoeffs` type=3) + PV_Compander downward expander
+- **EGG**: FIR bandpass + PV_Compander downward expander
 
 ### 3. Cycle Detection — Phase Portrait method
-Matches SC `VRPSDCSDFT` SynthDef:
 1. Leaky integrator: `y[n] = 0.999·y[n-1] + x[n]`
 2. HPF at 50 Hz on integrator output
 3. Phase: `atan2(EGG, HPF_integral)`
@@ -45,7 +44,7 @@ Matches SC `VRPSDCSDFT` SynthDef:
 
 | Metric | Method |
 |--------|--------|
-| MIDI, Clarity | McLeod-Wyvill NSDF autocorrelation (matches SC `Tartini.kr`) |
+| MIDI, Clarity | McLeod-Wyvill NSDF autocorrelation |
 | SPL | Sliding-window RMS → dBFS |
 | CPP | 1024-pt real cepstrum, peak prominence |
 | SpecBal | Single-pass energy ratio below/above 1500 Hz |
@@ -60,18 +59,17 @@ Cycles with clarity < 0.96 are discarded.
 ### 6. VRP Aggregation & Output
 - MIDI and dB rounded to integers
 - Grouped by (MIDI, dB) cell
-- **Clarity**: MAX per cell (matching SC `VRPControllerPlots`)
+- **Clarity**: MAX per cell
 - Other metrics: mean per cell
 - Range: MIDI 30–96, SPL 40–120 dB
 - Output: semicolon-delimited CSV to `result/`
 
 ## Output Format
 
-`result/complete_vrp_results_YYYYMMDD_HHMMSS_VRP.csv` — 25-column VRP format compatible with FonaDyn.
+`result/complete_vrp_results_YYYYMMDD_HHMMSS_VRP.csv` — 25-column VRP format.
 
 ## Requirements
 
 - Python 3.8+
 - numpy, scipy, pandas, soundfile
 - numba (optional — accelerates cycle detection; falls back to pure Python automatically)
-
