@@ -186,17 +186,14 @@ class ClarityCalculator(MetricCalculator):
         W_fft  = rfft(wins, n=fft_size, axis=1)
         m_full = irfft(W_fft * np.conj(W_fft), n=fft_size, axis=1)[:, :n]
 
-        sq = wins * wins
-        cs = np.zeros((len(wins), n + 1), dtype=np.float64)
-        np.cumsum(sq, axis=1, out=cs[:, 1:])
+        # Standard normalised ACF: NSDF(τ) = m(τ) / m(0)
+        # matches SC Tartini.kr internal normalisation (constant denominator)
+        m0 = m_full[:, 0:1]                               # (N_win, 1) = sum(x²)
 
         lo, hi = self._min_lag, min(self._max_lag, n - 1)
         taus   = np.arange(lo, hi + 1, dtype=int)
 
-        n_prime = cs[:, n - taus] + (cs[:, n:n+1] - cs[:, taus])
-        nsdf    = np.where(n_prime > 1e-12,
-                           2.0 * m_full[:, taus] / n_prime,
-                           0.0)                            # (N_win, L)
+        nsdf = np.where(m0 > 1e-12, m_full[:, taus] / m0, 0.0)  # (N_win, L)
 
         # Global argmax (baseline)
         peak_local = np.argmax(nsdf, axis=1)               # (N_win,) index in nsdf
