@@ -148,6 +148,3 @@ custom_results/
 # OS
 .DS_Store
 Thumbs.db
-
-# Build venv
-.venv_build/
