@@ -1,100 +1,82 @@
-# VoiceMap Python
+# FonaDyn.py
 
-Python implementation of VoiceMap algorithms for Voice Range Profile (VRP) analysis.
+Python implementation of the [FonaDyn](https://github.com/sternsc/FonaDyn) Voice Range Profile (VRP) analyzer.
 
 ## Quick Start
 
 ```bash
-# Install dependencies
 pip install -r requirements.txt
-
-# Run analysis
-python main.py
-
-# Run with custom audio file
 python main.py path/to/audio.wav
 ```
+
+The audio file must be a stereo WAV: **channel 1 = voice microphone, channel 2 = EGG**.
 
 ## Usage
 
 ```python
 from analyzer import VoiceMapAnalyzer
+from config import VoiceMapConfig
 
-# Basic usage
 analyzer = VoiceMapAnalyzer()
 data, output_file = analyzer.analyze_and_output_vrp("audio.wav")
 
-# Custom configuration
-from config import VoiceMapConfig
-config = VoiceMapConfig(clarity_threshold=0.95, output_dir="results")
+# Custom settings
+config = VoiceMapConfig(clarity_threshold=0.96, output_dir="results")
 analyzer = VoiceMapAnalyzer(config)
 ```
 
-## Analysis Logic
+## Analysis Pipeline
 
-The VoiceMap analysis follows a 7-step process to extract voice metrics from audio recordings:
-
-### 1. Audio Loading (`VoiceMapAnalyzer.load_audio()`)
-- Loads stereo audio file using `soundfile.read()`
-- Extracts voice channel (left) and EGG channel (right)
-- Returns sample rate and duration information
+### 1. Audio Loading
+- Stereo WAV → voice (ch 1) + EGG (ch 2) via `soundfile`
 
 ### 2. Signal Preprocessing
-- **Voice Signal** (`VoiceMapAnalyzer.preprocess_voice()`): Applies 30Hz high-pass filter using `scipy.signal.butter()` and `filtfilt()`
-- **EGG Signal** (`VoiceMapAnalyzer.preprocess_egg()`): Applies 100Hz HPF + 10kHz LPF + 9-point median filter
+- **Voice**: 2nd-order Butterworth HPF at 30 Hz (`filtfilt`)
+- **EGG**: FIR bandpass (matching SC `VRPSDIOfilterCoeffs` type=3) + PV_Compander downward expander
 
-### 3. Cycle Detection (`VoiceMapAnalyzer.peak_follower_cycle_detection()`)
-- Uses PeakFollower method with Dolansky algorithm
-- Calculates dEGG (derivative of EGG signal)
-- Applies `dolansky_algorithm()` → `peak_follower()` → `fos_filter()` → `set_reset_ff()`
-- Filters cycles based on minimum frequency (50Hz) and period constraints
+### 3. Cycle Detection — Phase Portrait method
+Matches SC `VRPSDCSDFT` SynthDef:
+1. Leaky integrator: `y[n] = 0.999·y[n-1] + x[n]`
+2. HPF at 50 Hz on integrator output
+3. Phase: `atan2(EGG, HPF_integral)`
+4. Dolansky algorithm → cycle triggers
 
-### 4. Metric Calculation (`VoiceMapAnalyzer.calculate_all_metrics()`)
-Calculates 9 voice metrics using specialized calculator classes:
-- **MIDI & Clarity** (`ClarityCalculator.calculate()`): Fundamental frequency detection using autocorrelation
-- **SPL** (`SPLCalculator.calculate()`): Sound pressure level using sliding window RMS
-- **CPP** (`CPPCalculator.calculate()`): Cepstral peak prominence using FFT and cepstrum analysis
-- **SpecBal** (`SpecBalCalculator.calculate()`): Spectral balance between 1500-2000Hz bands
-- **Crest** (`CrestCalculator.calculate()`): Crest factor (peak-to-RMS ratio)
-- **Qcontact, dEGGmax, Icontact** (`QcontactCalculator.calculate()`): EGG-based contact quotient metrics
-- **Entropy** (`EntropyCalculator.calculate()`): Spectral entropy (currently placeholder)
-- **HRFegg** (`HRFCalculator.calculate()`): Harmonic richness factor (currently placeholder)
+### 4. Metric Calculation (per cycle)
 
-### 5. Quality Filtering (`VoiceMapAnalyzer.apply_clarity_filtering()`)
-- Filters out data points below clarity threshold (default: 0.96)
-- Removes low-quality voice segments
+| Metric | Method |
+|--------|--------|
+| MIDI, Clarity | McLeod-Wyvill NSDF autocorrelation (matches SC `Tartini.kr`) |
+| SPL | Sliding-window RMS → dBFS |
+| CPP | 1024-pt real cepstrum, peak prominence |
+| SpecBal | Single-pass energy ratio below/above 1500 Hz |
+| Crest | Peak-to-RMS ratio |
+| Qcontact, dEGGmax, Icontact | EGG contact quotient metrics |
+| Entropy (CSE) | Sample Entropy on EGG amplitude/phase |
+| HRFegg | Per-cycle EGG DFT harmonic richness |
 
-### 6. Data Aggregation (`VoiceMapAnalyzer.output_vrp_csv()`)
-- Applies SPL correction (+120dB)
-- Rounds MIDI and dB values to integers
-- Filters to VoiceMap standard ranges (MIDI: 30-96, SPL: 40-120dB)
-- Groups by (MIDI, dB) pairs and averages other metrics
-- Sums Total column for each group
+### 5. Clarity Filtering
+Cycles with clarity < 0.96 are discarded.
 
-### 7. Output Generation
-- Creates 25-column VRP CSV format (with EGG clusters and phonation clusters on hold)
-- Saves timestamped file to `result/` directory
-- Displays comprehensive statistics
+### 6. VRP Aggregation & Output
+- MIDI and dB rounded to integers
+- Grouped by (MIDI, dB) cell
+- **Clarity**: MAX per cell (matching SC `VRPControllerPlots`)
+- Other metrics: mean per cell
+- Range: MIDI 30–96, SPL 40–120 dB
+- Output: semicolon-delimited CSV to `result/`
 
-## Features
+## Output Format
 
-- **9 Voice Metrics**: MIDI, SPL, Clarity, CPP, SpecBal, Crest, Qcontact, dEGGmax, Icontact
-- **Cycle Detection**: PeakFollower with Dolansky algorithm
-- **Standard Output**: 25-column VRP CSV format
-- **Configurable**: Adjustable thresholds and parameters
-
-## Output
-
-Results saved to `result/` directory as timestamped CSV files:
-- `complete_vrp_results_YYYYMMDD_HHMMSS_VRP.csv`
-
-## Testing
-
-```bash
-python -m unittest tests.test_voicemap
-```
+`result/complete_vrp_results_YYYYMMDD_HHMMSS_VRP.csv` — 25-column VRP format compatible with FonaDyn.
 
 ## Requirements
 
-- Python 3.7+
-- numpy, scipy, librosa, pandas, soundfile
+- Python 3.8+
+- numpy, scipy, pandas, soundfile
+- numba (optional — accelerates cycle detection; falls back to pure Python automatically)
+
+## Tests
+
+```bash
+python -m unittest test.test_voicemap
+```
