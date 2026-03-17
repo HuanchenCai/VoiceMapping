@@ -335,7 +335,8 @@ class VoiceMapAnalyzer:
         logger.info("  After range filter: %d", len(df))
 
         grouped = df.groupby(['MIDI', 'dB']).agg({
-            'Clarity': 'mean', 'CPP': 'mean', 'SpecBal': 'mean',
+            'Clarity': 'max',   # SC VRPControllerPlots: max(clarity, clarityMap.at(...) ? 0)
+            'CPP': 'mean', 'SpecBal': 'mean',
             'Crest': 'mean', 'Entropy': 'mean', 'Qcontact': 'mean',
             'dEGGmax': 'mean', 'Icontact': 'mean', 'HRFegg': 'mean',
             'Total': 'sum',
