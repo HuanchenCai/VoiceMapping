@@ -6,7 +6,7 @@ All hot paths use vectorised NumPy; no Python-level loops over samples or window
 
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
-from scipy.signal import butter, sosfilt
+from scipy.signal import butter, sosfilt, lfilter
 from scipy.fft import rfft, irfft, ifft as _ifft
 from typing import Tuple
 import logging
@@ -173,13 +173,13 @@ class ClarityCalculator(MetricCalculator):
         hop = self._hop
         sr  = self.sample_rate
 
-        sig = voice.astype(np.float64)
+        v_integr = lfilter([1.0], [1.0, -0.995], voice.astype(np.float64))
 
-        n_win = max((len(sig) - n) // hop + 1, 0)
+        n_win = max((len(v_integr) - n) // hop + 1, 0)
         if n_win == 0:
             return np.array([]), np.array([])
 
-        wins = sliding_window_view(sig, n)[::hop].copy()
+        wins = sliding_window_view(v_integr, n)[::hop].copy()
         wins -= wins.mean(axis=1, keepdims=True)
 
         fft_size = 2 * n
