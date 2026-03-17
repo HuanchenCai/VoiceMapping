@@ -1,4 +1,0 @@
-GatedDiskOut.scx relies on libsndfile v1.0.31 (sndfile.dll)
-which is distributed with SuperCollider from v3.12.0. 
-
-
