@@ -6,6 +6,7 @@ Updated for new package structure
 
 import sys
 import os
+import time
 from pathlib import Path
 import logging
 
@@ -21,7 +22,7 @@ def main():
     """Main entry point for VoiceMap analysis"""
     # Set up logging
     setup_logger("voicemap", level=logging.INFO)
-    logger = get_logger(__name__)
+    logger = get_logger("voicemap")
     
     logger.info("VoiceMap Voice Range Profile Analyzer")
     logger.info("=" * 50)
@@ -46,12 +47,15 @@ def main():
         
         # Run analysis
         logger.info(f"Analyzing audio file: {audio_file}")
+        t_start = time.time()
         data, output_file = analyzer.analyze_and_output_vrp(audio_file)
-        
+        elapsed = time.time() - t_start
+
         logger.info("=" * 50)
         logger.info("Analysis completed successfully!")
         logger.info(f"Output file: {output_file}")
         logger.info(f"Data points: {len(data['midi']):,}")
+        logger.info(f"Runtime: {elapsed:.2f} seconds")
         
     except Exception as e:
         logger.error(f"Analysis failed: {e}")
