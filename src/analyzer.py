@@ -16,6 +16,7 @@ import logging
 
 from config import VoiceMapConfig, DEFAULT_CONFIG
 from logger import setup_logger, get_logger
+from plotter import plot_vrp_dataframe
 from metrics import (
     SPLCalculator, ClarityCalculator, CPPCalculator, SpecBalCalculator,
     CrestCalculator, QcontactCalculator, EntropyCalculator, HRFCalculator
@@ -365,6 +366,14 @@ class VoiceMapAnalyzer:
                          grouped['MIDI'].mean(), grouped['dB'].mean(),
                          grouped['Clarity'].mean())
         logger.info("Saved: %s", out_file)
+
+        # --- Generate VRP map images ---
+        plot_dir = os.path.join(self.config.output_dir, "plots")
+        ts_base  = os.path.splitext(os.path.basename(out_file))[0]
+        saved    = plot_vrp_dataframe(grouped, ts_base, plot_dir)
+        if saved:
+            logger.info("Plots saved to: %s  (%d images)", plot_dir, len(saved))
+
         return out_file
 
     # ------------------------------------------------------------------
