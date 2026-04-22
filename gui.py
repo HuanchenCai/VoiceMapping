@@ -490,6 +490,13 @@ class FonaDynApp(_TkBase):
                                          command=self._open_output_dir)
         self.open_plots_btn.pack(side="left", padx=(6, 0))
 
+        btn_row2 = tk.Frame(pad, bg=PANEL)
+        btn_row2.pack(fill="x", pady=(0, 12))
+        self.excel_btn = ttk.Button(btn_row2, text="导出 Excel", style="Ghost.TButton",
+                                     command=self._export_excel)
+        self.excel_btn.pack(side="left")
+        self.excel_btn.state(["disabled"])
+
         # 进度条
         self.progress = ttk.Progressbar(pad, mode="indeterminate")
         self.progress.pack(fill="x", pady=(0, 12))
@@ -822,6 +829,10 @@ class FonaDynApp(_TkBase):
             self._last_analyzer = payload.get("analyzer")
             self.csv_path_var.set(payload["csv"])
             self.open_csv_btn.state(["!disabled"])
+            try:
+                self.excel_btn.state(["!disabled"])
+            except (AttributeError, tk.TclError):
+                pass
             # 有了 analyzer 就能保存 centroid
             try:
                 self.cent_save_btn.state(["!disabled"])
@@ -1146,6 +1157,27 @@ class FonaDynApp(_TkBase):
     def _set_status(self, text: str, color: str = MUTED):
         self.status_lbl.configure(text=text, fg=color)
         self.status_dot.configure(fg=color)
+
+    def _export_excel(self):
+        """一次分析完成后，可导出 .xlsx：Summary + Grouped + 每 metric 一个 heatmap sheet。"""
+        if self._last_df is None or self.last_csv is None:
+            self._append_log("WARNING", "还没分析过，无法导出 Excel")
+            return
+        default = str(Path(self.last_csv).with_suffix(".xlsx"))
+        path = filedialog.asksaveasfilename(
+            title="导出 Excel",
+            defaultextension=".xlsx",
+            filetypes=[("Excel", "*.xlsx")],
+            initialfile=Path(default).name,
+            initialdir=str(Path(default).parent))
+        if not path:
+            return
+        try:
+            from excel_export import export_vrp_xlsx
+            export_vrp_xlsx(self._last_df, path)
+            self._append_log("META", f"✓ Excel 已导出：{path}")
+        except Exception as e:  # noqa: BLE001
+            self._append_log("ERROR", f"Excel 导出失败：{e}")
 
     def _open_csv(self):
         """用系统默认程序直接打开 CSV 文件（Excel / 记事本等）。"""

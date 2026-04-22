@@ -85,6 +85,9 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="joint-train EGG cluster centroids across multiple WAVs "
                         "and write OUT.csv. Usage: --train-centroids out.csv a.wav b.wav [...]. "
                         "Exits after writing; does not run a normal analysis.")
+    p.add_argument("--excel", action="store_true",
+                   help="also write a .xlsx alongside the CSV: Summary + "
+                        "Grouped + one heatmap pivot sheet per metric.")
 
     # Logging
     p.add_argument("-v", "--verbose", action="store_true",
@@ -134,11 +137,22 @@ def _run_one(args, config, logger, audio_path: str, save_centroids_once: bool = 
 
     logger.info("Analysing: %s", audio_path)
     t0 = time.perf_counter()
-    data, out_csv = analyzer.analyze_and_output_vrp(
-        audio_path, plot_mode=args.plot_mode)
+    # Need the grouped DataFrame for Excel export; avoid the second CSV read
+    # by asking for return_df=True unconditionally.
+    data, out_csv, grouped = analyzer.analyze_and_output_vrp(
+        audio_path, plot_mode=args.plot_mode, return_df=True)
     dt = time.perf_counter() - t0
 
     logger.info("Done in %.2fs → %s  (%d points)", dt, out_csv, len(data["midi"]))
+
+    if args.excel:
+        from excel_export import export_vrp_xlsx
+        xlsx_path = os.path.splitext(out_csv)[0] + ".xlsx"
+        try:
+            export_vrp_xlsx(grouped, xlsx_path)
+            logger.info("Excel saved: %s", xlsx_path)
+        except Exception as e:  # noqa: BLE001
+            logger.error("Excel export failed: %s", e)
 
     if save_centroids_once and args.save_centroids:
         try:
