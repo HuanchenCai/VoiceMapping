@@ -6,3 +6,4 @@ matplotlib>=3.5.0
 scikit-learn>=1.1  # K-means for EGG waveform clustering (Cluster 1-5) and phonation-type clustering (cPhon 1-5)
 numba>=0.59  # optional but strongly recommended — JIT compiles cycle detection and sample-entropy loops (~2.4× speedup on typical recordings)
 tkinterdnd2>=0.4.2  # optional — enables native drag-drop in GUI; falls back to click-to-pick if missing
+praat-parselmouth>=0.4  # optional (dev) — Praat bindings used only by tests/validate_params.py

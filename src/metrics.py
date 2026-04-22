@@ -722,14 +722,22 @@ class FormantCalculator(MetricCalculator):
     def __init__(self, config: VoiceMapConfig,
                  lpc_order: Optional[int] = None,
                  win_ms: float = 25.0, hop_ms: float = 10.0,
-                 f_min: float = 90.0, f_max: float = 3500.0,
+                 f_min: float = 90.0, f_max: float = 5500.0,
+                 f1_floor: float = 250.0,
                  singer_band: Tuple[float, float] = (2800.0, 3400.0),
                  pre_emphasis: float = 0.97):
         super().__init__(config)
         self.win_ms, self.hop_ms = float(win_ms), float(hop_ms)
         self.f_min,  self.f_max  = float(f_min),  float(f_max)
+        self.f1_floor     = float(f1_floor)
         self.singer_band  = (float(singer_band[0]), float(singer_band[1]))
         self.pre_emphasis = float(pre_emphasis)
+        # LPC order: Praat's classical autocorrelation/Burg formula
+        #   order ≈ 2 + 2·Fs/1000   (→ 22 @ 44.1 kHz)
+        # captures the right amount of spectral detail for our peak-picking
+        # tracker. We DO need to gate sub-F1 peaks (pitch harmonics) with
+        # `f1_floor` below, or the first low LPC peak gets mislabelled as F1
+        # and drags F2/F3 with it.
         self.lpc_order    = int(lpc_order or (2 + 2 * config.sample_rate // 1000))
 
     def calculate(self, voice: np.ndarray,
@@ -810,6 +818,11 @@ class FormantCalculator(MetricCalculator):
             if len(pk) == 0:
                 continue
             pf = freqs_band[pk]
+            # Drop peaks below the F1 floor — these are subharmonic / low-
+            # frequency LPC artifacts that would hijack the F1 slot and
+            # pull the whole formant vector down (ours diverged from Praat
+            # by ~25% before this gate was added).
+            pf = pf[pf >= self.f1_floor]
             # Already ascending because freqs_band is monotonic
             if len(pf) >= 1: f1[i] = pf[0]
             if len(pf) >= 2: f2[i] = pf[1]
@@ -927,36 +940,70 @@ class PerturbationCalculator(MetricCalculator):
         "shimmer_local", "shimmer_db",  "shimmer_apq11",
     )
 
-    @staticmethod
-    def _local_perturb(x: np.ndarray) -> np.ndarray:
-        """|x[i] - x[i-1]| / mean(x) · 100 ; aligned to x (index 0 stays 0)."""
-        mx = x.mean()
-        if mx <= 0 or len(x) < 2:
-            return np.zeros_like(x)
-        out = np.zeros_like(x)
-        out[1:] = np.abs(np.diff(x)) / mx * 100.0
-        return out
+    # MDVP / Praat outlier rejection. A successive period (or amplitude)
+    # ratio beyond these factors is treated as a detection glitch and the
+    # affected cycle is masked out of the perturbation sum and denominator.
+    # 1.3 / 1.6 are Praat's documented defaults.
+    PERIOD_FACTOR_MAX    = 1.3
+    AMPLITUDE_FACTOR_MAX = 1.6
 
     @staticmethod
-    def _npq_perturb(x: np.ndarray, n_pts: int) -> np.ndarray:
-        """n-point perturbation quotient, n odd. |x[i] - avg(x[i-k..i+k])| / mean(x) · 100"""
+    def _adjacent_ok(x: np.ndarray, max_factor: float) -> np.ndarray:
+        """Boolean per-cycle mask: True if x[i] and x[i-1] are within a
+        factor of max_factor of each other. Cycle 0 is always False (no
+        previous neighbour to compare to)."""
+        ok = np.zeros(len(x), dtype=bool)
+        if len(x) < 2:
+            return ok
+        prev, cur = x[:-1], x[1:]
+        safe_prev = np.maximum(prev, 1e-15)
+        safe_cur  = np.maximum(cur,  1e-15)
+        ratio = np.maximum(safe_cur / safe_prev, safe_prev / safe_cur)
+        ok[1:] = ratio < max_factor
+        return ok
+
+    @classmethod
+    def _local_perturb(cls, x: np.ndarray, ok: np.ndarray) -> np.ndarray:
+        """Praat-style jitter/shimmer local with outlier mask.
+        |x[i] - x[i-1]| / mean(x over ok cycles) · 100; cycles with
+        ok[i]=False contribute 0 (masked out of both numerator and denominator).
+        """
+        out = np.zeros_like(x)
+        if len(x) < 2 or not ok.any():
+            return out
+        mx = x[ok | np.roll(ok, -1)].mean() if ok.any() else 0.0
+        if mx <= 0:
+            return out
+        diff = np.abs(np.diff(x))
+        out[1:] = np.where(ok[1:], diff / mx * 100.0, 0.0)
+        return out
+
+    @classmethod
+    def _npq_perturb(cls, x: np.ndarray, n_pts: int,
+                     ok: np.ndarray) -> np.ndarray:
+        """n-point PPQ/APQ with ok mask; pairs that touch an ok=False
+        cycle are zeroed."""
         if n_pts % 2 != 1:
             raise ValueError("n_pts must be odd")
         k = n_pts // 2
-        if len(x) < n_pts:
+        if len(x) < n_pts or not ok.any():
             return np.zeros_like(x)
-        mx = x.mean()
+        mx = x[ok].mean()
         if mx <= 0:
             return np.zeros_like(x)
-        wins = sliding_window_view(x, n_pts)        # (len-n_pts+1, n_pts)
-        avg  = wins.mean(axis=1)                    # center aligned to x[k:k+len(avg)]
-        out  = np.zeros_like(x)
-        out[k:k + len(avg)] = np.abs(x[k:k + len(avg)] - avg) / mx * 100.0
+        wins      = sliding_window_view(x,  n_pts)   # (len-n_pts+1, n_pts)
+        wins_ok   = sliding_window_view(ok, n_pts)
+        avg       = wins.mean(axis=1)
+        center_ok = wins_ok[:, k] & wins_ok.all(axis=1)
+        raw       = np.abs(x[k:k + len(avg)] - avg) / mx * 100.0
+        out = np.zeros_like(x)
+        out[k:k + len(avg)] = np.where(center_ok, raw, 0.0)
         return out
 
     def calculate(self, voice: np.ndarray,
                   cycle_triggers: np.ndarray) -> Dict[str, np.ndarray]:
-        logger.info("Calculating jitter + shimmer (per-cycle)...")
+        logger.info("Calculating jitter + shimmer (MDVP, period-factor %.1f)...",
+                    self.PERIOD_FACTOR_MAX)
         idx = np.where(cycle_triggers > 0.5)[0]
         n = max(len(idx) - 1, 0)
         z = lambda: np.zeros(n)
@@ -980,15 +1027,20 @@ class PerturbationCalculator(MetricCalculator):
                 A[i] = 0.0
         A_safe = np.maximum(A, 1e-15)
 
-        jitter_local  = self._local_perturb(T)
-        jitter_rap    = self._npq_perturb(T, 3)
-        jitter_ppq5   = self._npq_perturb(T, 5)
+        # Outlier masks (Praat-style period/amplitude factor rejection)
+        ok_T = self._adjacent_ok(T, self.PERIOD_FACTOR_MAX)
+        ok_A = self._adjacent_ok(A, self.AMPLITUDE_FACTOR_MAX)
 
-        shimmer_local = self._local_perturb(A)
-        # dB shimmer: per-cycle |20·log10(A[i]/A[i-1])|; cycle 0 stays 0
+        jitter_local  = self._local_perturb(T, ok_T)
+        jitter_rap    = self._npq_perturb  (T, 3,  ok_T)
+        jitter_ppq5   = self._npq_perturb  (T, 5,  ok_T)
+
+        shimmer_local = self._local_perturb(A, ok_A)
+        # dB shimmer: per-cycle |20·log10(A[i]/A[i-1])|; masked at outlier cycles
         shimmer_db    = np.zeros(n)
-        shimmer_db[1:] = np.abs(20.0 * np.log10(A_safe[1:] / A_safe[:-1]))
-        shimmer_apq11 = self._npq_perturb(A, 11)
+        shimmer_db[1:] = np.where(
+            ok_A[1:], np.abs(20.0 * np.log10(A_safe[1:] / A_safe[:-1])), 0.0)
+        shimmer_apq11 = self._npq_perturb(A, 11, ok_A)
 
         logger.info("  Jitter local=%.3f%%  RAP=%.3f%%  PPQ5=%.3f%%",
                     float(jitter_local[jitter_local > 0].mean() or 0),
