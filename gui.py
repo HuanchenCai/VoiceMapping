@@ -468,12 +468,13 @@ class FonaDynApp(_TkBase):
         except Exception:
             pass
 
-        # tk.Menu 在 Windows 下 font 参数有时被原生菜单样式压制；用
-        # option database 强制所有 Menu 都用 YaHei UI，确保 metric 下拉
-        # 里中文和英文字形权重一致。
-        self.option_add("*Menu.font",         ("Microsoft YaHei UI", 10))
-        self.option_add("*Menu.background",   PANEL_HI)
-        self.option_add("*Menu.foreground",   TEXT)
+        # 菜单颜色也走 option DB，值必须是字符串；字体直接用已经
+        # configure 过的 TkMenuFont 命名字体（不要传 Python 元组，option
+        # database 会把 ("Microsoft YaHei UI", 10) 存成字面量字符串，
+        # Tcl 解析不了就回退到系统字体，和我们自己画的字叠在一起就出
+        # "幻影"）。
+        self.option_add("*Menu.background",       PANEL_HI)
+        self.option_add("*Menu.foreground",       TEXT)
         self.option_add("*Menu.activeBackground", ACCENT)
         self.option_add("*Menu.activeForeground", BG)
 
@@ -516,6 +517,47 @@ class FonaDynApp(_TkBase):
                     fieldbackground=PANEL_HI, foreground=TEXT,
                     bordercolor=BORDER, lightcolor=BORDER, darkcolor=BORDER,
                     insertcolor=TEXT)
+        s.map("TEntry",
+              bordercolor=[("focus", ACCENT)],
+              lightcolor=[("focus", ACCENT)],
+              darkcolor=[("focus", ACCENT)])
+
+        # Spinbox with dark fill, accent arrows, accent-bordered focus
+        s.configure("TSpinbox",
+                    fieldbackground=PANEL_HI, background=PANEL_HI,
+                    foreground=TEXT,
+                    bordercolor=BORDER, lightcolor=BORDER, darkcolor=BORDER,
+                    arrowcolor=ACCENT, arrowsize=13,
+                    insertcolor=TEXT, padding=(6, 3))
+        s.map("TSpinbox",
+              fieldbackground=[("readonly", PANEL_HI), ("disabled", PANEL)],
+              foreground=[("disabled", MUTED)],
+              bordercolor=[("focus", ACCENT)],
+              lightcolor=[("focus", ACCENT)],
+              darkcolor=[("focus", ACCENT)],
+              arrowcolor=[("active", ACCENT_HI), ("disabled", MUTED)])
+
+        # Checkbutton: hollow indicator box filled with accent when on
+        s.configure("TCheckbutton",
+                    background=PANEL, foreground=TEXT,
+                    focuscolor=PANEL, padding=(2, 2),
+                    indicatorbackground=PANEL_HI,
+                    indicatorforeground=ACCENT)
+        s.map("TCheckbutton",
+              background=[("active", PANEL)],
+              indicatorbackground=[("selected", ACCENT),
+                                   ("!selected", PANEL_HI)])
+
+        # Radiobutton: same treatment
+        s.configure("TRadiobutton",
+                    background=PANEL, foreground=TEXT,
+                    focuscolor=PANEL, padding=(2, 2),
+                    indicatorbackground=PANEL_HI,
+                    indicatorforeground=ACCENT)
+        s.map("TRadiobutton",
+              background=[("active", PANEL)],
+              indicatorbackground=[("selected", ACCENT),
+                                   ("!selected", PANEL_HI)])
 
         s.configure("TCombobox",
                     fieldbackground=PANEL_HI, foreground=TEXT,
@@ -622,10 +664,14 @@ class FonaDynApp(_TkBase):
         self.metric_btn = ttk.Menubutton(side, textvariable=self.metric_var,
                                           style="Metric.TMenubutton", width=18)
         self.metric_btn.pack()
+        # 用字符串 "TkMenuFont" 引用已经 configure 过的命名字体。
+        # 传 Python 元组 ("Microsoft YaHei UI", 10) 看似能工作但实际上
+        # Tk 会为每个 Menu 创建一个匿名字体对象，加上菜单本身的默认
+        # 字体，两层字形叠加就产生视觉上的 "幻影"。
         self.metric_menu = tk.Menu(self.metric_btn, tearoff=0,
                                     bg=PANEL_HI, fg=TEXT,
                                     activebackground=ACCENT, activeforeground=BG,
-                                    font=FONT_UI, bd=0,
+                                    font="TkMenuFont", bd=0,
                                     disabledforeground=ACCENT)   # 节标题用强调色
         self.metric_btn["menu"] = self.metric_menu
         self.metric_btn.state(["disabled"])
