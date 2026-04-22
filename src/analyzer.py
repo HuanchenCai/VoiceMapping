@@ -23,7 +23,7 @@ from metrics import (
     CrestCalculator, QcontactCalculator, EntropyCalculator, HRFCalculator,
     ClusterCalculator, PhonClusterCalculator,
     PerturbationCalculator, HNRCalculator,
-    VibratoCalculator, FormantCalculator,
+    VibratoCalculator, FormantCalculator, HarmonicDiffCalculator,
 )
 
 logger = get_logger(__name__)
@@ -154,6 +154,7 @@ class VoiceMapAnalyzer:
         self.hnr_calculator      = HNRCalculator(self.config)
         self.vibrato_calculator  = VibratoCalculator(self.config)
         self.formant_calculator  = FormantCalculator(self.config)
+        self.harmdiff_calculator = HarmonicDiffCalculator(self.config)
 
         logger.info("VoiceMap analyzer initialized (numba=%s)", _NUMBA)
 
@@ -364,6 +365,8 @@ class VoiceMapAnalyzer:
         vib_rate, vib_extent                 = self.vibrato_calculator.calculate(midi_values, _idx)
         # P2: formants + Singer's Formant Energy from pre-emphasised voice
         formant_values                       = self.formant_calculator.calculate(voice_signal, cycle_triggers)
+        # P2: H1-H2 / H1-H3 spectral tilt (voice DFT per cycle)
+        harmdiff_values                      = self.harmdiff_calculator.calculate(voice_signal, cycle_triggers)
 
         base = {
             'midi':     midi_values,
@@ -392,6 +395,8 @@ class VoiceMapAnalyzer:
             'f2':  formant_values['f2'],
             'f3':  formant_values['f3'],
             'sfe': formant_values['sfe'],
+            'h1h2': harmdiff_values['h1h2'],
+            'h1h3': harmdiff_values['h1h3'],
         }
         # Phonation-type cluster uses the already-computed quality metrics
         # as features — must run AFTER them.
@@ -518,6 +523,8 @@ class VoiceMapAnalyzer:
             'F2':            _pad(metrics.get('f2'),  base_n),
             'F3':            _pad(metrics.get('f3'),  base_n),
             'SingersFormant': _pad(metrics.get('sfe'), base_n),
+            'H1H2':           _pad(metrics.get('h1h2'), base_n),
+            'H1H3':           _pad(metrics.get('h1h3'), base_n),
             '_cluster': cluster.astype(int),
             '_phon':    phon.astype(int),
         })
@@ -542,6 +549,7 @@ class VoiceMapAnalyzer:
             'VibratoRate': 'mean', 'VibratoExtent': 'mean',
             'F1': 'mean', 'F2': 'mean', 'F3': 'mean',
             'SingersFormant': 'mean',
+            'H1H2': 'mean', 'H1H3': 'mean',
             'Total': 'sum',
         }).reset_index()
 
@@ -563,6 +571,7 @@ class VoiceMapAnalyzer:
             # P2 (singing-specific)
             'VibratoRate', 'VibratoExtent',
             'F1', 'F2', 'F3', 'SingersFormant',
+            'H1H2', 'H1H3',
             # P0 cluster
             'maxCluster',
             'Cluster 1', 'Cluster 2', 'Cluster 3', 'Cluster 4', 'Cluster 5',

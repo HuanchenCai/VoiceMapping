@@ -262,6 +262,21 @@ METRIC_CFG = {
         cmap=_hsv_sweep(2/3, 0.0, "fd_sfe"),   # blue→red (low→high = more ring)
         norm=None,
     ),
+    # H1-H2 / H1-H3 spectral tilt from voice DFT per cycle.
+    # Breathy > 10 dB, modal ~ 2-6, pressed ≤ 0. Diverging palette so
+    # zero-crossing is visible: blue = pressed, green ≈ modal, red = breathy.
+    "H1H2": dict(
+        label="H1-H2  (voice)",
+        vmin=-10.0, vmax=20.0, unit="dB",
+        cmap=_hsv_sweep(2/3, 0.0, "fd_h1h2"),   # blue→red = pressed→breathy
+        norm=None,
+    ),
+    "H1H3": dict(
+        label="H1-H3  (voice)",
+        vmin=-10.0, vmax=25.0, unit="dB",
+        cmap=_hsv_sweep(2/3, 0.0, "fd_h1h3"),
+        norm=None,
+    ),
     # ── EGG waveform clusters ───────────────────────────────────────────────
     # maxCluster / maxCPhon: dominant cluster id (1..5). Use a discrete 5-step
     # qualitative palette so you can visually distinguish which mode dominates

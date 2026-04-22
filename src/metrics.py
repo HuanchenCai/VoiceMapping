@@ -850,6 +850,61 @@ class FormantCalculator(MetricCalculator):
 
 
 # ---------------------------------------------------------------------------
+# P2: H1-H2 and H1-H3 — spectral tilt from voice-channel per-cycle DFT.
+#
+# Physics: the relative amplitude of the fundamental versus the next
+# harmonics encodes glottal source shape.
+#   Breathy   → H1 strong, H2/H3 weak   → H1-H2 positive and large
+#   Modal     → graded decay             → H1-H2 ≈ 2–6 dB
+#   Pressed   → H2 close to or above H1  → H1-H2 near 0 or negative
+# These complement the EGG-side Qcontact/Icontact picture.
+#
+# Per cycle: reuse _compute_cycle_dft on the *voice* channel (not EGG)
+# for the first 3 harmonics. H1–H2 = 20·log10(|X[0]|/|X[1]|), similarly H3.
+# Output clipped to ±40 dB so a spurious near-zero harmonic can't destroy
+# the per-cell mean on aggregation.
+# ---------------------------------------------------------------------------
+class HarmonicDiffCalculator(MetricCalculator):
+    """Per-cycle H1-H2 and H1-H3 (voice) in dB."""
+
+    def __init__(self, config: VoiceMapConfig, clip_db: float = 40.0):
+        super().__init__(config)
+        self.clip_db = float(clip_db)
+
+    def calculate(self, voice: np.ndarray,
+                  cycle_triggers: np.ndarray) -> Dict[str, np.ndarray]:
+        logger.info("Calculating H1-H2 / H1-H3 (voice DFT)...")
+        idx = np.where(cycle_triggers > 0.5)[0]
+        n_cycles = max(len(idx) - 1, 0)
+        if n_cycles == 0:
+            return {"h1h2": np.zeros(0), "h1h3": np.zeros(0)}
+
+        # Voice per-cycle DFT at 3 harmonics (function is signal-agnostic —
+        # reuses the exact same single-cycle FFT machinery we already use
+        # for EGG in HRFCalculator, ClusterCalculator, etc.).
+        amps, _ = _compute_cycle_dft(voice, idx, 3)   # (n, 3)
+
+        eps = 1e-15
+        h1 = np.maximum(amps[:, 0], eps)
+        h2 = np.maximum(amps[:, 1], eps)
+        h3 = np.maximum(amps[:, 2], eps)
+        h1h2 = 20.0 * np.log10(h1 / h2)
+        h1h3 = 20.0 * np.log10(h1 / h3)
+
+        # Clip pathological extremes (near-zero harmonic amplitude on very
+        # short or noisy cycles otherwise gives ±∞ that destroys cell means).
+        np.clip(h1h2, -self.clip_db, self.clip_db, out=h1h2)
+        np.clip(h1h3, -self.clip_db, self.clip_db, out=h1h3)
+
+        logger.info("  H1-H2: mean=%.2f dB  range=[%.2f, %.2f]",
+                    float(h1h2.mean()), float(h1h2.min()), float(h1h2.max()))
+        logger.info("  H1-H3: mean=%.2f dB  range=[%.2f, %.2f]",
+                    float(h1h3.mean()), float(h1h3.min()), float(h1h3.max()))
+
+        return {"h1h2": h1h2, "h1h3": h1h3}
+
+
+# ---------------------------------------------------------------------------
 # P1: Jitter / Shimmer per cycle.
 #   Jitter_local  = mean(|T[i] - T[i-1]|) / mean(T)      · %
 #   Jitter_RAP    = mean(|T[i] - avg3(T[i-1..i+1])|) / mean(T)   · %   (3-pt)
