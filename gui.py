@@ -68,6 +68,76 @@ _METRIC_ORDER = [m for m in METRIC_CFG.keys() if m not in _SKIP_ZERO_METRICS]
 _DEFAULT_METRIC_CHAIN = ["CPP", "Clarity", "SpecBal", "Crest"]
 
 
+# ─── 设置对话框 ──────────────────────────────────────────────────────────────
+class SettingsDialog(tk.Toplevel):
+    """所有分析/输出相关的可配置项都在这里。现在只有 Clarity 阈值和输出目录，
+    随着新 metric（clustering / jitter / formants 等）加进来会继续扩展。"""
+
+    def __init__(self, app: "FonaDynApp"):
+        super().__init__(app)
+        self.app = app
+        self.transient(app)
+        self.title("设置")
+        self.configure(bg=PANEL)
+        self.resizable(False, False)
+
+        pad = tk.Frame(self, bg=PANEL)
+        pad.pack(padx=24, pady=20)
+
+        # ─ 分析参数 ─
+        tk.Label(pad, text="分析参数", bg=PANEL, fg=ACCENT, font=FONT_UI_B
+                 ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
+
+        tk.Label(pad, text="Clarity 阈值", bg=PANEL, fg=TEXT, font=FONT_UI
+                 ).grid(row=1, column=0, sticky="w", pady=3)
+        scale_wrap = tk.Frame(pad, bg=PANEL)
+        scale_wrap.grid(row=1, column=1, sticky="ew", padx=(18, 0), pady=3)
+        ttk.Scale(scale_wrap, from_=0.80, to=1.00,
+                  variable=app.clarity_var, orient="horizontal",
+                  length=240).pack(side="left")
+        self.clarity_lbl = tk.Label(scale_wrap,
+                                    text=f"{app.clarity_var.get():.2f}",
+                                    bg=PANEL, fg=ACCENT, font=FONT_UI_B, width=5)
+        self.clarity_lbl.pack(side="left", padx=(10, 0))
+
+        # ─ 输出 ─
+        tk.Label(pad, text="输出", bg=PANEL, fg=ACCENT, font=FONT_UI_B
+                 ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(18, 6))
+
+        tk.Label(pad, text="目录", bg=PANEL, fg=TEXT, font=FONT_UI
+                 ).grid(row=3, column=0, sticky="w", pady=3)
+        out_row = tk.Frame(pad, bg=PANEL)
+        out_row.grid(row=3, column=1, sticky="ew", padx=(18, 0), pady=3)
+        ttk.Entry(out_row, textvariable=app.output_dir_var, width=32
+                  ).pack(side="left")
+        ttk.Button(out_row, text="…", style="Ghost.TButton",
+                   command=app._pick_output_dir, width=3
+                   ).pack(side="left", padx=(6, 0))
+
+        # ─ 关闭 ─
+        btn_row = tk.Frame(pad, bg=PANEL)
+        btn_row.grid(row=4, column=0, columnspan=2, sticky="e", pady=(22, 0))
+        ttk.Button(btn_row, text="完成", style="Accent.TButton",
+                   command=self.destroy).pack()
+
+        # 居中到父窗口
+        self.update_idletasks()
+        try:
+            px, py = app.winfo_rootx(), app.winfo_rooty()
+            pw, ph = app.winfo_width(), app.winfo_height()
+            ww, wh = self.winfo_width(), self.winfo_height()
+            self.geometry(f"+{px + (pw - ww)//2}+{py + (ph - wh)//2}")
+        except Exception:
+            pass
+
+    def update_clarity_label(self):
+        """主 app 在 clarity_var 变化时调用，同步本对话框里的数值显示。"""
+        try:
+            self.clarity_lbl.configure(text=f"{self.app.clarity_var.get():.2f}")
+        except tk.TclError:
+            pass
+
+
 # ─── 分析进度对话框 ──────────────────────────────────────────────────────────
 class ProgressDialog(tk.Toplevel):
     """模态小窗：分析进行时显示文件名 + 当前阶段 + 不确定进度条。"""
@@ -156,6 +226,8 @@ class FonaDynApp(_TkBase):
 
         self.output_dir_var = tk.StringVar(value=str(_HERE / DEFAULT_CONFIG.output_dir))
         self.clarity_var    = tk.DoubleVar(value=DEFAULT_CONFIG.clarity_threshold)
+        # clarity 值变化 → 同步到设置对话框 + 防抖后重绘 voice map
+        self.clarity_var.trace_add("write", self._on_clarity_var_changed)
         self.metric_var     = tk.StringVar(value="")
         self.csv_path_var   = tk.StringVar(value="—")
 
@@ -169,6 +241,7 @@ class FonaDynApp(_TkBase):
         self._clarity_render_after: str | None = None  # clarity 滑动防抖句柄
         self._showing_placeholder = True   # 当前是否在显示占位图（resize 时会重绘）
         self._progress_dialog = None       # 分析进行时的模态对话框
+        self._settings_dialog = None       # 设置对话框（单例）
 
         # 高 DPI 下让 Tk 按物理像素缩放，而不是走老式位图放大
         try:
@@ -321,25 +394,9 @@ class FonaDynApp(_TkBase):
         pad = tk.Frame(parent, bg=PANEL)
         pad.pack(fill="both", expand=True, padx=14, pady=14)
 
-        # Clarity
-        tk.Label(pad, text="Clarity 阈值", bg=PANEL, fg=ACCENT, font=FONT_UI_B).pack(anchor="w")
-        row = tk.Frame(pad, bg=PANEL)
-        row.pack(fill="x", pady=(4, 12))
-        scale = ttk.Scale(row, from_=0.80, to=1.00, variable=self.clarity_var,
-                          orient="horizontal",
-                          command=lambda _v: self._update_clarity_lbl())
-        scale.pack(side="left", fill="x", expand=True)
-        self.clarity_lbl = tk.Label(row, width=5, bg=PANEL, fg=ACCENT, font=FONT_UI_B)
-        self.clarity_lbl.pack(side="left", padx=(8, 0))
-        self._update_clarity_lbl()
-
-        # 输出目录
-        tk.Label(pad, text="输出目录", bg=PANEL, fg=ACCENT, font=FONT_UI_B).pack(anchor="w")
-        out_row = tk.Frame(pad, bg=PANEL)
-        out_row.pack(fill="x", pady=(4, 12))
-        ttk.Entry(out_row, textvariable=self.output_dir_var).pack(side="left", fill="x", expand=True)
-        ttk.Button(out_row, text="…", style="Ghost.TButton",
-                   command=self._pick_output_dir, width=3).pack(side="left", padx=(6, 0))
+        # 设置入口（Clarity 阈值 / 输出目录 等都在对话框里）
+        ttk.Button(pad, text="⚙  设置", style="Ghost.TButton",
+                   command=self._open_settings).pack(fill="x", pady=(0, 14))
 
         # CSV 结果
         tk.Label(pad, text="最新 CSV", bg=PANEL, fg=ACCENT, font=FONT_UI_B).pack(anchor="w")
@@ -757,10 +814,34 @@ class FonaDynApp(_TkBase):
             pass
         self.after(80, self._drain_queue)
 
-    # ── 状态 ──
-    def _update_clarity_lbl(self):
-        self.clarity_lbl.configure(text=f"{self.clarity_var.get():.2f}")
-        # Clarity 滑动 → 防抖后刷新 voice map（不重跑分析，只改过滤阈值）
+    # ── 设置对话框 ──
+    def _open_settings(self):
+        # 单例：已打开就 focus；没打开就 new 一个
+        if self._settings_dialog is not None:
+            try:
+                if self._settings_dialog.winfo_exists():
+                    self._settings_dialog.lift()
+                    self._settings_dialog.focus_force()
+                    return
+            except tk.TclError:
+                pass
+        self._settings_dialog = SettingsDialog(self)
+        # 关闭时清引用
+        def _on_destroy(_e, _self=self):
+            if _e.widget is _self._settings_dialog:
+                _self._settings_dialog = None
+        self._settings_dialog.bind("<Destroy>", _on_destroy)
+
+    # ── Clarity 变化回调（由 clarity_var.trace_add 触发） ──
+    def _on_clarity_var_changed(self, *_):
+        # 1) 同步设置对话框里的数值显示
+        if self._settings_dialog is not None:
+            try:
+                if self._settings_dialog.winfo_exists():
+                    self._settings_dialog.update_clarity_label()
+            except tk.TclError:
+                pass
+        # 2) 防抖后重绘 voice map（不重跑分析，只改展示层过滤阈值）
         if self._last_df is None:
             return
         if self._clarity_render_after is not None:
