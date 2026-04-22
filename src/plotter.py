@@ -167,6 +167,55 @@ METRIC_CFG = {
         cmap=_CMAP["Total"],
         norm=LogNorm(vmin=1, vmax=10000, clip=True),     # SC: explin -> log axis
     ),
+    # ── P1: Jitter / Shimmer / HNR  (clinical voice-quality indices) ──
+    # Jitter family: higher = worse; green→red sweep. Clinical pathological
+    # threshold is around 1.04% for local jitter (MDVP norm) so vmax=3 puts
+    # normal at the cool end, warning at the hot end.
+    "Jitter": dict(
+        label="Jitter (local)",
+        vmin=0.0, vmax=3.0, unit="%",
+        cmap=_hsv_sweep(1/3, 0.0, "fd_jitter"),
+        norm=None,
+    ),
+    "JitterRAP": dict(
+        label="Jitter RAP (3-pt)",
+        vmin=0.0, vmax=3.0, unit="%",
+        cmap=_hsv_sweep(1/3, 0.0, "fd_jitter_rap"),
+        norm=None,
+    ),
+    "JitterPPQ5": dict(
+        label="Jitter PPQ5 (5-pt)",
+        vmin=0.0, vmax=3.0, unit="%",
+        cmap=_hsv_sweep(1/3, 0.0, "fd_jitter_ppq5"),
+        norm=None,
+    ),
+    # Shimmer family: pathological threshold ~3.8% for local shimmer.
+    "Shimmer": dict(
+        label="Shimmer (local)",
+        vmin=0.0, vmax=10.0, unit="%",
+        cmap=_hsv_sweep(1/3, 0.0, "fd_shimmer"),
+        norm=None,
+    ),
+    "ShimmerDB": dict(
+        label="Shimmer",
+        vmin=0.0, vmax=1.0, unit="dB",
+        cmap=_hsv_sweep(1/3, 0.0, "fd_shimmer_db"),
+        norm=None,
+    ),
+    "ShimmerAPQ11": dict(
+        label="Shimmer APQ11 (11-pt)",
+        vmin=0.0, vmax=10.0, unit="%",
+        cmap=_hsv_sweep(1/3, 0.0, "fd_shimmer_apq11"),
+        norm=None,
+    ),
+    # HNR: higher = healthier voice (>20 dB normal). Use blue→red reversed
+    # so high values (good) are cool/calm and low values (noisy) are hot.
+    "HNR": dict(
+        label="HNR",
+        vmin=0.0, vmax=35.0, unit="dB",
+        cmap=_hsv_sweep(0.0, 2/3, "fd_hnr"),   # red→blue (low→high)
+        norm=None,
+    ),
     # ── EGG waveform clusters ───────────────────────────────────────────────
     # maxCluster / maxCPhon: dominant cluster id (1..5). Use a discrete 5-step
     # qualitative palette so you can visually distinguish which mode dominates

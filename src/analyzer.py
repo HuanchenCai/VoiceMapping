@@ -22,6 +22,7 @@ from metrics import (
     SPLCalculator, ClarityCalculator, CPPCalculator, SpecBalCalculator,
     CrestCalculator, QcontactCalculator, EntropyCalculator, HRFCalculator,
     ClusterCalculator, PhonClusterCalculator,
+    PerturbationCalculator, HNRCalculator,
 )
 
 logger = get_logger(__name__)
@@ -148,6 +149,8 @@ class VoiceMapAnalyzer:
         self.hrf_calculator      = HRFCalculator(self.config)
         self.cluster_calculator  = ClusterCalculator(self.config)
         self.phon_calculator     = PhonClusterCalculator(self.config)
+        self.perturb_calculator  = PerturbationCalculator(self.config)
+        self.hnr_calculator      = HNRCalculator(self.config)
 
         logger.info("VoiceMap analyzer initialized (numba=%s)", _NUMBA)
 
@@ -351,6 +354,10 @@ class VoiceMapAnalyzer:
         hrf_values                           = self.hrf_calculator.calculate(egg_signal, cycle_triggers, dft=_dft)
         cluster_values                       = self.cluster_calculator.calculate(egg_signal, cycle_triggers, dft=_dft)
 
+        # P1: voice-perturbation family (jitter/shimmer) + voice HNR
+        perturb_values                       = self.perturb_calculator.calculate(voice_signal, cycle_triggers)
+        hnr_values                           = self.hnr_calculator.calculate(voice_signal, cycle_triggers)
+
         base = {
             'midi':     midi_values,
             'spl':      spl_values,
@@ -364,6 +371,14 @@ class VoiceMapAnalyzer:
             'entropy':  entropy_values,
             'hrf':      hrf_values,
             'cluster':  cluster_values,
+            # P1
+            'jitter':        perturb_values['jitter_local'],
+            'jitter_rap':    perturb_values['jitter_rap'],
+            'jitter_ppq5':   perturb_values['jitter_ppq5'],
+            'shimmer':       perturb_values['shimmer_local'],
+            'shimmer_db':    perturb_values['shimmer_db'],
+            'shimmer_apq11': perturb_values['shimmer_apq11'],
+            'hnr':           hnr_values,
         }
         # Phonation-type cluster uses the already-computed quality metrics
         # as features — must run AFTER them.
@@ -455,6 +470,15 @@ class VoiceMapAnalyzer:
             phon = np.concatenate([phon, np.zeros(base_n - len(phon),
                                                    dtype=phon.dtype)])
 
+        # P1 per-cycle scalars: align to base_n same as cluster arrays
+        def _pad(arr, n, dtype=np.float64):
+            if arr is None:
+                return np.zeros(n, dtype=dtype)
+            arr = np.asarray(arr, dtype=dtype)
+            if len(arr) < n:
+                return np.concatenate([arr, np.zeros(n - len(arr), dtype=dtype)])
+            return arr[:n]
+
         df = pd.DataFrame({
             'MIDI':     np.round(np.where(metrics['midi'] > 0, metrics['midi'], 0)).astype(int),
             'dB':       np.round(np.where(spl_corr > 0, spl_corr, 0)).astype(int),
@@ -468,6 +492,13 @@ class VoiceMapAnalyzer:
             'dEGGmax':  metrics['deggmax'],
             'Icontact': metrics['icontact'],
             'HRFegg':   metrics['hrf'],
+            'Jitter':        _pad(metrics.get('jitter'),        base_n),
+            'JitterRAP':     _pad(metrics.get('jitter_rap'),    base_n),
+            'JitterPPQ5':    _pad(metrics.get('jitter_ppq5'),   base_n),
+            'Shimmer':       _pad(metrics.get('shimmer'),       base_n),
+            'ShimmerDB':     _pad(metrics.get('shimmer_db'),    base_n),
+            'ShimmerAPQ11':  _pad(metrics.get('shimmer_apq11'), base_n),
+            'HNR':           _pad(metrics.get('hnr'),           base_n),
             '_cluster': cluster.astype(int),
             '_phon':    phon.astype(int),
         })
@@ -486,6 +517,9 @@ class VoiceMapAnalyzer:
             'CPP': 'mean', 'SpecBal': 'mean',
             'Crest': 'mean', 'Entropy': 'mean', 'Qcontact': 'mean',
             'dEGGmax': 'mean', 'Icontact': 'mean', 'HRFegg': 'mean',
+            'Jitter': 'mean', 'JitterRAP': 'mean', 'JitterPPQ5': 'mean',
+            'Shimmer': 'mean', 'ShimmerDB': 'mean', 'ShimmerAPQ11': 'mean',
+            'HNR': 'mean',
             'Total': 'sum',
         }).reset_index()
 
@@ -500,7 +534,12 @@ class VoiceMapAnalyzer:
 
         standard_columns = [
             'MIDI', 'dB', 'Total', 'Clarity', 'Crest', 'SpecBal', 'CPP', 'Entropy',
-            'dEGGmax', 'Qcontact', 'Icontact', 'HRFegg', 'maxCluster',
+            'dEGGmax', 'Qcontact', 'Icontact', 'HRFegg',
+            # P1
+            'Jitter', 'JitterRAP', 'JitterPPQ5',
+            'Shimmer', 'ShimmerDB', 'ShimmerAPQ11', 'HNR',
+            # P0 cluster
+            'maxCluster',
             'Cluster 1', 'Cluster 2', 'Cluster 3', 'Cluster 4', 'Cluster 5',
             'maxCPhon', 'cPhon 1', 'cPhon 2', 'cPhon 3', 'cPhon 4', 'cPhon 5',
         ]

@@ -8,7 +8,7 @@ import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 from scipy.signal import butter, sosfilt, lfilter
 from scipy.fft import rfft, irfft, ifft as _ifft
-from typing import Tuple
+from typing import Tuple, Dict
 import logging
 
 from config import VoiceMapConfig
@@ -589,6 +589,202 @@ class HRFCalculator(MetricCalculator):
         logger.info("  HRFegg: %d cycles  mean %.2f  range %.2f – %.2f dB",
                     n_cycles, hrf.mean(), hrf.min(), hrf.max())
         return hrf
+
+
+# ---------------------------------------------------------------------------
+# P1: Jitter / Shimmer per cycle.
+#   Jitter_local  = mean(|T[i] - T[i-1]|) / mean(T)      · %
+#   Jitter_RAP    = mean(|T[i] - avg3(T[i-1..i+1])|) / mean(T)   · %   (3-pt)
+#   Jitter_PPQ5   = mean(|T[i] - avg5(T[i-2..i+2])|) / mean(T)   · %   (5-pt)
+#   Shimmer_local = mean(|A[i] - A[i-1]|) / mean(A)      · %
+#   Shimmer_dB    = mean(|20·log10(A[i] / A[i-1])|)      · dB
+#   Shimmer_APQ11 = mean(|A[i] - avg11(A[i-5..i+5])|) / mean(A)  · %   (11-pt)
+# where T[i] = cycle period (samples), A[i] = peak-to-peak voice amplitude.
+#
+# These are the Praat/MDVP formulas used in clinical voice science. Output
+# is a per-cycle value (NOT a whole-recording scalar) so it can be
+# aggregated per VRP cell like every other metric.
+# ---------------------------------------------------------------------------
+class PerturbationCalculator(MetricCalculator):
+    """Cycle-to-cycle jitter (period) and shimmer (amplitude) perturbations."""
+
+    # Keys returned from calculate()
+    KEYS = (
+        "jitter_local", "jitter_rap",   "jitter_ppq5",
+        "shimmer_local", "shimmer_db",  "shimmer_apq11",
+    )
+
+    @staticmethod
+    def _local_perturb(x: np.ndarray) -> np.ndarray:
+        """|x[i] - x[i-1]| / mean(x) · 100 ; aligned to x (index 0 stays 0)."""
+        mx = x.mean()
+        if mx <= 0 or len(x) < 2:
+            return np.zeros_like(x)
+        out = np.zeros_like(x)
+        out[1:] = np.abs(np.diff(x)) / mx * 100.0
+        return out
+
+    @staticmethod
+    def _npq_perturb(x: np.ndarray, n_pts: int) -> np.ndarray:
+        """n-point perturbation quotient, n odd. |x[i] - avg(x[i-k..i+k])| / mean(x) · 100"""
+        if n_pts % 2 != 1:
+            raise ValueError("n_pts must be odd")
+        k = n_pts // 2
+        if len(x) < n_pts:
+            return np.zeros_like(x)
+        mx = x.mean()
+        if mx <= 0:
+            return np.zeros_like(x)
+        wins = sliding_window_view(x, n_pts)        # (len-n_pts+1, n_pts)
+        avg  = wins.mean(axis=1)                    # center aligned to x[k:k+len(avg)]
+        out  = np.zeros_like(x)
+        out[k:k + len(avg)] = np.abs(x[k:k + len(avg)] - avg) / mx * 100.0
+        return out
+
+    def calculate(self, voice: np.ndarray,
+                  cycle_triggers: np.ndarray) -> Dict[str, np.ndarray]:
+        logger.info("Calculating jitter + shimmer (per-cycle)...")
+        idx = np.where(cycle_triggers > 0.5)[0]
+        n = max(len(idx) - 1, 0)
+        z = lambda: np.zeros(n)
+        if n < 3:
+            return {k: z() for k in self.KEYS}
+
+        # Periods T[i] in samples (units cancel in relative formulas)
+        T = np.diff(idx).astype(np.float64)
+
+        # Peak-to-peak voice amplitude per cycle. A plain Python loop over
+        # ~12k cycles is ~60 ms — not worth the complexity of a vectorised
+        # reduceat here (would need boundary-index massage for equal-length
+        # semantics).
+        A = np.empty(n, dtype=np.float64)
+        for i in range(n):
+            s, e = idx[i], idx[i + 1]
+            if e > s:
+                seg = voice[s:e]
+                A[i] = seg.max() - seg.min()
+            else:
+                A[i] = 0.0
+        A_safe = np.maximum(A, 1e-15)
+
+        jitter_local  = self._local_perturb(T)
+        jitter_rap    = self._npq_perturb(T, 3)
+        jitter_ppq5   = self._npq_perturb(T, 5)
+
+        shimmer_local = self._local_perturb(A)
+        # dB shimmer: per-cycle |20·log10(A[i]/A[i-1])|; cycle 0 stays 0
+        shimmer_db    = np.zeros(n)
+        shimmer_db[1:] = np.abs(20.0 * np.log10(A_safe[1:] / A_safe[:-1]))
+        shimmer_apq11 = self._npq_perturb(A, 11)
+
+        logger.info("  Jitter local=%.3f%%  RAP=%.3f%%  PPQ5=%.3f%%",
+                    float(jitter_local[jitter_local > 0].mean() or 0),
+                    float(jitter_rap[jitter_rap > 0].mean() or 0),
+                    float(jitter_ppq5[jitter_ppq5 > 0].mean() or 0))
+        logger.info("  Shimmer local=%.3f%%  dB=%.3f  APQ11=%.3f%%",
+                    float(shimmer_local[shimmer_local > 0].mean() or 0),
+                    float(shimmer_db[shimmer_db > 0].mean() or 0),
+                    float(shimmer_apq11[shimmer_apq11 > 0].mean() or 0))
+
+        return {
+            "jitter_local":  jitter_local,
+            "jitter_rap":    jitter_rap,
+            "jitter_ppq5":   jitter_ppq5,
+            "shimmer_local": shimmer_local,
+            "shimmer_db":    shimmer_db,
+            "shimmer_apq11": shimmer_apq11,
+        }
+
+
+# ---------------------------------------------------------------------------
+# P1: HNR — Harmonics-to-Noise Ratio on the voice channel.
+# Praat-style autocorrelation method. For each analysis frame:
+#   r(τ) = autocorrelation, normalised so r(0) = 1
+#   p    = max r(τ) for τ ∈ [1/f_max, 1/f_min]       (expected pitch range)
+#   HNR  = 10·log10( p / (1 - p) )     dB
+# Computed on 40 ms frames with 10 ms hop; each cycle is assigned the HNR
+# of its enclosing frame.
+# ---------------------------------------------------------------------------
+class HNRCalculator(MetricCalculator):
+    """Per-cycle Harmonics-to-Noise Ratio (Praat autocorrelation method)."""
+
+    def __init__(self, config: VoiceMapConfig,
+                 win_ms: float = 40.0, hop_ms: float = 10.0,
+                 f_min: float = 60.0,   f_max: float = 400.0):
+        super().__init__(config)
+        self.win_ms, self.hop_ms = float(win_ms), float(hop_ms)
+        self.f_min,  self.f_max  = float(f_min),  float(f_max)
+
+    def calculate(self, voice: np.ndarray,
+                  cycle_triggers: np.ndarray) -> np.ndarray:
+        logger.info("Calculating HNR (voice, autocorrelation)...")
+        idx = np.where(cycle_triggers > 0.5)[0]
+        n_cycles = max(len(idx) - 1, 0)
+        if n_cycles == 0:
+            return np.zeros(0)
+
+        sr  = self.sample_rate
+        win = int(self.win_ms * 0.001 * sr)
+        hop = int(self.hop_ms * 0.001 * sr)
+        if len(voice) < win or hop < 1:
+            return np.zeros(n_cycles)
+
+        min_lag = max(1, int(sr / self.f_max))
+        max_lag = int(sr / self.f_min)
+        if max_lag <= min_lag:
+            return np.zeros(n_cycles)
+
+        # FFT size: next power of 2 ≥ 2·win (for linear via circular autocorr)
+        nfft = 1
+        while nfft < 2 * win:
+            nfft *= 2
+
+        # Build all frames at once using sliding_window_view — avoids a
+        # Python loop, drops HNR to well under 100 ms for typical lengths.
+        n_frames = 1 + (len(voice) - win) // hop
+        starts   = np.arange(n_frames) * hop
+        frames   = sliding_window_view(voice, win)[starts]   # (n_frames, win)
+        # Hann window + zero-mean per frame
+        hann     = np.hanning(win)
+        frames_w = (frames - frames.mean(axis=1, keepdims=True)) * hann
+
+        # FFT-based autocorrelation, batched over frames
+        X   = np.fft.rfft(frames_w, nfft, axis=1)
+        acf = np.fft.irfft(X * np.conj(X), nfft, axis=1)[:, :win]   # (n_frames, win)
+
+        # Praat's compensation: windowing reduces the autocorrelation peak
+        # at non-zero lags because the signal gets tapered. Divide by the
+        # autocorrelation of the window itself to recover the unbiased
+        # signal autocorrelation. Without this the HNR is systematically
+        # underestimated (10-15 dB too low on typical voice).
+        W   = np.fft.rfft(hann, nfft)
+        win_acf = np.fft.irfft(W * np.conj(W), nfft)[:win]
+        win_acf_safe = np.where(np.abs(win_acf) < 1e-15, 1.0, win_acf)
+        acf = acf / win_acf_safe[None, :]
+
+        # Normalise by r(0); guard against silent frames
+        r0  = acf[:, 0:1]
+        bad = (r0[:, 0] <= 0)
+        r0_safe = np.where(bad[:, None], 1.0, r0)
+        acf_n = acf / r0_safe
+
+        # Peak in pitch range → HNR
+        peak = acf_n[:, min_lag:max_lag + 1].max(axis=1)
+        peak = np.clip(peak, 1e-6, 0.9999)
+        hnr_frames = 10.0 * np.log10(peak / (1.0 - peak))
+        hnr_frames[bad] = 0.0
+
+        # Assign each cycle to its nearest frame start
+        cycle_starts = idx[:-1]
+        frame_idx    = np.clip(cycle_starts // hop, 0, n_frames - 1)
+        hnr_per_cycle = hnr_frames[frame_idx]
+
+        valid = hnr_per_cycle != 0
+        if valid.any():
+            logger.info("  HNR: %d cycles  mean=%.2f dB  range %.2f – %.2f",
+                        n_cycles, hnr_per_cycle[valid].mean(),
+                        hnr_per_cycle[valid].min(), hnr_per_cycle[valid].max())
+        return hnr_per_cycle
 
 
 # ---------------------------------------------------------------------------
