@@ -19,7 +19,8 @@ from logger import setup_logger, get_logger
 from plotter import plot_vrp_dataframe
 from metrics import (
     SPLCalculator, ClarityCalculator, CPPCalculator, SpecBalCalculator,
-    CrestCalculator, QcontactCalculator, EntropyCalculator, HRFCalculator
+    CrestCalculator, QcontactCalculator, EntropyCalculator, HRFCalculator,
+    ClusterCalculator, PhonClusterCalculator,
 )
 
 logger = get_logger(__name__)
@@ -144,6 +145,8 @@ class VoiceMapAnalyzer:
         self.qcontact_calculator = QcontactCalculator(self.config)
         self.entropy_calculator  = EntropyCalculator(self.config)
         self.hrf_calculator      = HRFCalculator(self.config)
+        self.cluster_calculator  = ClusterCalculator(self.config)
+        self.phon_calculator     = PhonClusterCalculator(self.config)
 
         logger.info("VoiceMap analyzer initialized (numba=%s)", _NUMBA)
 
@@ -281,7 +284,9 @@ class VoiceMapAnalyzer:
         qcontact_values, deggmax_v, ic_v     = self.qcontact_calculator.calculate(egg_signal, cycle_triggers)
         entropy_values                       = self.entropy_calculator.calculate(egg_signal, cycle_triggers)
         hrf_values                           = self.hrf_calculator.calculate(egg_signal, cycle_triggers)
-        return {
+        cluster_values                       = self.cluster_calculator.calculate(egg_signal, cycle_triggers)
+
+        base = {
             'midi':     midi_values,
             'spl':      spl_values,
             'clarity':  clarity_values,
@@ -293,7 +298,12 @@ class VoiceMapAnalyzer:
             'icontact': ic_v,
             'entropy':  entropy_values,
             'hrf':      hrf_values,
+            'cluster':  cluster_values,
         }
+        # Phonation-type cluster uses the already-computed quality metrics
+        # as features — must run AFTER them.
+        base['phon'] = self.phon_calculator.calculate(base)
+        return base
 
     def apply_clarity_filtering(self, metrics: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
         logger.info("Applying Clarity threshold (%.2f)...", self.config.clarity_threshold)
@@ -307,11 +317,65 @@ class VoiceMapAnalyzer:
         return out
 
     # ------------------------------------------------------------------
+    # Cluster aggregation helper
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _aggregate_cluster_labels(df: pd.DataFrame,
+                                   label_col: str, n: int,
+                                   prefix: str, max_col: str) -> pd.DataFrame:
+        """
+        For each (MIDI, dB) cell, compute:
+          - `{prefix}k` (k=1..n) = percentage of cycles in that cell with label == k
+          - `max_col` = k with the highest percentage (0 if cell is empty)
+        Rows with label==0 are treated as "invalid/unclustered" and excluded
+        from the denominator.
+        """
+        # Skip degenerate case: all-zero labels
+        if (df[label_col] == 0).all():
+            keys = df[['MIDI', 'dB']].drop_duplicates().reset_index(drop=True)
+            for k in range(1, n + 1):
+                keys[f"{prefix}{k}"] = 0.0
+            keys[max_col] = 0
+            return keys
+
+        valid = df[df[label_col] > 0].copy()
+        pivot = (valid.groupby(['MIDI', 'dB', label_col])
+                      .size()
+                      .unstack(label_col, fill_value=0))
+        # Ensure every cluster column 1..n is present
+        for k in range(1, n + 1):
+            if k not in pivot.columns:
+                pivot[k] = 0
+        pivot = pivot[[k for k in range(1, n + 1)]]   # stable column order
+        totals = pivot.sum(axis=1).replace(0, np.nan)
+        pct = (100.0 * pivot.div(totals, axis=0)).fillna(0.0)
+        pct.columns = [f"{prefix}{k}" for k in range(1, n + 1)]
+
+        # maxCluster = argmax + 1 (labels are 1..n); 0 when no valid cycles
+        argmax = pct.values.argmax(axis=1) + 1
+        pct[max_col] = argmax
+
+        return pct.reset_index()
+
+    # ------------------------------------------------------------------
     # CSV output
     # ------------------------------------------------------------------
     def output_vrp_csv(self, metrics: Dict[str, np.ndarray], return_df: bool = False):
         logger.info("Outputting VRP CSV...")
         spl_corr = metrics['spl'] + self.config.spl_correction_db
+
+        # Cluster labels may be shorter than metric arrays (e.g. trailing cycles
+        # dropped during feature extraction); align to the shortest array.
+        base_n = len(metrics['midi'])
+        cluster = metrics.get('cluster', np.zeros(base_n, dtype=np.int32))
+        phon    = metrics.get('phon',    np.zeros(base_n, dtype=np.int32))
+        if len(cluster) < base_n:
+            cluster = np.concatenate([cluster, np.zeros(base_n - len(cluster),
+                                                         dtype=cluster.dtype)])
+        if len(phon) < base_n:
+            phon = np.concatenate([phon, np.zeros(base_n - len(phon),
+                                                   dtype=phon.dtype)])
+
         df = pd.DataFrame({
             'MIDI':     np.round(np.where(metrics['midi'] > 0, metrics['midi'], 0)).astype(int),
             'dB':       np.round(np.where(spl_corr > 0, spl_corr, 0)).astype(int),
@@ -325,6 +389,8 @@ class VoiceMapAnalyzer:
             'dEGGmax':  metrics['deggmax'],
             'Icontact': metrics['icontact'],
             'HRFegg':   metrics['hrf'],
+            '_cluster': cluster.astype(int),
+            '_phon':    phon.astype(int),
         })
         logger.info("  Raw points: %d", len(df))
 
@@ -335,6 +401,7 @@ class VoiceMapAnalyzer:
         df = df[range_mask].copy()
         logger.info("  After range filter: %d", len(df))
 
+        # Per-cell aggregation for scalar metrics
         grouped = df.groupby(['MIDI', 'dB']).agg({
             'Clarity': 'max',   # SC VRPControllerPlots: max(clarity, clarityMap.at(...) ? 0)
             'CPP': 'mean', 'SpecBal': 'mean',
@@ -342,6 +409,15 @@ class VoiceMapAnalyzer:
             'dEGGmax': 'mean', 'Icontact': 'mean', 'HRFegg': 'mean',
             'Total': 'sum',
         }).reset_index()
+
+        # Per-cell cluster aggregation: maxCluster = dominant label; Cluster k = %
+        cluster_cols = self._aggregate_cluster_labels(
+            df, label_col='_cluster', n=5, prefix='Cluster ', max_col='maxCluster')
+        phon_cols = self._aggregate_cluster_labels(
+            df, label_col='_phon',    n=5, prefix='cPhon ',   max_col='maxCPhon')
+
+        grouped = grouped.merge(cluster_cols, on=['MIDI', 'dB'], how='left')
+        grouped = grouped.merge(phon_cols,    on=['MIDI', 'dB'], how='left')
 
         standard_columns = [
             'MIDI', 'dB', 'Total', 'Clarity', 'Crest', 'SpecBal', 'CPP', 'Entropy',
@@ -352,6 +428,7 @@ class VoiceMapAnalyzer:
         for col in standard_columns:
             if col not in grouped.columns:
                 grouped[col] = 0
+            grouped[col] = grouped[col].fillna(0)
         grouped = grouped[standard_columns]
 
         os.makedirs(self.config.output_dir, exist_ok=True)

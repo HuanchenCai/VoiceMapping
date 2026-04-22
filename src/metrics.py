@@ -580,3 +580,160 @@ class HRFCalculator(MetricCalculator):
         logger.info("  HRFegg: %d cycles  mean %.2f  range %.2f – %.2f dB",
                     n_cycles, hrf.mean(), hrf.min(), hrf.max())
         return hrf
+
+
+# ---------------------------------------------------------------------------
+# EGG cycle clustering (Cluster 1..5) — harmonic-shape K-means.
+#
+# Mirrors FonaDyn's VRPSDCluster.sc feature recipe:
+#   per-cycle DFT at n harmonics →
+#   feature vector = [ Δamp_dB[1..n], cos(Δφ[1..n]), sin(Δφ[1..n]) ]   (3n dims)
+#   where Δamp_dB[k] = 20·log10(|X[k]| / |X[0]|)
+#         Δφ[k]     = phase[k] - phase[0]
+# K-means k=5, trained from scratch on the input recording (from-scratch matches
+# the default `learn=true` behaviour when no pre-saved centroid CSV is loaded).
+# Returns a 1..k label per cycle (0 reserved for "no cluster / not computed").
+# ---------------------------------------------------------------------------
+class ClusterCalculator:
+    """
+    K-means clustering over per-cycle EGG harmonic shape features.
+
+    Returns an int array of length n_cycles, values in {1..n_clusters}; 0
+    means the cycle was dropped (e.g. degenerate amplitude at fundamental).
+    """
+
+    def __init__(self, config: VoiceMapConfig,
+                 n_clusters: int = 5,
+                 n_harmonics: int = 10,
+                 random_state: int = 0):
+        self.config = config
+        self.n_clusters = int(n_clusters)
+        self.n_harmonics = int(n_harmonics)
+        self.random_state = int(random_state)
+
+    def calculate(self, egg: np.ndarray,
+                  cycle_triggers: np.ndarray) -> np.ndarray:
+        from sklearn.cluster import KMeans
+
+        logger.info("Calculating EGG cycle clusters (k=%d, n_harm=%d)...",
+                    self.n_clusters, self.n_harmonics)
+        idx = np.where(cycle_triggers > 0.5)[0]
+        n_cycles = max(len(idx) - 1, 0)
+        if n_cycles < self.n_clusters:
+            logger.warning("  Too few cycles (%d < k=%d); skipping cluster",
+                           n_cycles, self.n_clusters)
+            return np.zeros(n_cycles, dtype=np.int32)
+
+        amps, phases = _compute_cycle_dft(egg, idx, self.n_harmonics)
+
+        # Δamp_dB relative to fundamental (in dB). Fundamental near zero ⇒ invalid.
+        fund = amps[:, 0]
+        valid = fund > 1e-12
+        if valid.sum() < self.n_clusters:
+            logger.warning("  Only %d valid cycles; skipping cluster",
+                           int(valid.sum()))
+            return np.zeros(n_cycles, dtype=np.int32)
+
+        amps_v = amps[valid]
+        phases_v = phases[valid]
+
+        eps = 1e-15
+        damp_db = 20.0 * np.log10(
+            np.maximum(amps_v[:, 1:], eps) / np.maximum(amps_v[:, :1], eps)
+        )  # (n_valid, n-1)
+
+        dphi = phases_v[:, 1:] - phases_v[:, :1]   # (n_valid, n-1)
+        feats = np.concatenate([damp_db, np.cos(dphi), np.sin(dphi)], axis=1)
+
+        km = KMeans(n_clusters=self.n_clusters,
+                    n_init=10, random_state=self.random_state)
+        labels_v = km.fit_predict(feats)  # 0..k-1
+
+        # Map labels to 1..k, leaving 0 for invalid cycles
+        out = np.zeros(n_cycles, dtype=np.int32)
+        out[valid] = labels_v.astype(np.int32) + 1
+
+        counts = np.bincount(out[out > 0], minlength=self.n_clusters + 1)[1:]
+        pct = 100.0 * counts / max(counts.sum(), 1)
+        logger.info("  Cluster sizes (%%): " +
+                    "  ".join(f"#{i+1}={p:.1f}" for i, p in enumerate(pct)))
+        return out
+
+
+# ---------------------------------------------------------------------------
+# Phonation-type clustering (cPhon 1..5) — quality-metric K-means.
+#
+# Independent of EGG shape clustering. Takes the already-computed per-cycle
+# quality metrics (clarity, CPP, specbal, crest, entropy, qcontact, deggmax,
+# icontact, hrf) and clusters cycles by overall voice quality profile. Because
+# these metrics have wildly different native ranges, z-score normalise first.
+# Returns 1..k per cycle (0 for invalid).
+# ---------------------------------------------------------------------------
+class PhonClusterCalculator:
+    """K-means over z-scored quality-metric vectors (one row per cycle)."""
+
+    DEFAULT_KEYS = (
+        "clarity", "cpp", "specbal", "crest", "entropy",
+        "qcontact", "deggmax", "icontact", "hrf",
+    )
+
+    def __init__(self, config: VoiceMapConfig,
+                 n_clusters: int = 5,
+                 keys: tuple = None,
+                 random_state: int = 0):
+        self.config = config
+        self.n_clusters = int(n_clusters)
+        self.keys = tuple(keys) if keys else self.DEFAULT_KEYS
+        self.random_state = int(random_state)
+
+    def calculate(self, metrics: dict) -> np.ndarray:
+        from sklearn.cluster import KMeans
+
+        # Stack selected per-cycle metric arrays → (n_cycles, n_features)
+        cols = []
+        names = []
+        for k in self.keys:
+            v = metrics.get(k)
+            if v is None or len(v) == 0:
+                continue
+            cols.append(np.asarray(v, dtype=np.float64))
+            names.append(k)
+
+        if not cols:
+            return np.zeros(0, dtype=np.int32)
+
+        n_min = min(len(c) for c in cols)
+        feats = np.stack([c[:n_min] for c in cols], axis=1)
+
+        logger.info("Calculating phonation clusters (k=%d, feats=%s)...",
+                    self.n_clusters, ",".join(names))
+
+        if n_min < self.n_clusters:
+            logger.warning("  Too few cycles (%d < k=%d); skipping cPhon",
+                           n_min, self.n_clusters)
+            return np.zeros(n_min, dtype=np.int32)
+
+        # Drop non-finite rows (any nan/inf) so KMeans doesn't choke.
+        good = np.isfinite(feats).all(axis=1)
+        if good.sum() < self.n_clusters:
+            logger.warning("  Only %d finite rows; skipping cPhon", int(good.sum()))
+            return np.zeros(n_min, dtype=np.int32)
+
+        feats_g = feats[good]
+        mu  = feats_g.mean(axis=0)
+        sd  = feats_g.std(axis=0)
+        sd[sd < 1e-12] = 1.0
+        z   = (feats_g - mu) / sd
+
+        km = KMeans(n_clusters=self.n_clusters,
+                    n_init=10, random_state=self.random_state)
+        labels_g = km.fit_predict(z)
+
+        out = np.zeros(n_min, dtype=np.int32)
+        out[good] = labels_g.astype(np.int32) + 1
+
+        counts = np.bincount(out[out > 0], minlength=self.n_clusters + 1)[1:]
+        pct = 100.0 * counts / max(counts.sum(), 1)
+        logger.info("  cPhon sizes (%%):   " +
+                    "  ".join(f"#{i+1}={p:.1f}" for i, p in enumerate(pct)))
+        return out
