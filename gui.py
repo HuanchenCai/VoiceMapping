@@ -189,6 +189,127 @@ class SettingsDialog(tk.Toplevel):
             pass
 
 
+# ─── 对比对话框 ──────────────────────────────────────────────────────────────
+class CompareDialog(tk.Toplevel):
+    """Load two VRP CSVs, pick a metric, see A | B | A-B."""
+
+    def __init__(self, app: "FonaDynApp"):
+        super().__init__(app)
+        self.app = app
+        self.transient(app)
+        self.title("对比 2 段录音 · Voice Map diff")
+        self.configure(bg=PANEL)
+        self.geometry("1300x560")
+
+        # File pickers (top bar)
+        bar = tk.Frame(self, bg=PANEL)
+        bar.pack(fill="x", padx=12, pady=(10, 4))
+
+        self.csv_a = tk.StringVar(value="")
+        self.csv_b = tk.StringVar(value="")
+        self._df_a = None
+        self._df_b = None
+
+        for label, var, slot in (("A", self.csv_a, "a"), ("B", self.csv_b, "b")):
+            f = tk.Frame(bar, bg=PANEL)
+            f.pack(side="left", fill="x", expand=True, padx=(0, 8))
+            tk.Label(f, text=label, bg=PANEL, fg=ACCENT,
+                     font=FONT_UI_B, width=2).pack(side="left")
+            ttk.Entry(f, textvariable=var).pack(side="left", fill="x", expand=True)
+            ttk.Button(f, text="…", style="Ghost.TButton", width=3,
+                       command=lambda s=slot: self._pick_csv(s)).pack(side="left", padx=(4, 0))
+
+        # Metric + render controls
+        ctrl = tk.Frame(self, bg=PANEL)
+        ctrl.pack(fill="x", padx=12, pady=(4, 8))
+        tk.Label(ctrl, text="Metric:", bg=PANEL, fg=MUTED, font=FONT_UI).pack(side="left")
+        self.metric = tk.StringVar(value="CPP")
+        self.metric_combo = ttk.Combobox(ctrl, textvariable=self.metric,
+                                          state="readonly", width=18, font=FONT_UI,
+                                          values=["CPP"])
+        self.metric_combo.pack(side="left", padx=(6, 0))
+        self.metric_combo.bind("<<ComboboxSelected>>", lambda _e: self._render())
+        ttk.Button(ctrl, text="刷新绘图", style="Accent.TButton",
+                   command=self._render).pack(side="left", padx=(12, 0))
+        ttk.Button(ctrl, text="导出 PNG", style="Ghost.TButton",
+                   command=self._save_png).pack(side="left", padx=(6, 0))
+
+        # Canvas
+        self._fig = Figure(figsize=(14, 4.5), dpi=110, facecolor=PANEL)
+        self._canvas = FigureCanvasTkAgg(self._fig, master=self)
+        cw = self._canvas.get_tk_widget()
+        cw.configure(bg=PANEL, highlightthickness=0, bd=0)
+        cw.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+
+        self._show_msg("加载 A 和 B 的 VRP CSV")
+
+    def _show_msg(self, msg: str):
+        self._fig.clear()
+        ax = self._fig.add_subplot(111)
+        ax.set_facecolor(PANEL)
+        ax.text(0.5, 0.5, msg, ha="center", va="center", color=MUTED, fontsize=13,
+                transform=ax.transAxes)
+        ax.set_xticks([]); ax.set_yticks([])
+        for s in ax.spines.values(): s.set_visible(False)
+        self._canvas.draw_idle()
+
+    def _pick_csv(self, slot: str):
+        path = filedialog.askopenfilename(
+            parent=self, title=f"选 {slot.upper()} 的 VRP CSV",
+            filetypes=[("CSV", "*.csv")],
+            initialdir=str(Path(self.app.output_dir_var.get())))
+        if not path:
+            return
+        try:
+            import pandas as _pd
+            df = _pd.read_csv(path, sep=";")
+        except Exception as e:  # noqa: BLE001
+            self._show_msg(f"读取失败：{e}")
+            return
+        if slot == "a":
+            self.csv_a.set(path); self._df_a = df
+        else:
+            self.csv_b.set(path); self._df_b = df
+        # Update metric dropdown to intersection of both loaded DFs
+        if self._df_a is not None and self._df_b is not None:
+            common = [c for c in self._df_a.columns
+                      if c in self._df_b.columns and c not in ("MIDI", "dB")]
+            self.metric_combo.configure(values=common)
+            if self.metric.get() not in common and common:
+                self.metric.set("CPP" if "CPP" in common else common[0])
+            self._render()
+
+    def _render(self):
+        if self._df_a is None or self._df_b is None:
+            self._show_msg("还没加载两个 CSV")
+            return
+        from plotter import draw_vrp_comparison
+        ok = draw_vrp_comparison(
+            self._df_a, self._df_b, self.metric.get(), self._fig,
+            label_a=Path(self.csv_a.get()).stem,
+            label_b=Path(self.csv_b.get()).stem)
+        if not ok:
+            self._show_msg(f"{self.metric.get()} 在 A/B 中都为空")
+            return
+        self._canvas.draw_idle()
+
+    def _save_png(self):
+        if self._df_a is None or self._df_b is None:
+            return
+        path = filedialog.asksaveasfilename(
+            parent=self, title="保存对比 PNG",
+            defaultextension=".png", filetypes=[("PNG", "*.png")],
+            initialfile=f"{Path(self.csv_a.get()).stem}_vs_{Path(self.csv_b.get()).stem}_{self.metric.get()}.png")
+        if not path:
+            return
+        try:
+            self._fig.savefig(path, dpi=130, bbox_inches="tight",
+                               facecolor=self._fig.get_facecolor())
+            self.app._append_log("META", f"✓ 对比图已保存：{path}")
+        except Exception as e:  # noqa: BLE001
+            self.app._append_log("ERROR", f"保存失败：{e}")
+
+
 # ─── 分析进度对话框 ──────────────────────────────────────────────────────────
 class ProgressDialog(tk.Toplevel):
     """模态小窗：分析进行时显示文件名 + 当前阶段 + 不确定进度条。"""
@@ -496,6 +617,9 @@ class FonaDynApp(_TkBase):
                                      command=self._export_excel)
         self.excel_btn.pack(side="left")
         self.excel_btn.state(["disabled"])
+        ttk.Button(btn_row2, text="对比 2 段录音…", style="Ghost.TButton",
+                   command=self._open_compare_dialog
+                   ).pack(side="left", padx=(6, 0))
 
         # 进度条
         self.progress = ttk.Progressbar(pad, mode="indeterminate")
@@ -1157,6 +1281,10 @@ class FonaDynApp(_TkBase):
     def _set_status(self, text: str, color: str = MUTED):
         self.status_lbl.configure(text=text, fg=color)
         self.status_dot.configure(fg=color)
+
+    def _open_compare_dialog(self):
+        """A | B | A-B comparison on two previously-written VRP CSVs."""
+        CompareDialog(self)
 
     def _export_excel(self):
         """一次分析完成后，可导出 .xlsx：Summary + Grouped + 每 metric 一个 heatmap sheet。"""

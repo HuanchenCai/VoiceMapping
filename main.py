@@ -88,6 +88,13 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--excel", action="store_true",
                    help="also write a .xlsx alongside the CSV: Summary + "
                         "Grouped + one heatmap pivot sheet per metric.")
+    p.add_argument("--compare", nargs=2, metavar=("CSV_A", "CSV_B"),
+                   help="compare two previously-written VRP CSVs (A | B | A-B). "
+                        "Exits after writing the comparison PNG; no new analysis.")
+    p.add_argument("--compare-metric", default="CPP", metavar="NAME",
+                   help="metric column to compare (default CPP).")
+    p.add_argument("--compare-out", metavar="PNG", default=None,
+                   help="output PNG path for --compare (default: next to CSV_A).")
 
     # Logging
     p.add_argument("-v", "--verbose", action="store_true",
@@ -180,6 +187,23 @@ def main():
     logger.info("Voice Mapping CLI")
 
     config = _build_config(args)
+
+    # --compare shortcut: render A | B | A-B from two existing CSVs
+    if args.compare:
+        csv_a, csv_b = args.compare
+        for p in (csv_a, csv_b):
+            if not os.path.exists(p):
+                logger.error("CSV not found: %s", p); sys.exit(1)
+        if args.compare_out:
+            out_png = args.compare_out
+        else:
+            base = os.path.splitext(os.path.basename(csv_a))[0]
+            out_png = os.path.join(os.path.dirname(csv_a) or ".",
+                                    f"{base}_vs_{os.path.basename(csv_b).split('.')[0]}_{args.compare_metric}.png")
+        from plotter import save_vrp_comparison
+        path = save_vrp_comparison(csv_a, csv_b, args.compare_metric, out_png)
+        logger.info("Comparison saved: %s", path)
+        return
 
     # --train-centroids shortcut: pool EGG features across all given wavs,
     # fit a single K-means, write CSV, exit.

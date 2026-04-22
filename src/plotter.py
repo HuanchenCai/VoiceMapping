@@ -535,3 +535,96 @@ def plot_vrp_dataframe(
         if os.path.exists(fpath):
             saved.append(fpath)
     return saved
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Cross-recording comparison: A | B | A − B, same metric.
+# ───────────────────────────────────────────────────────────────────────────
+def draw_vrp_comparison(df_a: pd.DataFrame,
+                         df_b: pd.DataFrame,
+                         col: str,
+                         fig,
+                         label_a: str = "A",
+                         label_b: str = "B") -> bool:
+    """Render three heatmaps on `fig`: A | B | A − B. Returns False if
+    the metric is missing or empty in both inputs."""
+    if col not in df_a.columns or col not in df_b.columns:
+        return False
+    ga = _build_grid(df_a, col)
+    gb = _build_grid(df_b, col)
+    if ga.count() == 0 and gb.count() == 0:
+        return False
+
+    cfg = METRIC_CFG.get(col, dict(label=col, vmin=None, vmax=None,
+                                     unit="", cmap="viridis", norm=None))
+    fig.clear()
+    fig.patch.set_facecolor("#1a1a1a")
+    axes = fig.subplots(1, 3)
+
+    midi_edges = np.arange(MIDI_MIN - 0.5, MIDI_MAX + 1.5)
+    spl_edges  = np.arange(SPL_MIN  - 0.5, SPL_MAX  + 1.5)
+
+    # Left + middle: per-metric palette
+    for ax, grid, label in ((axes[0], ga, label_a), (axes[1], gb, label_b)):
+        ax.set_facecolor("#333333")
+        ax.set_title(f"{label} · {cfg['label']}", color="white", fontsize=9)
+        if grid.count() == 0:
+            ax.text(0.5, 0.5, "no data", ha="center", va="center",
+                    color="#888", transform=ax.transAxes)
+            ax.set_xticks([]); ax.set_yticks([])
+            continue
+        vmin = cfg["vmin"] if cfg["vmin"] is not None else float(np.nanmin(grid))
+        vmax = cfg["vmax"] if cfg["vmax"] is not None else float(np.nanmax(grid))
+        raw_cmap = cfg["cmap"]
+        cmap_obj = plt.get_cmap(raw_cmap).copy() if isinstance(raw_cmap, str) else raw_cmap
+        cmap_obj.set_bad(color="#333333")
+        norm = cfg.get("norm") or Normalize(vmin=vmin, vmax=vmax)
+        mesh = ax.pcolormesh(midi_edges, spl_edges, grid,
+                              cmap=cmap_obj, norm=norm, shading="flat")
+        fig.colorbar(mesh, ax=ax, fraction=0.03, pad=0.01)
+        ax.tick_params(colors="white", labelsize=6)
+        ax.set_xlabel("MIDI", color="white", fontsize=7)
+        ax.set_ylabel("SPL (dB)", color="white", fontsize=7)
+
+    # Right: A − B, diverging palette symmetric around 0
+    diff = ga.filled(np.nan) - gb.filled(np.nan)
+    diff_ma = np.ma.masked_invalid(diff)
+    axd = axes[2]
+    axd.set_facecolor("#333333")
+    axd.set_title(f"Δ = {label_a} − {label_b}", color="white", fontsize=9)
+    if diff_ma.count() == 0:
+        axd.text(0.5, 0.5, "no overlap", ha="center", va="center",
+                 color="#888", transform=axd.transAxes)
+        axd.set_xticks([]); axd.set_yticks([])
+    else:
+        absmax = float(np.nanmax(np.abs(diff_ma)))
+        if absmax == 0:
+            absmax = 1.0
+        mesh = axd.pcolormesh(midi_edges, spl_edges, diff_ma,
+                               cmap=plt.get_cmap("RdBu_r"),
+                               vmin=-absmax, vmax=absmax, shading="flat")
+        fig.colorbar(mesh, ax=axd, fraction=0.03, pad=0.01)
+        axd.tick_params(colors="white", labelsize=6)
+        axd.set_xlabel("MIDI", color="white", fontsize=7)
+
+    fig.subplots_adjust(left=0.05, right=0.97, top=0.90,
+                         bottom=0.12, wspace=0.25)
+    return True
+
+
+def save_vrp_comparison(csv_a: str, csv_b: str, col: str,
+                          out_png: str) -> str:
+    """CLI helper: read both CSVs, draw comparison, save PNG."""
+    df_a = pd.read_csv(csv_a, sep=";")
+    df_b = pd.read_csv(csv_b, sep=";")
+    fig, _ = plt.subplots(figsize=(15, 5), dpi=130)
+    ok = draw_vrp_comparison(df_a, df_b, col, fig,
+                               label_a=os.path.basename(csv_a),
+                               label_b=os.path.basename(csv_b))
+    if not ok:
+        plt.close(fig)
+        raise ValueError(f"Metric {col!r} not comparable on these two files")
+    fig.savefig(out_png, dpi=130, bbox_inches="tight",
+                facecolor=fig.get_facecolor())
+    plt.close(fig)
+    return out_png
