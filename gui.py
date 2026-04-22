@@ -673,8 +673,10 @@ class FonaDynApp(_TkBase):
             try:
                 from analyzer import VoiceMapAnalyzer
                 analyzer = VoiceMapAnalyzer(cfg)
+                # export_plots=False: GUI embeds plots in-memory; saving 22
+                # PNGs per run would add ~8s of dead work.
                 data, out_file, grouped = analyzer.analyze_and_output_vrp(
-                    audio, return_df=True)
+                    audio, return_df=True, export_plots=False)
                 self._msg_q.put(("done", True, {
                     "df": grouped,
                     "csv": out_file,

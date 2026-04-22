@@ -276,15 +276,31 @@ class VoiceMapAnalyzer:
     def calculate_all_metrics(self, voice_signal, egg_signal,
                                cycle_triggers) -> Dict[str, np.ndarray]:
         logger.info("Calculating all metrics...")
+
+        # Precompute per-cycle EGG DFT once and share it across HRF, Entropy,
+        # and ClusterCalculator — previously each of those computed its own
+        # copy, tripling the cost of the Python-loop DFT on long recordings.
+        # Take max over all consumers' n_harmonics requirement so every slice
+        # fits. Cluster default is 10, HRF default 10, Entropy default 4.
+        _dft_n = max(self.config.n_harmonics,
+                     self.cluster_calculator.n_harmonics,
+                     self.config.sampen_amplitude_harmonics,
+                     self.config.sampen_phase_harmonics)
+        _idx   = np.where(cycle_triggers > 0.5)[0]
+        _dft   = None
+        if len(_idx) >= 2:
+            from metrics import _compute_cycle_dft
+            _dft = _compute_cycle_dft(egg_signal, _idx, _dft_n)
+
         spl_values                           = self.spl_calculator.calculate(voice_signal, cycle_triggers)
         midi_values, clarity_values          = self.clarity_calculator.calculate(voice_signal, cycle_triggers)
         cpp_values                           = self.cpp_calculator.calculate(voice_signal, cycle_triggers)
         specbal_values                       = self.specbal_calculator.calculate(voice_signal, cycle_triggers)
         crest_values                         = self.crest_calculator.calculate(voice_signal, cycle_triggers)
         qcontact_values, deggmax_v, ic_v     = self.qcontact_calculator.calculate(egg_signal, cycle_triggers)
-        entropy_values                       = self.entropy_calculator.calculate(egg_signal, cycle_triggers)
-        hrf_values                           = self.hrf_calculator.calculate(egg_signal, cycle_triggers)
-        cluster_values                       = self.cluster_calculator.calculate(egg_signal, cycle_triggers)
+        entropy_values                       = self.entropy_calculator.calculate(egg_signal, cycle_triggers, dft=_dft)
+        hrf_values                           = self.hrf_calculator.calculate(egg_signal, cycle_triggers, dft=_dft)
+        cluster_values                       = self.cluster_calculator.calculate(egg_signal, cycle_triggers, dft=_dft)
 
         base = {
             'midi':     midi_values,
@@ -360,7 +376,9 @@ class VoiceMapAnalyzer:
     # ------------------------------------------------------------------
     # CSV output
     # ------------------------------------------------------------------
-    def output_vrp_csv(self, metrics: Dict[str, np.ndarray], return_df: bool = False):
+    def output_vrp_csv(self, metrics: Dict[str, np.ndarray],
+                        return_df: bool = False,
+                        export_plots: bool = True):
         logger.info("Outputting VRP CSV...")
         spl_corr = metrics['spl'] + self.config.spl_correction_db
 
@@ -444,12 +462,18 @@ class VoiceMapAnalyzer:
                          grouped['Clarity'].mean())
         logger.info("Saved: %s", out_file)
 
-        # --- Generate VRP map images ---
-        plot_dir = os.path.join(self.config.output_dir, "plots")
-        ts_base  = os.path.splitext(os.path.basename(out_file))[0]
-        saved    = plot_vrp_dataframe(grouped, ts_base, plot_dir)
-        if saved:
-            logger.info("Plots saved to: %s  (%d images)", plot_dir, len(saved))
+        # --- Generate VRP map images (optional) ---
+        # With 22 metrics each savefig at dpi=150 costs ~0.4s → PNG export
+        # dominates total runtime (~8s for a 10s analysis). GUI embeds the
+        # plots in-memory and doesn't need the PNGs; CLI keeps them by default.
+        if export_plots:
+            plot_dir = os.path.join(self.config.output_dir, "plots")
+            ts_base  = os.path.splitext(os.path.basename(out_file))[0]
+            saved    = plot_vrp_dataframe(grouped, ts_base, plot_dir)
+            if saved:
+                logger.info("Plots saved to: %s  (%d images)", plot_dir, len(saved))
+        else:
+            logger.info("Skipping PNG export (GUI mode)")
 
         if return_df:
             return out_file, grouped
@@ -459,7 +483,8 @@ class VoiceMapAnalyzer:
     # Full pipeline
     # ------------------------------------------------------------------
     def analyze_and_output_vrp(self, file_path: Optional[str] = None,
-                                return_df: bool = False):
+                                return_df: bool = False,
+                                export_plots: bool = True):
         logger.info("=" * 60)
         logger.info("VoiceMap Complete Analysis")
         logger.info("=" * 60)
@@ -481,7 +506,9 @@ class VoiceMapAnalyzer:
         filtered_metrics = self.apply_clarity_filtering(metrics)
 
         logger.info("Valid data points: %d", len(filtered_metrics['midi']))
-        csv_result = self.output_vrp_csv(filtered_metrics, return_df=return_df)
+        csv_result = self.output_vrp_csv(filtered_metrics,
+                                          return_df=return_df,
+                                          export_plots=export_plots)
         if return_df:
             out_file, grouped_df = csv_result
         else:

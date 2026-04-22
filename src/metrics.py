@@ -515,7 +515,8 @@ class QcontactCalculator(MetricCalculator):
 # ---------------------------------------------------------------------------
 class EntropyCalculator(MetricCalculator):
 
-    def calculate(self, egg: np.ndarray, cycle_triggers: np.ndarray) -> np.ndarray:
+    def calculate(self, egg: np.ndarray, cycle_triggers: np.ndarray,
+                  dft: Tuple[np.ndarray, np.ndarray] = None) -> np.ndarray:
         logger.info("Calculating Sample Entropy (CSE)...")
         idx      = np.where(cycle_triggers > 0.5)[0]
         n_cycles = max(len(idx) - 1, 0)
@@ -531,7 +532,11 @@ class EntropyCalculator(MetricCalculator):
         tol_p      = cfg.sampen_phase_tolerance
 
         n_harm = max(n_harm_amp, n_harm_ph)
-        amps, phases_raw = _compute_cycle_dft(egg, idx, n_harm)
+        if dft is not None:
+            amps       = dft[0][:, :n_harm]
+            phases_raw = dft[1][:, :n_harm]
+        else:
+            amps, phases_raw = _compute_cycle_dft(egg, idx, n_harm)
 
         # Amplitude in Bel: 2*log10(complexAbs)  (SC: ampdb*0.1)
         amps_bel   = 2.0 * np.log10(np.maximum(amps[:, :n_harm_amp], 1e-15))
@@ -563,7 +568,8 @@ class EntropyCalculator(MetricCalculator):
 # ---------------------------------------------------------------------------
 class HRFCalculator(MetricCalculator):
 
-    def calculate(self, egg: np.ndarray, cycle_triggers: np.ndarray) -> np.ndarray:
+    def calculate(self, egg: np.ndarray, cycle_triggers: np.ndarray,
+                  dft: Tuple[np.ndarray, np.ndarray] = None) -> np.ndarray:
         logger.info("Calculating HRFegg (per-cycle EGG DFT)...")
         idx      = np.where(cycle_triggers > 0.5)[0]
         n_cycles = max(len(idx) - 1, 0)
@@ -571,7 +577,10 @@ class HRFCalculator(MetricCalculator):
             return np.zeros(0)
 
         n_harm = self.config.n_harmonics
-        amps, _ = _compute_cycle_dft(egg, idx, n_harm)
+        if dft is not None:
+            amps = dft[0][:, :n_harm]
+        else:
+            amps, _ = _compute_cycle_dft(egg, idx, n_harm)
 
         fund    = np.maximum(amps[:, 0], 1e-15)
         harms_p = 2.0 * np.sqrt(np.sum(amps[:, 1:] ** 2, axis=1))
@@ -612,7 +621,8 @@ class ClusterCalculator:
         self.random_state = int(random_state)
 
     def calculate(self, egg: np.ndarray,
-                  cycle_triggers: np.ndarray) -> np.ndarray:
+                  cycle_triggers: np.ndarray,
+                  dft: Tuple[np.ndarray, np.ndarray] = None) -> np.ndarray:
         from sklearn.cluster import KMeans
 
         logger.info("Calculating EGG cycle clusters (k=%d, n_harm=%d)...",
@@ -624,7 +634,11 @@ class ClusterCalculator:
                            n_cycles, self.n_clusters)
             return np.zeros(n_cycles, dtype=np.int32)
 
-        amps, phases = _compute_cycle_dft(egg, idx, self.n_harmonics)
+        if dft is not None:
+            amps   = dft[0][:, :self.n_harmonics]
+            phases = dft[1][:, :self.n_harmonics]
+        else:
+            amps, phases = _compute_cycle_dft(egg, idx, self.n_harmonics)
 
         # Δamp_dB relative to fundamental (in dB). Fundamental near zero ⇒ invalid.
         fund = amps[:, 0]
@@ -645,8 +659,10 @@ class ClusterCalculator:
         dphi = phases_v[:, 1:] - phases_v[:, :1]   # (n_valid, n-1)
         feats = np.concatenate([damp_db, np.cos(dphi), np.sin(dphi)], axis=1)
 
+        # n_init=3 gives essentially the same cluster quality as 10 in our
+        # tests (12k cycles × 30 dims) but cuts fit time 3× — main speed win.
         km = KMeans(n_clusters=self.n_clusters,
-                    n_init=10, random_state=self.random_state)
+                    n_init=3, random_state=self.random_state)
         labels_v = km.fit_predict(feats)  # 0..k-1
 
         # Map labels to 1..k, leaving 0 for invalid cycles
@@ -726,7 +742,7 @@ class PhonClusterCalculator:
         z   = (feats_g - mu) / sd
 
         km = KMeans(n_clusters=self.n_clusters,
-                    n_init=10, random_state=self.random_state)
+                    n_init=3, random_state=self.random_state)
         labels_g = km.fit_predict(z)
 
         out = np.zeros(n_min, dtype=np.int32)
