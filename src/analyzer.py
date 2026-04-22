@@ -23,7 +23,7 @@ from metrics import (
     CrestCalculator, QcontactCalculator, EntropyCalculator, HRFCalculator,
     ClusterCalculator, PhonClusterCalculator,
     PerturbationCalculator, HNRCalculator,
-    VibratoCalculator,
+    VibratoCalculator, FormantCalculator,
 )
 
 logger = get_logger(__name__)
@@ -153,6 +153,7 @@ class VoiceMapAnalyzer:
         self.perturb_calculator  = PerturbationCalculator(self.config)
         self.hnr_calculator      = HNRCalculator(self.config)
         self.vibrato_calculator  = VibratoCalculator(self.config)
+        self.formant_calculator  = FormantCalculator(self.config)
 
         logger.info("VoiceMap analyzer initialized (numba=%s)", _NUMBA)
 
@@ -361,6 +362,8 @@ class VoiceMapAnalyzer:
         hnr_values                           = self.hnr_calculator.calculate(voice_signal, cycle_triggers)
         # P2: vibrato on the already-computed per-cycle MIDI series
         vib_rate, vib_extent                 = self.vibrato_calculator.calculate(midi_values, _idx)
+        # P2: formants + Singer's Formant Energy from pre-emphasised voice
+        formant_values                       = self.formant_calculator.calculate(voice_signal, cycle_triggers)
 
         base = {
             'midi':     midi_values,
@@ -385,6 +388,10 @@ class VoiceMapAnalyzer:
             'hnr':           hnr_values,
             'vibrato_rate':   vib_rate,
             'vibrato_extent': vib_extent,
+            'f1':  formant_values['f1'],
+            'f2':  formant_values['f2'],
+            'f3':  formant_values['f3'],
+            'sfe': formant_values['sfe'],
         }
         # Phonation-type cluster uses the already-computed quality metrics
         # as features — must run AFTER them.
@@ -507,6 +514,10 @@ class VoiceMapAnalyzer:
             'HNR':           _pad(metrics.get('hnr'),           base_n),
             'VibratoRate':   _pad(metrics.get('vibrato_rate'),   base_n),
             'VibratoExtent': _pad(metrics.get('vibrato_extent'), base_n),
+            'F1':            _pad(metrics.get('f1'),  base_n),
+            'F2':            _pad(metrics.get('f2'),  base_n),
+            'F3':            _pad(metrics.get('f3'),  base_n),
+            'SingersFormant': _pad(metrics.get('sfe'), base_n),
             '_cluster': cluster.astype(int),
             '_phon':    phon.astype(int),
         })
@@ -529,6 +540,8 @@ class VoiceMapAnalyzer:
             'Shimmer': 'mean', 'ShimmerDB': 'mean', 'ShimmerAPQ11': 'mean',
             'HNR': 'mean',
             'VibratoRate': 'mean', 'VibratoExtent': 'mean',
+            'F1': 'mean', 'F2': 'mean', 'F3': 'mean',
+            'SingersFormant': 'mean',
             'Total': 'sum',
         }).reset_index()
 
@@ -549,6 +562,7 @@ class VoiceMapAnalyzer:
             'Shimmer', 'ShimmerDB', 'ShimmerAPQ11', 'HNR',
             # P2 (singing-specific)
             'VibratoRate', 'VibratoExtent',
+            'F1', 'F2', 'F3', 'SingersFormant',
             # P0 cluster
             'maxCluster',
             'Cluster 1', 'Cluster 2', 'Cluster 3', 'Cluster 4', 'Cluster 5',

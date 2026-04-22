@@ -8,7 +8,7 @@ import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 from scipy.signal import butter, sosfilt, lfilter
 from scipy.fft import rfft, irfft, ifft as _ifft
-from typing import Tuple, Dict
+from typing import Tuple, Dict, Optional
 import logging
 
 from config import VoiceMapConfig
@@ -699,6 +699,154 @@ class VibratoCalculator(MetricCalculator):
                         float(extent[good].mean()),
                         100.0 * good.mean())
         return rate, extent
+
+
+# ---------------------------------------------------------------------------
+# P2: Formants F1/F2/F3 + Singer's Formant Energy (SFE).
+#
+# LPC-based formant estimation on 25 ms frames (Hamming windowed, with
+# α=0.97 pre-emphasis for flat-ish spectral envelope). LPC order defaults
+# to 2 + 2·Fs/1000 (Praat recipe) — ~22 at 44.1 kHz, enough for 5–6
+# formants in the voiced band. We take the batch autocorrelation →
+# batched Levinson-Durbin via np.linalg.solve → LPC spectrum magnitude,
+# then scipy find_peaks in the 90–3500 Hz band. First three peaks ascending
+# become F1/F2/F3.
+#
+# Singer's Formant Energy (SFE): ratio of spectral power in 2.8–3.4 kHz to
+# total power, in dB. Classical / trained singers show –7…–13 dB; untrained
+# speakers usually < –13 dB.
+# ---------------------------------------------------------------------------
+class FormantCalculator(MetricCalculator):
+    """Per-cycle F1, F2, F3 (Hz) + Singer's Formant Energy (dB)."""
+
+    def __init__(self, config: VoiceMapConfig,
+                 lpc_order: Optional[int] = None,
+                 win_ms: float = 25.0, hop_ms: float = 10.0,
+                 f_min: float = 90.0, f_max: float = 3500.0,
+                 singer_band: Tuple[float, float] = (2800.0, 3400.0),
+                 pre_emphasis: float = 0.97):
+        super().__init__(config)
+        self.win_ms, self.hop_ms = float(win_ms), float(hop_ms)
+        self.f_min,  self.f_max  = float(f_min),  float(f_max)
+        self.singer_band  = (float(singer_band[0]), float(singer_band[1]))
+        self.pre_emphasis = float(pre_emphasis)
+        self.lpc_order    = int(lpc_order or (2 + 2 * config.sample_rate // 1000))
+
+    def calculate(self, voice: np.ndarray,
+                  cycle_triggers: np.ndarray) -> Dict[str, np.ndarray]:
+        from scipy.signal import find_peaks
+        logger.info("Calculating formants (LPC order=%d) + SFE...", self.lpc_order)
+
+        idx = np.where(cycle_triggers > 0.5)[0]
+        n_cycles = max(len(idx) - 1, 0)
+        z = lambda: np.zeros(n_cycles)
+        keys = ("f1", "f2", "f3", "sfe")
+        if n_cycles == 0:
+            return {k: z() for k in keys}
+
+        sr  = self.sample_rate
+        win = int(self.win_ms * 0.001 * sr)
+        hop = int(self.hop_ms * 0.001 * sr)
+        if len(voice) < win or hop < 1:
+            return {k: z() for k in keys}
+
+        # Pre-emphasis (HPF boost; matters a lot for LPC accuracy)
+        voice_pe = np.empty_like(voice)
+        voice_pe[0]  = voice[0]
+        voice_pe[1:] = voice[1:] - self.pre_emphasis * voice[:-1]
+
+        # Frame up
+        n_frames = 1 + (len(voice_pe) - win) // hop
+        starts   = np.arange(n_frames) * hop
+        frames   = sliding_window_view(voice_pe, win)[starts]    # (n_frames, win)
+        hamm     = np.hamming(win)
+        frames_w = (frames - frames.mean(axis=1, keepdims=True)) * hamm
+
+        # --- LPC via batched autocorrelation + Levinson-Durbin (np.linalg.solve) ---
+        p = self.lpc_order
+        nfft_ac = 1
+        while nfft_ac < 2 * win:
+            nfft_ac *= 2
+        X_ac = np.fft.rfft(frames_w, nfft_ac, axis=1)
+        acf  = np.fft.irfft(X_ac * np.conj(X_ac), nfft_ac, axis=1)[:, :p + 1]
+
+        valid = acf[:, 0] > 1e-12
+        lpc = np.zeros((n_frames, p + 1))
+        lpc[:, 0] = 1.0
+        if valid.any():
+            # Toeplitz matrix per valid frame, then batched solve
+            ij   = np.arange(p)[:, None] - np.arange(p)[None, :]
+            R    = acf[valid][:, np.abs(ij)]                     # (m, p, p)
+            rhs  = -acf[valid, 1:p + 1, None]
+            try:
+                a_sol = np.linalg.solve(R, rhs)[..., 0]          # (m, p)
+                lpc[valid, 1:] = a_sol
+            except np.linalg.LinAlgError:
+                logger.warning("  LPC batch solve singular; falling back per-frame")
+                for f in np.where(valid)[0]:
+                    try:
+                        R_f = acf[f, np.abs(ij)]
+                        lpc[f, 1:] = np.linalg.solve(R_f, -acf[f, 1:p + 1])
+                    except np.linalg.LinAlgError:
+                        pass
+
+        # --- LPC spectrum magnitude → per-frame peaks → F1/F2/F3 ---
+        nfft_sp  = 1024
+        A        = np.fft.rfft(lpc, nfft_sp, axis=1)
+        H        = 1.0 / np.maximum(np.abs(A), 1e-12)
+        freqs_sp = np.fft.rfftfreq(nfft_sp, 1.0 / sr)
+        band     = (freqs_sp >= self.f_min) & (freqs_sp <= self.f_max)
+        freqs_band = freqs_sp[band]
+        min_peak_gap = max(1, int(150.0 / (sr / nfft_sp)))   # ≥ 150 Hz between peaks
+
+        f1 = np.zeros(n_frames)
+        f2 = np.zeros(n_frames)
+        f3 = np.zeros(n_frames)
+        for i in range(n_frames):
+            if not valid[i]:
+                continue
+            spec = H[i, band]
+            pk, _ = find_peaks(spec, distance=min_peak_gap)
+            if len(pk) == 0:
+                continue
+            pf = freqs_band[pk]
+            # Already ascending because freqs_band is monotonic
+            if len(pf) >= 1: f1[i] = pf[0]
+            if len(pf) >= 2: f2[i] = pf[1]
+            if len(pf) >= 3: f3[i] = pf[2]
+
+        # --- Singer's Formant Energy: signal-FFT power ratio (dB) ---
+        nfft_sfe   = 2048
+        X_sfe      = np.fft.rfft(frames_w, nfft_sfe, axis=1)
+        power      = (np.abs(X_sfe)) ** 2
+        freqs_sfe  = np.fft.rfftfreq(nfft_sfe, 1.0 / sr)
+        sfe_mask   = (freqs_sfe >= self.singer_band[0]) & (freqs_sfe <= self.singer_band[1])
+        total_pow  = power.sum(axis=1)
+        band_pow   = power[:, sfe_mask].sum(axis=1)
+        ratio      = band_pow / np.maximum(total_pow, 1e-15)
+        sfe_db     = 10.0 * np.log10(np.maximum(ratio, 1e-6))
+
+        # Assign each cycle to its enclosing frame
+        cycle_starts = idx[:-1]
+        frame_idx    = np.clip(cycle_starts // hop, 0, n_frames - 1)
+
+        out = {
+            "f1":  f1[frame_idx],
+            "f2":  f2[frame_idx],
+            "f3":  f3[frame_idx],
+            "sfe": sfe_db[frame_idx],
+        }
+
+        def _report(name, arr, unit):
+            nz = arr[arr > (0 if unit != "dB" else -50)]
+            if len(nz):
+                logger.info("  %s: mean=%.1f %s  range=[%.1f, %.1f]",
+                            name, float(nz.mean()), unit, float(nz.min()), float(nz.max()))
+        _report("F1", out["f1"], "Hz")
+        _report("F2", out["f2"], "Hz")
+        _report("F3", out["f3"], "Hz")
+        _report("SFE", out["sfe"], "dB")
+        return out
 
 
 # ---------------------------------------------------------------------------

@@ -232,6 +232,36 @@ METRIC_CFG = {
         cmap=_hsv_sweep(1/3, 0.0, "fd_vib_ext"),    # green→red (wide = dramatic)
         norm=None,
     ),
+    # Formants: vocal-tract resonances. Typical ranges for a mixed voice:
+    #   F1 ~ 300-1000 Hz   (vowel height)
+    #   F2 ~ 900-2500 Hz   (vowel backness)
+    #   F3 ~ 2200-3500 Hz  (articulation, part of singer's formant cluster)
+    "F1": dict(
+        label="F1 — 1st formant",
+        vmin=200.0, vmax=1000.0, unit="Hz",
+        cmap=_hsv_sweep(2/3, 0.0, "fd_f1"),
+        norm=None,
+    ),
+    "F2": dict(
+        label="F2 — 2nd formant",
+        vmin=800.0, vmax=2800.0, unit="Hz",
+        cmap=_hsv_sweep(2/3, 0.0, "fd_f2"),
+        norm=None,
+    ),
+    "F3": dict(
+        label="F3 — 3rd formant",
+        vmin=2000.0, vmax=3600.0, unit="Hz",
+        cmap=_hsv_sweep(2/3, 0.0, "fd_f3"),
+        norm=None,
+    ),
+    # Singer's Formant Energy (2.8-3.4 kHz band / total, dB).
+    # Classical trained singer: -7 to -13 dB; untrained < -13 dB; "ring" is high.
+    "SingersFormant": dict(
+        label="Singer's Formant Energy",
+        vmin=-25.0, vmax=-5.0, unit="dB",
+        cmap=_hsv_sweep(2/3, 0.0, "fd_sfe"),   # blue→red (low→high = more ring)
+        norm=None,
+    ),
     # ── EGG waveform clusters ───────────────────────────────────────────────
     # maxCluster / maxCPhon: dominant cluster id (1..5). Use a discrete 5-step
     # qualitative palette so you can visually distinguish which mode dominates
