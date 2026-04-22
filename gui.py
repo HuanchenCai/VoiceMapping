@@ -671,8 +671,7 @@ class FonaDynApp(_TkBase):
         self.metric_menu = tk.Menu(self.metric_btn, tearoff=0,
                                     bg=PANEL_HI, fg=TEXT,
                                     activebackground=ACCENT, activeforeground=BG,
-                                    font="TkMenuFont", bd=0,
-                                    disabledforeground=ACCENT)   # 节标题用强调色
+                                    font="TkMenuFont", bd=0)
         self.metric_btn["menu"] = self.metric_menu
         self.metric_btn.state(["disabled"])
         # metric_var 的变化 = 菜单里点击 or 键盘方向键触发 → 自动重绘
@@ -1110,9 +1109,18 @@ class FonaDynApp(_TkBase):
             if not first_section:
                 self.metric_menu.add_separator()
             first_section = False
-            # 节标题：disabled，文字颜色用 ACCENT（disabledforeground）
-            self.metric_menu.add_command(label=f"  {section_title}",
-                                         state="disabled")
+            # 节标题：不要 state="disabled"，否则 Windows 原生菜单会给
+            # 一层 emboss 的灰色底字 + 我们的 disabledforeground 叠起来
+            # 产生 "幻影"。改成可点击但 command 为 no-op 的普通 item，
+            # 通过 foreground / activebackground 全显式指定颜色，hover
+            # 时保持不高亮（activebackground 与底色相同）。
+            self.metric_menu.add_command(
+                label=f"  {section_title}",
+                foreground=ACCENT,
+                background=PANEL_HI,
+                activeforeground=ACCENT,
+                activebackground=PANEL_HI,
+                command=lambda: None)
             for m in avail:
                 self.metric_menu.add_command(
                     label=f"      {m}",
