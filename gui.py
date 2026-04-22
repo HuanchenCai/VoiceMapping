@@ -706,18 +706,19 @@ class FonaDynApp(_TkBase):
         self._showing_placeholder = False
         self._sync_fig_to_widget()
         self._fig.clear()
+        # 用固定边距替代 tight_layout：后者会随标题/colorbar 内容变化而
+        # 重新计算布局，导致每个 metric 的绘图区大小不一致；固定值能保证
+        # 切换 metric 时画面完全对齐，便于视觉比较。
+        # left：留给 "SPL (dB)" 竖向标签
+        # right：留给 colorbar + tick 数字（~5 位数字 @ fontsize=7）
+        # top：留给 metric 标题
+        # bottom：留给 x-ticks + "MIDI" 标签
+        self._fig.subplots_adjust(left=0.10, right=0.90, top=0.93, bottom=0.13)
         ax = self._fig.add_subplot(111)
         ok = draw_vrp_on_ax(ax, self._fig, df, col)
         if not ok:
             self._show_placeholder(f"{col} · 无数据")
             return
-        # tight_layout 在有 colorbar 的情况下会自动给 ylabel / title / colorbar 腾
-        # 出空间，避免 SPL 标签和 metric 标题被截。pad=1.6 经测试在 dpi=120 下
-        # 够用，再大会让绘图区变窄。
-        try:
-            self._fig.tight_layout(pad=1.6)
-        except Exception:
-            self._fig.subplots_adjust(left=0.12, right=0.92, top=0.90, bottom=0.14)
         self._canvas.draw_idle()
 
     # ── 日志 ──
