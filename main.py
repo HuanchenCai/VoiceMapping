@@ -13,20 +13,25 @@ import logging
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-from analyzer import VoiceMapAnalyzer
-from config import VoiceMapConfig, DEFAULT_CONFIG
-from logger import setup_logger, get_logger
-
-
 def main():
     """Main entry point for VoiceMap analysis"""
+    # --gui 启动现代 GUI 前端（GUI 路径懒加载重型依赖，这里不 import analyzer）
+    if len(sys.argv) > 1 and sys.argv[1] in ("--gui", "-g", "gui"):
+        from gui import main as gui_main
+        gui_main()
+        return
+
+    from analyzer import VoiceMapAnalyzer
+    from config import DEFAULT_CONFIG
+    from logger import setup_logger, get_logger
+
     # Set up logging
     setup_logger("voicemap", level=logging.INFO)
     logger = get_logger("voicemap")
-    
+
     logger.info("VoiceMap Voice Range Profile Analyzer")
     logger.info("=" * 50)
-    
+
     # Check command line arguments
     if len(sys.argv) > 1:
         audio_file = sys.argv[1]

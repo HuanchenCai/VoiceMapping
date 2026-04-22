@@ -344,6 +344,9 @@ def plot_vrp_csv(
     return saved
 
 
+draw_vrp_on_ax = _draw_vrp_ax
+
+
 def plot_vrp_dataframe(
     df: pd.DataFrame,
     basename: str,

@@ -309,7 +309,7 @@ class VoiceMapAnalyzer:
     # ------------------------------------------------------------------
     # CSV output
     # ------------------------------------------------------------------
-    def output_vrp_csv(self, metrics: Dict[str, np.ndarray]) -> str:
+    def output_vrp_csv(self, metrics: Dict[str, np.ndarray], return_df: bool = False):
         logger.info("Outputting VRP CSV...")
         spl_corr = metrics['spl'] + self.config.spl_correction_db
         df = pd.DataFrame({
@@ -374,13 +374,15 @@ class VoiceMapAnalyzer:
         if saved:
             logger.info("Plots saved to: %s  (%d images)", plot_dir, len(saved))
 
+        if return_df:
+            return out_file, grouped
         return out_file
 
     # ------------------------------------------------------------------
     # Full pipeline
     # ------------------------------------------------------------------
-    def analyze_and_output_vrp(self, file_path: Optional[str] = None
-                                ) -> Tuple[Dict[str, np.ndarray], str]:
+    def analyze_and_output_vrp(self, file_path: Optional[str] = None,
+                                return_df: bool = False):
         logger.info("=" * 60)
         logger.info("VoiceMap Complete Analysis")
         logger.info("=" * 60)
@@ -402,11 +404,17 @@ class VoiceMapAnalyzer:
         filtered_metrics = self.apply_clarity_filtering(metrics)
 
         logger.info("Valid data points: %d", len(filtered_metrics['midi']))
-        out_file = self.output_vrp_csv(filtered_metrics)
+        csv_result = self.output_vrp_csv(filtered_metrics, return_df=return_df)
+        if return_df:
+            out_file, grouped_df = csv_result
+        else:
+            out_file = csv_result
 
         logger.info("Total wall time: %.2fs  (audio: %.1fs  ratio: %.1fx)",
                          time.perf_counter() - t0, duration,
                          duration / max(time.perf_counter() - t0, 1e-9))
+        if return_df:
+            return filtered_metrics, out_file, grouped_df
         return filtered_metrics, out_file
 
 
