@@ -73,6 +73,7 @@ _METRIC_SECTIONS: list = [
     ]),
     ("EGG · 电声门图", [
         "Qcontact", "Icontact", "dEGGmax", "HRFegg",
+        "OQ", "SPQ", "CIQ",
     ]),
     ("唱歌特异性 · Singing-specific", [
         "VibratoRate", "VibratoExtent",

@@ -592,6 +592,93 @@ class HRFCalculator(MetricCalculator):
 
 
 # ---------------------------------------------------------------------------
+# P3: Open Quotient / Speed Quotient / Contact Index Quotient.
+#
+# Three glottal-timing descriptors derived from within-cycle EGG events.
+# FonaDyn's existing Qcontact uses an SC-specific integral formula; these
+# use the classical Howard / Baken derivative-peak definitions which are
+# what most EGG papers cite.
+#
+# Within each cycle [t0 = GCI_i, t1 = GCI_{i+1}]:
+#   GOI (opening instant)       = argmin(dEGG)  within (t0, t1)
+#   peak (max open, min EGG)    = argmin(EGG)   within (t0, t1)
+#   T_closed  = GOI - t0         (fully contacted phase)
+#   T_open    = t1  - GOI        (any contact loss)
+#   T_opening = peak - GOI       (sub-phase 1 of the open phase)
+#   T_closing = t1   - peak      (sub-phase 2 of the open phase)
+#
+# OQ  = T_open    / T
+# SPQ = T_opening / T_closing        (Baken: "opening vs closing branch")
+# CIQ = (T_closing - T_opening) / T_open    (Howard asymmetry index)
+# Cycles whose sub-phase durations are degenerate (non-positive) fall to 0
+# so bad segments don't wreck per-cell means.
+# ---------------------------------------------------------------------------
+class OpenQuotientCalculator(MetricCalculator):
+    """Per-cycle OQ, SPQ, CIQ (all EGG-derivative based)."""
+
+    KEYS = ("oq", "spq", "ciq")
+
+    def calculate(self, egg: np.ndarray,
+                  cycle_triggers: np.ndarray) -> Dict[str, np.ndarray]:
+        logger.info("Calculating OQ / SPQ / CIQ (EGG timing)...")
+        idx = np.where(cycle_triggers > 0.5)[0]
+        n = max(len(idx) - 1, 0)
+        if n == 0:
+            return {k: np.zeros(0) for k in self.KEYS}
+
+        T = np.diff(idx).astype(np.float64)              # cycle length
+        t_goi   = np.zeros(n, dtype=np.float64)          # within-cycle offset
+        t_peak  = np.zeros(n, dtype=np.float64)
+
+        # Per-cycle argmin on dEGG and EGG. The Python loop is ~150 ms for
+        # 12k cycles — less than the downstream K-means, not worth the
+        # complexity of a jagged-array vectorisation.
+        for i in range(n):
+            s, e = idx[i], idx[i + 1]
+            if e - s < 4:
+                continue
+            cyc  = egg[s:e]
+            dcyc = np.diff(cyc)
+            t_goi[i]  = float(np.argmin(dcyc))
+            t_peak[i] = float(np.argmin(cyc))
+
+        # Quotients
+        oq  = np.zeros(n)
+        spq = np.zeros(n)
+        ciq = np.zeros(n)
+
+        good_T = T > 0
+        # OQ = T_open / T = (T - t_goi) / T ; clip to [0, 1]
+        oq[good_T] = np.clip((T[good_T] - t_goi[good_T]) / T[good_T], 0.0, 1.0)
+
+        t_opening = t_peak - t_goi        # GOI → peak (open_phase sub-1)
+        t_closing = T      - t_peak       # peak → next GCI  (open_phase sub-2)
+
+        # SPQ: both sub-phases must be positive; clip to a sane 0.1–10 range
+        valid = good_T & (t_opening > 0) & (t_closing > 0)
+        spq[valid] = np.clip(t_opening[valid] / t_closing[valid], 0.1, 10.0)
+
+        # CIQ: T_open must be positive (same as OQ)
+        t_open = T - t_goi
+        valid_ciq = good_T & (t_open > 0)
+        ciq[valid_ciq] = np.clip(
+            (t_closing[valid_ciq] - t_opening[valid_ciq]) / t_open[valid_ciq],
+            -1.0, 1.0)
+
+        logger.info("  OQ:  mean=%.3f  range=[%.3f, %.3f]",
+                    float(oq[oq > 0].mean() if (oq > 0).any() else 0.0),
+                    float(oq.min()), float(oq.max()))
+        logger.info("  SPQ: mean=%.3f  range=[%.3f, %.3f]",
+                    float(spq[spq > 0].mean() if (spq > 0).any() else 0.0),
+                    float(spq.min()), float(spq.max()))
+        logger.info("  CIQ: mean=%.3f  range=[%.3f, %.3f]",
+                    float(ciq.mean()),
+                    float(ciq.min()), float(ciq.max()))
+
+        return {"oq": oq, "spq": spq, "ciq": ciq}
+
+
+# ---------------------------------------------------------------------------
 # P2: Vibrato rate + extent per cycle.
 #
 # Peking-opera singing technique is characterised by a prominent 5-7 Hz

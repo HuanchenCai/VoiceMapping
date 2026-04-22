@@ -24,6 +24,7 @@ from metrics import (
     ClusterCalculator, PhonClusterCalculator,
     PerturbationCalculator, HNRCalculator,
     VibratoCalculator, FormantCalculator, HarmonicDiffCalculator,
+    OpenQuotientCalculator,
 )
 
 logger = get_logger(__name__)
@@ -155,6 +156,7 @@ class VoiceMapAnalyzer:
         self.vibrato_calculator  = VibratoCalculator(self.config)
         self.formant_calculator  = FormantCalculator(self.config)
         self.harmdiff_calculator = HarmonicDiffCalculator(self.config)
+        self.oq_calculator       = OpenQuotientCalculator(self.config)
 
         logger.info("VoiceMap analyzer initialized (numba=%s)", _NUMBA)
 
@@ -367,6 +369,8 @@ class VoiceMapAnalyzer:
         formant_values                       = self.formant_calculator.calculate(voice_signal, cycle_triggers)
         # P2: H1-H2 / H1-H3 spectral tilt (voice DFT per cycle)
         harmdiff_values                      = self.harmdiff_calculator.calculate(voice_signal, cycle_triggers)
+        # P3: EGG timing quotients (OQ / SPQ / CIQ)
+        oq_values                            = self.oq_calculator.calculate(egg_signal, cycle_triggers)
 
         base = {
             'midi':     midi_values,
@@ -397,6 +401,9 @@ class VoiceMapAnalyzer:
             'sfe': formant_values['sfe'],
             'h1h2': harmdiff_values['h1h2'],
             'h1h3': harmdiff_values['h1h3'],
+            'oq':  oq_values['oq'],
+            'spq': oq_values['spq'],
+            'ciq': oq_values['ciq'],
         }
         # Phonation-type cluster uses the already-computed quality metrics
         # as features — must run AFTER them.
@@ -525,6 +532,9 @@ class VoiceMapAnalyzer:
             'SingersFormant': _pad(metrics.get('sfe'), base_n),
             'H1H2':           _pad(metrics.get('h1h2'), base_n),
             'H1H3':           _pad(metrics.get('h1h3'), base_n),
+            'OQ':             _pad(metrics.get('oq'),  base_n),
+            'SPQ':            _pad(metrics.get('spq'), base_n),
+            'CIQ':            _pad(metrics.get('ciq'), base_n),
             '_cluster': cluster.astype(int),
             '_phon':    phon.astype(int),
         })
@@ -550,6 +560,7 @@ class VoiceMapAnalyzer:
             'F1': 'mean', 'F2': 'mean', 'F3': 'mean',
             'SingersFormant': 'mean',
             'H1H2': 'mean', 'H1H3': 'mean',
+            'OQ': 'mean', 'SPQ': 'mean', 'CIQ': 'mean',
             'Total': 'sum',
         }).reset_index()
 
@@ -565,6 +576,8 @@ class VoiceMapAnalyzer:
         standard_columns = [
             'MIDI', 'dB', 'Total', 'Clarity', 'Crest', 'SpecBal', 'CPP', 'Entropy',
             'dEGGmax', 'Qcontact', 'Icontact', 'HRFegg',
+            # P3 (EGG timing)
+            'OQ', 'SPQ', 'CIQ',
             # P1
             'Jitter', 'JitterRAP', 'JitterPPQ5',
             'Shimmer', 'ShimmerDB', 'ShimmerAPQ11', 'HNR',

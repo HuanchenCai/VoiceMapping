@@ -277,6 +277,31 @@ METRIC_CFG = {
         cmap=_hsv_sweep(2/3, 0.0, "fd_h1h3"),
         norm=None,
     ),
+    # ── P3 EGG timing quotients ────────────────────────────────────────────
+    # OQ (Open Quotient): fraction of cycle where vocal folds are open.
+    # Modal ~ 0.5, breathy > 0.7, pressed < 0.4.
+    "OQ": dict(
+        label="Open Quotient",
+        vmin=0.2, vmax=0.8, unit="",
+        cmap=_hsv_sweep(1/3, 0.0, "fd_oq"),   # green → red (closed → open)
+        norm=None,
+    ),
+    # SPQ (Speed Quotient): opening vs closing phase duration. 1.0 = symmetric;
+    # > 1 = slower opening, < 1 = faster opening.
+    "SPQ": dict(
+        label="Speed Quotient",
+        vmin=0.3, vmax=3.0, unit="",
+        cmap=_hsv_sweep(2/3, 0.0, "fd_spq"),
+        norm=None,
+    ),
+    # CIQ (Contact Index / asymmetry): negative = opening longer, positive =
+    # closing longer. 0 = symmetric.
+    "CIQ": dict(
+        label="Contact Index",
+        vmin=-0.6, vmax=0.6, unit="",
+        cmap=_hsv_sweep(2/3, 0.0, "fd_ciq"),
+        norm=None,
+    ),
     # ── EGG waveform clusters ───────────────────────────────────────────────
     # maxCluster / maxCPhon: dominant cluster id (1..5). Use a discrete 5-step
     # qualitative palette so you can visually distinguish which mode dominates
