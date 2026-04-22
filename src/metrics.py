@@ -592,6 +592,116 @@ class HRFCalculator(MetricCalculator):
 
 
 # ---------------------------------------------------------------------------
+# P2: Vibrato rate + extent per cycle.
+#
+# Peking-opera singing technique is characterised by a prominent 5-7 Hz
+# pitch modulation; rate and extent are the standard quantitative handles.
+#
+# Algorithm:
+#   • Take the per-cycle MIDI (semitone) series p[i].
+#   • Sliding window of W cycles (default 40 ≈ 0.4 s @ 100 Hz pitch rate).
+#   • Detrend (subtract window mean), Hann-window, FFT.
+#   • For each window the cycle clock runs at avg_rate = W / Σ T[i..i+W];
+#     FFT bin k maps to freq_k = k · avg_rate / W. Mask to the 4–8 Hz
+#     vibrato band per window.
+#   • Rate  = freq at max magnitude in the band (Hz).
+#   • Extent = 800 · |X[k_peak]| / W  cents peak-to-peak (Hann coherent
+#     gain factored in: amplitude_semitones = 4·mag/W → pk-pk cents = ×200).
+#   • Peaks below 2× median magnitude in the band are gated to 0
+#     (no clear vibrato → output 0, not spurious noise freq).
+#   • Each cycle is assigned to the window it's centred in.
+# ---------------------------------------------------------------------------
+class VibratoCalculator(MetricCalculator):
+    """Sliding-window FFT of the per-cycle MIDI series → rate (Hz) + extent (cents)."""
+
+    def __init__(self, config: VoiceMapConfig,
+                 window_cycles: int = 40,
+                 vib_f_min: float = 4.0, vib_f_max: float = 8.0,
+                 min_snr: float = 2.0):
+        super().__init__(config)
+        self.window_cycles = int(window_cycles)
+        self.vib_f_min = float(vib_f_min)
+        self.vib_f_max = float(vib_f_max)
+        self.min_snr = float(min_snr)
+
+    def calculate(self, midi_per_cycle: np.ndarray,
+                  cycle_idx: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        logger.info("Calculating vibrato (rate + extent)...")
+        n = len(midi_per_cycle)
+        W = self.window_cycles
+        zeros = np.zeros(n)
+
+        if n < W + 2 or len(cycle_idx) < n + 1:
+            return zeros.copy(), zeros.copy()
+
+        sr = float(self.sample_rate)
+        T = np.diff(cycle_idx[:n + 1]).astype(np.float64) / sr      # (n,)
+
+        # Sliding windows over midi + T
+        midi_wins = sliding_window_view(midi_per_cycle, W)           # (n-W+1, W)
+        T_wins    = sliding_window_view(T, W)                        # (n-W+1, W)
+        n_wins    = midi_wins.shape[0]
+
+        # Detrend + Hann, FFT
+        midi_d = midi_wins - midi_wins.mean(axis=1, keepdims=True)
+        hann   = np.hanning(W)
+        X      = np.fft.rfft(midi_d * hann, axis=1)
+        mag    = np.abs(X)                                           # (n_wins, W//2+1)
+
+        # Per-window cycle rate (cycles/s ≈ pitch frequency average)
+        cycle_rate = W / T_wins.sum(axis=1)                          # (n_wins,)
+        # FFT bin frequencies per window
+        k = np.arange(mag.shape[1])
+        freqs = k[None, :] * cycle_rate[:, None] / W                  # (n_wins, n_bins)
+
+        # Mask to vibrato band (per-window since freqs vary)
+        band = (freqs >= self.vib_f_min) & (freqs <= self.vib_f_max)
+        has_band = band.any(axis=1)
+
+        # Peak magnitude and freq in band
+        mag_in_band = np.where(band, mag, -np.inf)
+        peak_bin = mag_in_band.argmax(axis=1)
+        peak_mag = mag[np.arange(n_wins), peak_bin]
+        peak_freq = freqs[np.arange(n_wins), peak_bin]
+
+        # SNR gate — peak must be > min_snr × median of full-spectrum mag.
+        # Windows without vibrato (pure tone or random drift) get 0.
+        noise_floor = np.median(mag, axis=1)
+        valid = has_band & (peak_mag > self.min_snr * np.maximum(noise_floor, 1e-9))
+
+        rate_win   = np.where(valid, peak_freq, 0.0)
+        extent_win = np.where(valid, 800.0 * peak_mag / W, 0.0)   # cents pk-pk
+
+        # Sanity clip: real vibrato is < ~400 cents pk-pk. Values above that
+        # almost always come from pitch-tracking glitches (octave jumps,
+        # subharmonic snaps) producing huge FFT peaks. Zero out both rate and
+        # extent so those cycles don't skew the per-cell mean.
+        bad = extent_win > 400.0
+        rate_win[bad]   = 0.0
+        extent_win[bad] = 0.0
+
+        # Assign each cycle to its centred window; pad edges with nearest
+        half = W // 2
+        rate = np.zeros(n)
+        extent = np.zeros(n)
+        rate[half:half + n_wins]   = rate_win
+        extent[half:half + n_wins] = extent_win
+        if n_wins:
+            rate[:half]             = rate_win[0]
+            extent[:half]           = extent_win[0]
+            rate[half + n_wins:]    = rate_win[-1]
+            extent[half + n_wins:]  = extent_win[-1]
+
+        good = rate > 0
+        if good.any():
+            logger.info("  Vibrato: rate mean=%.2f Hz  extent mean=%.1f cents  (%.0f%% of cycles)",
+                        float(rate[good].mean()),
+                        float(extent[good].mean()),
+                        100.0 * good.mean())
+        return rate, extent
+
+
+# ---------------------------------------------------------------------------
 # P1: Jitter / Shimmer per cycle.
 #   Jitter_local  = mean(|T[i] - T[i-1]|) / mean(T)      · %
 #   Jitter_RAP    = mean(|T[i] - avg3(T[i-1..i+1])|) / mean(T)   · %   (3-pt)

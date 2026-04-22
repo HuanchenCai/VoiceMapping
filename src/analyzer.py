@@ -23,6 +23,7 @@ from metrics import (
     CrestCalculator, QcontactCalculator, EntropyCalculator, HRFCalculator,
     ClusterCalculator, PhonClusterCalculator,
     PerturbationCalculator, HNRCalculator,
+    VibratoCalculator,
 )
 
 logger = get_logger(__name__)
@@ -151,6 +152,7 @@ class VoiceMapAnalyzer:
         self.phon_calculator     = PhonClusterCalculator(self.config)
         self.perturb_calculator  = PerturbationCalculator(self.config)
         self.hnr_calculator      = HNRCalculator(self.config)
+        self.vibrato_calculator  = VibratoCalculator(self.config)
 
         logger.info("VoiceMap analyzer initialized (numba=%s)", _NUMBA)
 
@@ -357,6 +359,8 @@ class VoiceMapAnalyzer:
         # P1: voice-perturbation family (jitter/shimmer) + voice HNR
         perturb_values                       = self.perturb_calculator.calculate(voice_signal, cycle_triggers)
         hnr_values                           = self.hnr_calculator.calculate(voice_signal, cycle_triggers)
+        # P2: vibrato on the already-computed per-cycle MIDI series
+        vib_rate, vib_extent                 = self.vibrato_calculator.calculate(midi_values, _idx)
 
         base = {
             'midi':     midi_values,
@@ -379,6 +383,8 @@ class VoiceMapAnalyzer:
             'shimmer_db':    perturb_values['shimmer_db'],
             'shimmer_apq11': perturb_values['shimmer_apq11'],
             'hnr':           hnr_values,
+            'vibrato_rate':   vib_rate,
+            'vibrato_extent': vib_extent,
         }
         # Phonation-type cluster uses the already-computed quality metrics
         # as features — must run AFTER them.
@@ -499,6 +505,8 @@ class VoiceMapAnalyzer:
             'ShimmerDB':     _pad(metrics.get('shimmer_db'),    base_n),
             'ShimmerAPQ11':  _pad(metrics.get('shimmer_apq11'), base_n),
             'HNR':           _pad(metrics.get('hnr'),           base_n),
+            'VibratoRate':   _pad(metrics.get('vibrato_rate'),   base_n),
+            'VibratoExtent': _pad(metrics.get('vibrato_extent'), base_n),
             '_cluster': cluster.astype(int),
             '_phon':    phon.astype(int),
         })
@@ -520,6 +528,7 @@ class VoiceMapAnalyzer:
             'Jitter': 'mean', 'JitterRAP': 'mean', 'JitterPPQ5': 'mean',
             'Shimmer': 'mean', 'ShimmerDB': 'mean', 'ShimmerAPQ11': 'mean',
             'HNR': 'mean',
+            'VibratoRate': 'mean', 'VibratoExtent': 'mean',
             'Total': 'sum',
         }).reset_index()
 
@@ -538,6 +547,8 @@ class VoiceMapAnalyzer:
             # P1
             'Jitter', 'JitterRAP', 'JitterPPQ5',
             'Shimmer', 'ShimmerDB', 'ShimmerAPQ11', 'HNR',
+            # P2 (singing-specific)
+            'VibratoRate', 'VibratoExtent',
             # P0 cluster
             'maxCluster',
             'Cluster 1', 'Cluster 2', 'Cluster 3', 'Cluster 4', 'Cluster 5',

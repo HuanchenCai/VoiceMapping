@@ -216,6 +216,22 @@ METRIC_CFG = {
         cmap=_hsv_sweep(0.0, 2/3, "fd_hnr"),   # red→blue (low→high)
         norm=None,
     ),
+    # ── P2 Singing-specific ────────────────────────────────────────────────
+    # Vibrato rate: typical singer 5-7 Hz; Peking opera often 5-6 Hz.
+    # vmin/vmax span the realistic vibrato band; mid-green = healthy.
+    "VibratoRate": dict(
+        label="Vibrato rate",
+        vmin=3.0, vmax=9.0, unit="Hz",
+        cmap=_hsv_sweep(2/3, 0.0, "fd_vib_rate"),   # blue→red across band
+        norm=None,
+    ),
+    # Vibrato extent: 50-150 cents typical; classical Western ~80, Peking often wider.
+    "VibratoExtent": dict(
+        label="Vibrato extent",
+        vmin=0.0, vmax=300.0, unit="cents",
+        cmap=_hsv_sweep(1/3, 0.0, "fd_vib_ext"),    # green→red (wide = dramatic)
+        norm=None,
+    ),
     # ── EGG waveform clusters ───────────────────────────────────────────────
     # maxCluster / maxCPhon: dominant cluster id (1..5). Use a discrete 5-step
     # qualitative palette so you can visually distinguish which mode dominates
