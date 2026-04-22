@@ -208,12 +208,55 @@ METRIC_CFG = {
         cmap=_hsv_sweep(1/3, 0.0, "fd_shimmer_apq11"),
         norm=None,
     ),
+    "ShimmerAPQ3": dict(
+        label="Shimmer APQ3 (3-pt)",
+        vmin=0.0, vmax=10.0, unit="%",
+        cmap=_hsv_sweep(1/3, 0.0, "fd_shimmer_apq3"),
+        norm=None,
+    ),
+    "ShimmerAPQ5": dict(
+        label="Shimmer APQ5 (5-pt)",
+        vmin=0.0, vmax=10.0, unit="%",
+        cmap=_hsv_sweep(1/3, 0.0, "fd_shimmer_apq5"),
+        norm=None,
+    ),
     # HNR: higher = healthier voice (>20 dB normal). Use blue→red reversed
     # so high values (good) are cool/calm and low values (noisy) are hot.
     "HNR": dict(
         label="HNR",
         vmin=0.0, vmax=35.0, unit="dB",
         cmap=_hsv_sweep(0.0, 2/3, "fd_hnr"),   # red→blue (low→high)
+        norm=None,
+    ),
+    # ── Add-on voice-quality metrics (待验证) ──────────────────────────────
+    # NHR (Noise-to-Harmonics): inverse of HNR. >0.19 pathological (MDVP).
+    # Low = clean. Green→red so "normal" reads cool, "noisy" reads hot.
+    "NHR": dict(
+        label="NHR (Noise-to-Harm)",
+        vmin=0.0, vmax=0.5, unit="",
+        cmap=_hsv_sweep(1/3, 0.0, "fd_nhr"),
+        norm=None,
+    ),
+    # CPPS (smoothed CPP). Same scale as CPP, moving-averaged temporally.
+    "CPPS": dict(
+        label="CPPS (smoothed CPP)",
+        vmin=0.0, vmax=30.0, unit="dB",
+        cmap=_CMAP["CPP"],
+        norm=None,
+    ),
+    # PPE (pitch period entropy). 0-1 after log(n_bins) normalisation.
+    # 0 = perfectly periodic, 1 = maximally irregular.
+    "PPE": dict(
+        label="Pitch Period Entropy",
+        vmin=0.0, vmax=1.0, unit="",
+        cmap=_hsv_sweep(1/3, 0.0, "fd_ppe"),   # green→red (stable→noisy)
+        norm=None,
+    ),
+    # ZCR (zero-crossing rate) per cycle. Range typically 0.01–0.2 for voice.
+    "ZCR": dict(
+        label="Zero-Crossing Rate",
+        vmin=0.0, vmax=0.3, unit="",
+        cmap=_hsv_sweep(1/3, 0.0, "fd_zcr"),
         norm=None,
     ),
     # ── P2 Singing-specific ────────────────────────────────────────────────
@@ -355,7 +398,9 @@ METRIC_CATEGORY = {
     **{m: "Acoustic" for m in (
         "Clarity", "CPP", "SpecBal", "Crest", "Entropy",
         "Jitter", "JitterRAP", "JitterPPQ5",
-        "Shimmer", "ShimmerDB", "ShimmerAPQ11", "HNR")},
+        "Shimmer", "ShimmerDB",
+        "ShimmerAPQ3", "ShimmerAPQ5", "ShimmerAPQ11",
+        "HNR", "NHR", "CPPS", "PPE", "ZCR")},
     # EGG
     **{m: "EGG" for m in (
         "Qcontact", "Icontact", "dEGGmax", "HRFegg",

@@ -70,9 +70,12 @@ FONT_MONO  = ("Consolas", 9)
 # 节与节之间 ttk Menu 画分隔线。未来新指标按功能塞进对应的 section。
 _METRIC_SECTIONS: list = [
     ("声学 · Acoustic", [
-        "Clarity", "CPP", "SpecBal", "Crest", "Entropy",
+        "Clarity", "CPP", "CPPS", "SpecBal", "Crest", "Entropy",
         "Jitter", "JitterRAP", "JitterPPQ5",
-        "Shimmer", "ShimmerDB", "ShimmerAPQ11", "HNR",
+        "Shimmer", "ShimmerDB",
+        "ShimmerAPQ3", "ShimmerAPQ5", "ShimmerAPQ11",
+        "HNR", "NHR",
+        "PPE", "ZCR",
     ]),
     ("EGG · 电声门图", [
         "Qcontact", "Icontact", "dEGGmax", "HRFegg",

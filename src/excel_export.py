@@ -30,9 +30,11 @@ logger = logging.getLogger(__name__)
 # with analyzer.output_vrp_csv's standard_columns.
 _METRIC_COLS = [
     # Acoustic
-    "Clarity", "CPP", "SpecBal", "Crest", "Entropy",
+    "Clarity", "CPP", "CPPS", "SpecBal", "Crest", "Entropy",
     "Jitter", "JitterRAP", "JitterPPQ5",
-    "Shimmer", "ShimmerDB", "ShimmerAPQ11", "HNR",
+    "Shimmer", "ShimmerDB",
+    "ShimmerAPQ3", "ShimmerAPQ5", "ShimmerAPQ11",
+    "HNR", "NHR", "PPE", "ZCR",
     # EGG
     "Qcontact", "Icontact", "dEGGmax", "HRFegg",
     "OQ", "SPQ", "CIQ",

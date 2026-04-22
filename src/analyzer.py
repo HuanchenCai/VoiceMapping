@@ -25,6 +25,8 @@ from metrics import (
     PerturbationCalculator, HNRCalculator,
     VibratoCalculator, FormantCalculator, HarmonicDiffCalculator,
     OpenQuotientCalculator,
+    # Add-on voice quality metrics (待验证)
+    NHRCalculator, CPPSCalculator, PPECalculator, ZCRCalculator,
 )
 
 logger = get_logger(__name__)
@@ -157,6 +159,11 @@ class VoiceMapAnalyzer:
         self.formant_calculator  = FormantCalculator(self.config)
         self.harmdiff_calculator = HarmonicDiffCalculator(self.config)
         self.oq_calculator       = OpenQuotientCalculator(self.config)
+        # Add-on: voice-quality metrics under active validation.
+        self.nhr_calculator      = NHRCalculator(self.config)
+        self.cpps_calculator     = CPPSCalculator(self.config)
+        self.ppe_calculator      = PPECalculator(self.config)
+        self.zcr_calculator      = ZCRCalculator(self.config)
 
         logger.info("VoiceMap analyzer initialized (numba=%s)", _NUMBA)
 
@@ -450,8 +457,10 @@ class VoiceMapAnalyzer:
 
         _step(9)   # "Jitter / Shimmer"
         perturb_values                       = self.perturb_calculator.calculate(voice_signal, cycle_triggers)
-        _step(10)  # "HNR"
+        _step(10)  # "HNR + NHR"
         hnr_values                           = self.hnr_calculator.calculate(voice_signal, cycle_triggers)
+        nhr_values                           = self.nhr_calculator.calculate(
+                                                    voice_signal, cycle_triggers, hnr_values=hnr_values)
         _step(11)  # "Vibrato"
         vib_rate, vib_extent                 = self.vibrato_calculator.calculate(midi_values, _idx)
         _step(12)  # "Formants + Singer's Formant"
@@ -460,6 +469,10 @@ class VoiceMapAnalyzer:
         harmdiff_values                      = self.harmdiff_calculator.calculate(voice_signal, cycle_triggers)
         _step(14)  # "OQ / SPQ / CIQ"
         oq_values                            = self.oq_calculator.calculate(egg_signal, cycle_triggers)
+        _step(15)  # "Add-on: CPPS / PPE / ZCR"
+        cpps_values                          = self.cpps_calculator.calculate(cpp_values)
+        ppe_values                           = self.ppe_calculator.calculate(cycle_triggers)
+        zcr_values                           = self.zcr_calculator.calculate(voice_signal, cycle_triggers)
 
         base = {
             'midi':     midi_values,
@@ -480,8 +493,14 @@ class VoiceMapAnalyzer:
             'jitter_ppq5':   perturb_values['jitter_ppq5'],
             'shimmer':       perturb_values['shimmer_local'],
             'shimmer_db':    perturb_values['shimmer_db'],
+            'shimmer_apq3':  perturb_values['shimmer_apq3'],
+            'shimmer_apq5':  perturb_values['shimmer_apq5'],
             'shimmer_apq11': perturb_values['shimmer_apq11'],
             'hnr':           hnr_values,
+            'nhr':           nhr_values,
+            'cpps':          cpps_values,
+            'ppe':           ppe_values,
+            'zcr':           zcr_values,
             'vibrato_rate':   vib_rate,
             'vibrato_extent': vib_extent,
             'f1':  formant_values['f1'],
@@ -496,7 +515,7 @@ class VoiceMapAnalyzer:
         }
         # Phonation-type cluster uses the already-computed quality metrics
         # as features — must run AFTER them.
-        _step(15)   # "Phonation cluster (cPhon)"
+        _step(16)   # "Phonation cluster (cPhon)"
         base['phon'] = self.phon_calculator.calculate(base)
         return base
 
@@ -612,8 +631,14 @@ class VoiceMapAnalyzer:
             'JitterPPQ5':    _pad(metrics.get('jitter_ppq5'),   base_n),
             'Shimmer':       _pad(metrics.get('shimmer'),       base_n),
             'ShimmerDB':     _pad(metrics.get('shimmer_db'),    base_n),
+            'ShimmerAPQ3':   _pad(metrics.get('shimmer_apq3'),  base_n),
+            'ShimmerAPQ5':   _pad(metrics.get('shimmer_apq5'),  base_n),
             'ShimmerAPQ11':  _pad(metrics.get('shimmer_apq11'), base_n),
             'HNR':           _pad(metrics.get('hnr'),           base_n),
+            'NHR':           _pad(metrics.get('nhr'),           base_n),
+            'CPPS':          _pad(metrics.get('cpps'),          base_n),
+            'PPE':           _pad(metrics.get('ppe'),           base_n),
+            'ZCR':           _pad(metrics.get('zcr'),           base_n),
             'VibratoRate':   _pad(metrics.get('vibrato_rate'),   base_n),
             'VibratoExtent': _pad(metrics.get('vibrato_extent'), base_n),
             'F1':            _pad(metrics.get('f1'),  base_n),
@@ -644,8 +669,10 @@ class VoiceMapAnalyzer:
             'Crest': 'mean', 'Entropy': 'mean', 'Qcontact': 'mean',
             'dEGGmax': 'mean', 'Icontact': 'mean', 'HRFegg': 'mean',
             'Jitter': 'mean', 'JitterRAP': 'mean', 'JitterPPQ5': 'mean',
-            'Shimmer': 'mean', 'ShimmerDB': 'mean', 'ShimmerAPQ11': 'mean',
-            'HNR': 'mean',
+            'Shimmer': 'mean', 'ShimmerDB': 'mean',
+            'ShimmerAPQ3': 'mean', 'ShimmerAPQ5': 'mean', 'ShimmerAPQ11': 'mean',
+            'HNR': 'mean', 'NHR': 'mean',
+            'CPPS': 'mean', 'PPE': 'mean', 'ZCR': 'mean',
             'VibratoRate': 'mean', 'VibratoExtent': 'mean',
             'F1': 'mean', 'F2': 'mean', 'F3': 'mean',
             'SingersFormant': 'mean',
@@ -692,7 +719,11 @@ class VoiceMapAnalyzer:
             'OQ', 'SPQ', 'CIQ',
             # P1
             'Jitter', 'JitterRAP', 'JitterPPQ5',
-            'Shimmer', 'ShimmerDB', 'ShimmerAPQ11', 'HNR',
+            'Shimmer', 'ShimmerDB',
+            'ShimmerAPQ3', 'ShimmerAPQ5', 'ShimmerAPQ11',
+            'HNR',
+            # Add-on voice-quality (待验证)
+            'NHR', 'CPPS', 'PPE', 'ZCR',
             # P2 (singing-specific)
             'VibratoRate', 'VibratoExtent',
             'F1', 'F2', 'F3', 'SingersFormant',
@@ -761,13 +792,14 @@ class VoiceMapAnalyzer:
         "Qcontact / Entropy / HRFegg",       # 7
         "EGG 波形聚类",                      # 8
         "Jitter / Shimmer",                  # 9
-        "HNR",                               # 10
+        "HNR + NHR",                         # 10
         "Vibrato",                           # 11
         "Formants + Singer's Formant",       # 12
         "H1-H2 / H1-H3",                     # 13
         "OQ / SPQ / CIQ",                    # 14
-        "Phonation cluster (cPhon)",         # 15
-        "写 CSV",                            # 16
+        "Add-on: CPPS / PPE / ZCR",          # 15
+        "Phonation cluster (cPhon)",         # 16
+        "写 CSV",                            # 17
     )
     TOTAL_STAGES = len(_STAGE_LABELS)
 
@@ -820,7 +852,7 @@ class VoiceMapAnalyzer:
         filtered_metrics = self.apply_clarity_filtering(metrics)
 
         logger.info("Valid data points: %d", len(filtered_metrics['midi']))
-        _cb(16)  # "写 CSV"
+        _cb(17)  # "写 CSV"
         csv_result = self.output_vrp_csv(filtered_metrics,
                                           return_df=return_df,
                                           plot_mode=plot_mode,

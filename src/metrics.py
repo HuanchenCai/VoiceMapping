@@ -1024,7 +1024,8 @@ class PerturbationCalculator(MetricCalculator):
     # Keys returned from calculate()
     KEYS = (
         "jitter_local", "jitter_rap",   "jitter_ppq5",
-        "shimmer_local", "shimmer_db",  "shimmer_apq11",
+        "shimmer_local", "shimmer_db",
+        "shimmer_apq3",  "shimmer_apq5", "shimmer_apq11",
     )
 
     # MDVP / Praat outlier rejection. A successive period (or amplitude)
@@ -1127,6 +1128,8 @@ class PerturbationCalculator(MetricCalculator):
         shimmer_db    = np.zeros(n)
         shimmer_db[1:] = np.where(
             ok_A[1:], np.abs(20.0 * np.log10(A_safe[1:] / A_safe[:-1])), 0.0)
+        shimmer_apq3  = self._npq_perturb(A, 3,  ok_A)
+        shimmer_apq5  = self._npq_perturb(A, 5,  ok_A)
         shimmer_apq11 = self._npq_perturb(A, 11, ok_A)
 
         logger.info("  Jitter local=%.3f%%  RAP=%.3f%%  PPQ5=%.3f%%",
@@ -1144,8 +1147,162 @@ class PerturbationCalculator(MetricCalculator):
             "jitter_ppq5":   jitter_ppq5,
             "shimmer_local": shimmer_local,
             "shimmer_db":    shimmer_db,
+            "shimmer_apq3":  shimmer_apq3,
+            "shimmer_apq5":  shimmer_apq5,
             "shimmer_apq11": shimmer_apq11,
         }
+
+
+# ---------------------------------------------------------------------------
+# ADD-ON: NHR — Noise-to-Harmonics Ratio, classical clinical measure.
+# Arithmetic inverse of the linear HNR value. NHR > 0.19 is pathological
+# by the Kay/MDVP reference; healthy voices sit around 0.1. Computing it
+# just takes the per-cycle HNR we already make, so this class is a thin
+# wrapper — keeping it separate makes the dedicated CSV column explicit.
+# Status: 待验证 (not yet cross-checked against MDVP/Praat)
+# ---------------------------------------------------------------------------
+class NHRCalculator(MetricCalculator):
+    """NHR = 1 / H, where H is the linear harmonics-to-noise ratio."""
+
+    def calculate(self, voice: np.ndarray, cycle_triggers: np.ndarray,
+                  hnr_values: Optional[np.ndarray] = None) -> np.ndarray:
+        # If caller already computed HNR, reuse; otherwise compute inline.
+        if hnr_values is None:
+            hnr_values = HNRCalculator(self.config).calculate(voice, cycle_triggers)
+        # Convert dB → linear ratio, then invert. Clip to avoid 0 / inf.
+        h_linear = np.power(10.0, hnr_values / 10.0)
+        nhr = 1.0 / np.maximum(h_linear, 1e-6)
+        nhr = np.clip(nhr, 0.0, 10.0)   # sanity
+        valid = nhr > 0
+        if valid.any():
+            logger.info("  NHR: mean=%.3f  range=[%.3f, %.3f]  (n=%d)",
+                        float(nhr[valid].mean()), float(nhr[valid].min()),
+                        float(nhr[valid].max()), int(valid.sum()))
+        return nhr
+
+
+# ---------------------------------------------------------------------------
+# ADD-ON: CPPS — Cepstral Peak Prominence Smoothed (Hillenbrand 1996).
+# Same cepstrum peak we compute for CPP, but smoothed over a short time
+# window to reduce frame-to-frame jitter. Widely reported in clinical
+# dysphonia literature as more stable than raw CPP.
+# Status: 待验证 (not cross-checked)
+# ---------------------------------------------------------------------------
+class CPPSCalculator(MetricCalculator):
+    """Temporal moving-average of CPP. `smooth_cycles` centred cycles wide."""
+
+    def __init__(self, config: VoiceMapConfig, smooth_cycles: int = 5):
+        super().__init__(config)
+        self.smooth_cycles = max(1, int(smooth_cycles))
+
+    def calculate(self, cpp_per_cycle: np.ndarray) -> np.ndarray:
+        n = len(cpp_per_cycle)
+        if n == 0:
+            return np.zeros(0)
+        w = min(self.smooth_cycles, n)
+        if w % 2 == 0:
+            w += 1   # odd → centred kernel
+        kernel = np.ones(w) / w
+        cpps = np.convolve(cpp_per_cycle, kernel, mode="same")
+        logger.info("  CPPS (w=%d cycles): mean=%.2f  range=[%.2f, %.2f]",
+                    w, float(cpps.mean()), float(cpps.min()), float(cpps.max()))
+        return cpps
+
+
+# ---------------------------------------------------------------------------
+# ADD-ON: PPE — Pitch Period Entropy (Little et al 2009, Parkinson voice).
+# Shannon entropy of the per-cycle log-period distribution inside a sliding
+# window, normalised to [0, 1]. Low PPE = stable pitch, high PPE = noisy /
+# irregular. Computed per-cycle via a ±W/2 window so it can be aggregated
+# into the VRP grid.
+# Status: 待验证
+# ---------------------------------------------------------------------------
+class PPECalculator(MetricCalculator):
+    """Sliding-window Shannon entropy of log-period distribution."""
+
+    def __init__(self, config: VoiceMapConfig,
+                 window_cycles: int = 40, bins: int = 10):
+        super().__init__(config)
+        self.window_cycles = int(window_cycles)
+        self.bins = int(bins)
+
+    def calculate(self, cycle_triggers: np.ndarray) -> np.ndarray:
+        idx = np.where(cycle_triggers > 0.5)[0]
+        n = max(len(idx) - 1, 0)
+        if n < self.window_cycles + 2:
+            return np.zeros(n)
+
+        # log-period per cycle (units cancel in ratio-based entropy)
+        T    = np.diff(idx).astype(np.float64)
+        logT = np.log(np.maximum(T, 1.0))
+
+        W    = self.window_cycles
+        wins = sliding_window_view(logT, W)             # (n-W+1, W)
+        nw   = wins.shape[0]
+
+        # Per-window: detrend, histogram, Shannon entropy normalised by log(bins).
+        # Normalisation → PPE ∈ [0, 1] so it's comparable across recordings.
+        log_bins = np.log(self.bins) if self.bins > 1 else 1.0
+        ppe_win  = np.zeros(nw)
+        for i in range(nw):
+            w = wins[i] - wins[i].mean()
+            # Dynamic range for the histogram: per-window σ, fall back if zero.
+            s = w.std()
+            if s < 1e-9:
+                continue
+            edges = np.linspace(w.min() - 1e-9, w.max() + 1e-9, self.bins + 1)
+            counts, _ = np.histogram(w, bins=edges)
+            p = counts.astype(np.float64) / max(counts.sum(), 1)
+            p = p[p > 0]
+            ppe_win[i] = float(-np.sum(p * np.log(p)) / log_bins)
+
+        # Assign each cycle the PPE of its centred window; pad edges.
+        half = W // 2
+        out  = np.zeros(n)
+        out[half:half + nw] = ppe_win
+        if nw:
+            out[:half]            = ppe_win[0]
+            out[half + nw:]       = ppe_win[-1]
+        good = out > 0
+        if good.any():
+            logger.info("  PPE (w=%d cycles, %d bins): mean=%.3f  range=[%.3f, %.3f]",
+                        W, self.bins, float(out[good].mean()),
+                        float(out[good].min()), float(out[good].max()))
+        return out
+
+
+# ---------------------------------------------------------------------------
+# ADD-ON: ZCR — Zero-Crossing Rate per cycle (voice channel).
+# Classical noise indicator — clean periodic voice has one main crossing
+# per half-period; noisy / breathy voice has many extra crossings inside
+# each cycle. Value is crossings / cycle_length so it's unit-less and
+# comparable across pitches.
+# Status: 待验证
+# ---------------------------------------------------------------------------
+class ZCRCalculator(MetricCalculator):
+    """Per-cycle zero-crossing count / cycle length."""
+
+    def calculate(self, voice: np.ndarray,
+                  cycle_triggers: np.ndarray) -> np.ndarray:
+        idx = np.where(cycle_triggers > 0.5)[0]
+        n = max(len(idx) - 1, 0)
+        if n == 0:
+            return np.zeros(0)
+
+        zcr = np.zeros(n, dtype=np.float64)
+        # A Python loop over 12k cycles does ~50 ms; skipping reduceat
+        # trickery (cycle lengths vary).
+        for i in range(n):
+            s, e = idx[i], idx[i + 1]
+            if e - s < 2:
+                continue
+            seg = voice[s:e]
+            crossings = int(np.sum(np.diff(np.sign(seg)) != 0))
+            zcr[i] = crossings / float(e - s)
+
+        logger.info("  ZCR: mean=%.4f  range=[%.4f, %.4f]",
+                    float(zcr.mean()), float(zcr.min()), float(zcr.max()))
+        return zcr
 
 
 # ---------------------------------------------------------------------------
