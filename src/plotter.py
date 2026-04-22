@@ -235,7 +235,9 @@ def _draw_vrp_ax(ax, fig, df: pd.DataFrame, col: str) -> bool:
 
     unit_str = f" [{cfg['unit']}]" if cfg["unit"] else ""
     cbar = fig.colorbar(mesh, ax=ax, fraction=0.03, pad=0.01)
-    cbar.set_label(unit_str.strip(" []"), color="white", fontsize=7)
+    # 不再在颜色条旁重复单位——标题里 "CPP [dB]" 已经写过了，
+    # 重复标注会让不同 metric 的颜色条宽度变化（有的有 "dB" / "slope" / ""），
+    # 进而让整张图的尺寸参差不齐。
     cbar.ax.yaxis.set_tick_params(color="white")
     plt.setp(cbar.ax.yaxis.get_ticklabels(), color="white", fontsize=7)
 
