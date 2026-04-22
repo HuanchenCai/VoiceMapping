@@ -63,8 +63,28 @@ FONT_SUB   = ("Segoe UI", 10)
 FONT_DROP  = ("Segoe UI Semibold", 13)
 FONT_MONO  = ("Consolas", 9)
 
-# 下拉里展示的 metric 顺序（剔除聚类相关列）
-_METRIC_ORDER = [m for m in METRIC_CFG.keys() if m not in _SKIP_ZERO_METRICS]
+# Metric 分类。下拉按这个顺序分段显示，每段一个禁用的标题；
+# 节与节之间 ttk Menu 画分隔线。未来新指标按功能塞进对应的 section。
+_METRIC_SECTIONS: list = [
+    ("声学 · Acoustic", [
+        "Clarity", "CPP", "SpecBal", "Crest", "Entropy",
+        "Jitter", "JitterRAP", "JitterPPQ5",
+        "Shimmer", "ShimmerDB", "ShimmerAPQ11", "HNR",
+    ]),
+    ("EGG · 电声门图", [
+        "Qcontact", "Icontact", "dEGGmax", "HRFegg",
+    ]),
+    ("唱歌特异性 · Singing-specific", [
+        "VibratoRate", "VibratoExtent",
+        "F1", "F2", "F3", "SingersFormant",
+        "H1H2", "H1H3",
+    ]),
+    ("聚类 · Cluster / cPhon", [
+        "maxCluster", "Cluster 1", "Cluster 2", "Cluster 3", "Cluster 4", "Cluster 5",
+        "maxCPhon",   "cPhon 1",   "cPhon 2",   "cPhon 3",   "cPhon 4",   "cPhon 5",
+    ]),
+    ("密度 · Density", ["Total"]),
+]
 _DEFAULT_METRIC_CHAIN = ["CPP", "Clarity", "SpecBal", "Crest"]
 
 
@@ -363,6 +383,14 @@ class FonaDynApp(_TkBase):
               background=[("active", BORDER), ("disabled", PANEL)],
               foreground=[("disabled", MUTED)])
 
+        s.configure("Metric.TMenubutton",
+                    background=PANEL_HI, foreground=TEXT,
+                    font=FONT_UI, borderwidth=0, padding=(10, 4),
+                    arrowcolor=ACCENT)
+        s.map("Metric.TMenubutton",
+              background=[("active", BORDER), ("disabled", PANEL)],
+              foreground=[("disabled", MUTED)])
+
     # ── 布局 ──
     def _build_ui(self):
         outer = tk.Frame(self, bg=BG)
@@ -419,15 +447,22 @@ class FonaDynApp(_TkBase):
             w.bind("<Enter>",    lambda _e: self.drop_zone.config(highlightbackground=ACCENT))
             w.bind("<Leave>",    lambda _e: self.drop_zone.config(highlightbackground=BORDER))
 
-        # Metric 下拉
+        # Metric 按钮 + 分类菜单（组合框没有原生节分隔，改用 Menubutton）
         side = tk.Frame(bar, bg=BG)
         side.pack(side="right", padx=(14, 0))
         tk.Label(side, text="Metric", bg=BG, fg=MUTED, font=FONT_UI).pack(anchor="w")
-        self.metric_combo = ttk.Combobox(side, textvariable=self.metric_var,
-                                         values=_METRIC_ORDER, state="disabled",
-                                         width=16, font=FONT_UI)
-        self.metric_combo.pack()
-        self.metric_combo.bind("<<ComboboxSelected>>", self._on_metric_change)
+        self.metric_btn = ttk.Menubutton(side, textvariable=self.metric_var,
+                                          style="Metric.TMenubutton", width=18)
+        self.metric_btn.pack()
+        self.metric_menu = tk.Menu(self.metric_btn, tearoff=0,
+                                    bg=PANEL_HI, fg=TEXT,
+                                    activebackground=ACCENT, activeforeground=BG,
+                                    font=FONT_UI, bd=0,
+                                    disabledforeground=ACCENT)   # 节标题用强调色
+        self.metric_btn["menu"] = self.metric_menu
+        self.metric_btn.state(["disabled"])
+        # metric_var 的变化 = 菜单里点击 or 键盘方向键触发 → 自动重绘
+        self.metric_var.trace_add("write", self._on_metric_change)
 
     def _build_left_panel(self, parent):
         pad = tk.Frame(parent, bg=PANEL)
@@ -550,7 +585,7 @@ class FonaDynApp(_TkBase):
             self.next_btn.place_forget()
 
     def _cycle_metric(self, delta: int):
-        vals = list(self.metric_combo.cget("values"))
+        vals = getattr(self, "_metric_flat", None) or []
         if not vals:
             return
         cur = self.metric_var.get()
@@ -559,13 +594,13 @@ class FonaDynApp(_TkBase):
         except ValueError:
             i = 0
         self.metric_var.set(vals[(i + delta) % len(vals)])
-        self._on_metric_change()
+        # trace on metric_var fires _on_metric_change automatically
 
     def _bind_global_keys(self):
         def on_key(event):
-            # 在 Entry / Combobox 里输入时不抢键
+            # 在 Entry / 文本区等输入控件里时不抢键
             cls = event.widget.winfo_class()
-            if cls in ("Entry", "Text", "TCombobox", "TEntry"):
+            if cls in ("Entry", "Text", "TEntry", "Spinbox", "TSpinbox"):
                 return
             if event.keysym == "Left":
                 self._cycle_metric(-1)
@@ -710,7 +745,7 @@ class FonaDynApp(_TkBase):
         self.drop_label.configure(text=p.name, fg=ACCENT)
         self.drop_sub.configure(text=str(p.parent))
 
-        self.metric_combo.state(["disabled"])
+        self.metric_btn.state(["disabled"])
         self.open_csv_btn.state(["disabled"])
         self.progress.start(12)
         self._set_status("分析中…", ACCENT)
@@ -798,39 +833,55 @@ class FonaDynApp(_TkBase):
 
     # ── Metric 切换 ──
     def _refresh_metric_dropdown(self):
+        """重建分类菜单。每节只保留 df 里非全零的 metric；空节整节隐藏。"""
         if self._last_df is None:
             return
         df = self._last_df
-        available = []
-        for col in _METRIC_ORDER:
-            if col not in df.columns:
-                continue
-            series = df[col]
-            try:
-                if float(series.abs().sum()) > 0:
-                    available.append(col)
-            except Exception:
-                available.append(col)
 
-        if not available:
-            self.metric_combo.configure(values=[])
-            self.metric_combo.state(["disabled", "!readonly"])
+        def _has_data(col):
+            if col not in df.columns:
+                return False
+            try:
+                return float(df[col].abs().sum()) > 0
+            except Exception:
+                return True
+
+        # 清空菜单
+        self.metric_menu.delete(0, "end")
+        flat = []   # 用于键盘 ← → 和 ◀ ▶ 按钮的扁平列表
+        first_section = True
+        for section_title, cols in _METRIC_SECTIONS:
+            avail = [c for c in cols if _has_data(c)]
+            if not avail:
+                continue
+            if not first_section:
+                self.metric_menu.add_separator()
+            first_section = False
+            # 节标题：disabled，文字颜色用 ACCENT（disabledforeground）
+            self.metric_menu.add_command(label=f"  {section_title}",
+                                         state="disabled")
+            for m in avail:
+                self.metric_menu.add_command(
+                    label=f"      {m}",
+                    command=lambda x=m: self.metric_var.set(x))
+                flat.append(m)
+
+        self._metric_flat = flat
+
+        if not flat:
+            self.metric_btn.state(["disabled"])
             self._set_nav_visible(False)
             self._show_placeholder("无可用 metric")
             return
 
-        self.metric_combo.configure(values=available)
-        # 同时清掉 disabled 标志，否则 ttk 的 disabled 会压制 readonly → 点不动
-        self.metric_combo.state(["!disabled", "readonly"])
-        self._set_nav_visible(len(available) > 1)
+        self.metric_btn.state(["!disabled"])
+        self._set_nav_visible(len(flat) > 1)
+        default = next((m for m in _DEFAULT_METRIC_CHAIN if m in flat), flat[0])
+        self.metric_var.set(default)   # trace → _on_metric_change → _render
 
-        default = next((m for m in _DEFAULT_METRIC_CHAIN if m in available), available[0])
-        self.metric_var.set(default)
-        self._render_metric(default)
-
-    def _on_metric_change(self, _event=None):
+    def _on_metric_change(self, *_):
         col = self.metric_var.get()
-        if col:
+        if col and self._last_df is not None and col in self._last_df.columns:
             self._render_metric(col)
 
     def _render_metric(self, col: str):
