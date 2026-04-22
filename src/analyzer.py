@@ -10,6 +10,7 @@ import pandas as pd
 import soundfile as sf
 from scipy.signal import butter, filtfilt, lfilter, fftconvolve
 import os
+import re
 from datetime import datetime
 from typing import Dict, Optional, Tuple
 import logging
@@ -149,6 +150,54 @@ class VoiceMapAnalyzer:
         self.phon_calculator     = PhonClusterCalculator(self.config)
 
         logger.info("VoiceMap analyzer initialized (numba=%s)", _NUMBA)
+
+    # ------------------------------------------------------------------
+    # Centroid I/O (EGG-shape clusters).
+    # Format: semicolon-delimited CSV. Header row:
+    #   "# FonaDyn cluster centroids  k=<k>  n_harm=<n>  dim=<3n>"
+    # Then one row per centroid: cluster_id;feat_0;feat_1;...;feat_{dim-1}
+    # ------------------------------------------------------------------
+    def save_centroids(self, path: str) -> None:
+        cent = self.cluster_calculator.centroids_
+        if cent is None:
+            raise ValueError("No trained centroids yet — run an analysis first")
+        n_harm = self.cluster_calculator.n_harmonics
+        dim = cent.shape[1]
+        k = cent.shape[0]
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(f"# FonaDyn cluster centroids  k={k}  n_harm={n_harm}  dim={dim}\n")
+            f.write("cluster;" + ";".join(f"f{i}" for i in range(dim)) + "\n")
+            for i in range(k):
+                row = [str(i + 1)] + [f"{v:.6g}" for v in cent[i]]
+                f.write(";".join(row) + "\n")
+        logger.info("Centroids saved: %s (k=%d, dim=%d)", path, k, dim)
+
+    def load_centroids(self, path: str) -> None:
+        header_n = None
+        rows = []
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                s = line.strip()
+                if not s:
+                    continue
+                if s.startswith("#"):
+                    m = re.search(r"n_harm\s*=\s*(\d+)", s)
+                    if m:
+                        header_n = int(m.group(1))
+                    continue
+                parts = s.split(";")
+                if parts[0].lower().startswith("cluster"):
+                    continue   # skip column header
+                rows.append([float(x) for x in parts[1:]])
+        if not rows:
+            raise ValueError(f"No centroid rows found in {path}")
+        cent = np.asarray(rows, dtype=np.float64)
+        self.cluster_calculator.centroids_ = cent
+        self.cluster_calculator.n_clusters = cent.shape[0]
+        if header_n is not None:
+            self.cluster_calculator.n_harmonics = header_n
+        logger.info("Centroids loaded: %s  k=%d  dim=%d",
+                    path, cent.shape[0], cent.shape[1])
 
     # ------------------------------------------------------------------
     # Audio I/O

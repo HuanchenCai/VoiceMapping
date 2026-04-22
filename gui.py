@@ -100,14 +100,42 @@ class SettingsDialog(tk.Toplevel):
                                     bg=PANEL, fg=ACCENT, font=FONT_UI_B, width=5)
         self.clarity_lbl.pack(side="left", padx=(10, 0))
 
-        # ─ 输出 ─
-        tk.Label(pad, text="输出", bg=PANEL, fg=ACCENT, font=FONT_UI_B
+        # ─ 聚类（下次分析生效） ─
+        tk.Label(pad, text="聚类  (下次分析生效)", bg=PANEL, fg=ACCENT, font=FONT_UI_B
                  ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(18, 6))
 
-        tk.Label(pad, text="目录", bg=PANEL, fg=TEXT, font=FONT_UI
+        tk.Label(pad, text="簇数 k", bg=PANEL, fg=TEXT, font=FONT_UI
                  ).grid(row=3, column=0, sticky="w", pady=3)
+        ttk.Spinbox(pad, from_=2, to=10, textvariable=app.cluster_k_var,
+                    width=6).grid(row=3, column=1, sticky="w", padx=(18, 0), pady=3)
+
+        tk.Label(pad, text="谐波数 n", bg=PANEL, fg=TEXT, font=FONT_UI
+                 ).grid(row=4, column=0, sticky="w", pady=3)
+        ttk.Spinbox(pad, from_=3, to=20, textvariable=app.cluster_nharm_var,
+                    width=6).grid(row=4, column=1, sticky="w", padx=(18, 0), pady=3)
+
+        # ─ Centroid CSV（跨录音共享聚类标签） ─
+        tk.Label(pad, text="Centroid CSV  (跨录音可比)", bg=PANEL, fg=ACCENT, font=FONT_UI_B
+                 ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(18, 6))
+
+        cent_row = tk.Frame(pad, bg=PANEL)
+        cent_row.grid(row=6, column=0, columnspan=2, sticky="w", pady=3)
+        ttk.Button(cent_row, text="加载", style="Ghost.TButton",
+                   command=app._load_centroids).pack(side="left")
+        ttk.Button(cent_row, text="保存上次分析", style="Ghost.TButton",
+                   command=app._save_centroids).pack(side="left", padx=(6, 0))
+        self.cent_status = tk.Label(cent_row, text=app._centroid_status_text(),
+                                     bg=PANEL, fg=MUTED, font=FONT_UI)
+        self.cent_status.pack(side="left", padx=(10, 0))
+
+        # ─ 输出 ─
+        tk.Label(pad, text="输出", bg=PANEL, fg=ACCENT, font=FONT_UI_B
+                 ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(18, 6))
+
+        tk.Label(pad, text="目录", bg=PANEL, fg=TEXT, font=FONT_UI
+                 ).grid(row=8, column=0, sticky="w", pady=3)
         out_row = tk.Frame(pad, bg=PANEL)
-        out_row.grid(row=3, column=1, sticky="ew", padx=(18, 0), pady=3)
+        out_row.grid(row=8, column=1, sticky="ew", padx=(18, 0), pady=3)
         ttk.Entry(out_row, textvariable=app.output_dir_var, width=32
                   ).pack(side="left")
         ttk.Button(out_row, text="…", style="Ghost.TButton",
@@ -116,7 +144,7 @@ class SettingsDialog(tk.Toplevel):
 
         # ─ 关闭 ─
         btn_row = tk.Frame(pad, bg=PANEL)
-        btn_row.grid(row=4, column=0, columnspan=2, sticky="e", pady=(22, 0))
+        btn_row.grid(row=9, column=0, columnspan=2, sticky="e", pady=(22, 0))
         ttk.Button(btn_row, text="完成", style="Accent.TButton",
                    command=self.destroy).pack()
 
@@ -228,6 +256,9 @@ class FonaDynApp(_TkBase):
         self.clarity_var    = tk.DoubleVar(value=DEFAULT_CONFIG.clarity_threshold)
         # clarity 值变化 → 同步到设置对话框 + 防抖后重绘 voice map
         self.clarity_var.trace_add("write", self._on_clarity_var_changed)
+        # 聚类参数（下次分析生效）
+        self.cluster_k_var    = tk.IntVar(value=5)
+        self.cluster_nharm_var = tk.IntVar(value=10)
         self.metric_var     = tk.StringVar(value="")
         self.csv_path_var   = tk.StringVar(value="—")
 
@@ -242,6 +273,9 @@ class FonaDynApp(_TkBase):
         self._showing_placeholder = True   # 当前是否在显示占位图（resize 时会重绘）
         self._progress_dialog = None       # 分析进行时的模态对话框
         self._settings_dialog = None       # 设置对话框（单例）
+        self._last_analyzer = None         # 上次分析用的 VoiceMapAnalyzer（保存 centroids 用）
+        self._loaded_centroids = None      # 预加载的 EGG centroid 数组（跨录音一致标签）
+        self._loaded_centroids_path = None
 
         # 高 DPI 下让 Tk 按物理像素缩放，而不是走老式位图放大
         try:
@@ -669,10 +703,21 @@ class FonaDynApp(_TkBase):
         )
         audio = str(p)
 
+        # Snapshot cluster params + loaded centroids for the worker
+        k_snap      = int(self.cluster_k_var.get())
+        nharm_snap  = int(self.cluster_nharm_var.get())
+        cent_snap   = self._loaded_centroids
+
         def work():
             try:
                 from analyzer import VoiceMapAnalyzer
                 analyzer = VoiceMapAnalyzer(cfg)
+                # Apply user-chosen cluster params
+                analyzer.cluster_calculator.n_clusters  = k_snap
+                analyzer.cluster_calculator.n_harmonics = nharm_snap
+                analyzer.phon_calculator.n_clusters     = k_snap
+                if cent_snap is not None:
+                    analyzer.cluster_calculator.centroids_ = cent_snap
                 # export_plots=False: GUI embeds plots in-memory; saving 22
                 # PNGs per run would add ~8s of dead work.
                 data, out_file, grouped = analyzer.analyze_and_output_vrp(
@@ -681,6 +726,7 @@ class FonaDynApp(_TkBase):
                     "df": grouped,
                     "csv": out_file,
                     "points": len(data["midi"]),
+                    "analyzer": analyzer,
                 }))
             except Exception:  # noqa: BLE001
                 self._msg_q.put(("done", False, {"error": traceback.format_exc()}))
@@ -701,6 +747,7 @@ class FonaDynApp(_TkBase):
         if ok:
             self._last_df = payload["df"]
             self.last_csv = payload["csv"]
+            self._last_analyzer = payload.get("analyzer")
             self.csv_path_var.set(payload["csv"])
             self.open_csv_btn.state(["!disabled"])
             self._set_status(f"完成 · {payload['points']:,} 点", OK)
@@ -813,6 +860,80 @@ class FonaDynApp(_TkBase):
         except queue.Empty:
             pass
         self.after(80, self._drain_queue)
+
+    # ── Centroid CSV ──
+    def _centroid_status_text(self) -> str:
+        if self._loaded_centroids_path:
+            name = Path(self._loaded_centroids_path).name
+            k = self._loaded_centroids.shape[0] if self._loaded_centroids is not None else "?"
+            return f"已加载 {name} (k={k})"
+        return "（未加载，将从头训练）"
+
+    def _load_centroids(self):
+        path = filedialog.askopenfilename(
+            title="加载 centroid CSV",
+            filetypes=[("CSV", "*.csv"), ("所有", "*.*")])
+        if not path:
+            return
+        try:
+            # Parse directly so we don't need an analyzer instance yet.
+            import re as _re
+            header_n = None
+            rows = []
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    s = line.strip()
+                    if not s:
+                        continue
+                    if s.startswith("#"):
+                        m = _re.search(r"n_harm\s*=\s*(\d+)", s)
+                        if m:
+                            header_n = int(m.group(1))
+                        continue
+                    parts = s.split(";")
+                    if parts[0].lower().startswith("cluster"):
+                        continue
+                    rows.append([float(x) for x in parts[1:]])
+            if not rows:
+                raise ValueError("文件里没有 centroid 行")
+            import numpy as _np
+            cent = _np.asarray(rows, dtype=_np.float64)
+            self._loaded_centroids = cent
+            self._loaded_centroids_path = path
+            # 同步 k / n_harm
+            self.cluster_k_var.set(cent.shape[0])
+            if header_n:
+                self.cluster_nharm_var.set(header_n)
+            self._append_log("META", f"✓ centroids 加载：{Path(path).name} k={cent.shape[0]}")
+            self._refresh_centroid_status()
+        except Exception as e:  # noqa: BLE001
+            self._append_log("ERROR", f"centroid 加载失败：{e}")
+
+    def _save_centroids(self):
+        if self._last_analyzer is None:
+            self._append_log("WARNING", "还没分析过，没有 centroid 可保存")
+            return
+        path = filedialog.asksaveasfilename(
+            title="保存 centroid CSV",
+            defaultextension=".csv",
+            filetypes=[("CSV", "*.csv")],
+            initialfile="cEGG.csv")
+        if not path:
+            return
+        try:
+            self._last_analyzer.save_centroids(path)
+            self._append_log("META", f"✓ centroids 保存：{Path(path).name}")
+        except Exception as e:  # noqa: BLE001
+            self._append_log("ERROR", f"centroid 保存失败：{e}")
+
+    def _refresh_centroid_status(self):
+        if self._settings_dialog is not None:
+            try:
+                if self._settings_dialog.winfo_exists():
+                    self._settings_dialog.cent_status.configure(
+                        text=self._centroid_status_text())
+            except tk.TclError:
+                pass
 
     # ── 设置对话框 ──
     def _open_settings(self):

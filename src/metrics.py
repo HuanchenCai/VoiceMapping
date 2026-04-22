@@ -609,6 +609,14 @@ class ClusterCalculator:
 
     Returns an int array of length n_cycles, values in {1..n_clusters}; 0
     means the cycle was dropped (e.g. degenerate amplitude at fundamental).
+
+    After a fit, `centroids_` holds the trained centroids (shape (k, 3n)) so
+    they can be persisted to CSV and reloaded for cross-recording consistency
+    (a recording analysed with preloaded centroids will use the same cluster
+    label semantics as whichever recording trained them). Set `centroids_`
+    directly to a pre-loaded array to run in "classify-only" mode — the
+    next calculate() will skip K-means training and just assign each cycle
+    to the nearest loaded centroid.
     """
 
     def __init__(self, config: VoiceMapConfig,
@@ -619,6 +627,7 @@ class ClusterCalculator:
         self.n_clusters = int(n_clusters)
         self.n_harmonics = int(n_harmonics)
         self.random_state = int(random_state)
+        self.centroids_ = None   # None → train from scratch; ndarray → classify only
 
     def calculate(self, egg: np.ndarray,
                   cycle_triggers: np.ndarray,
@@ -659,11 +668,28 @@ class ClusterCalculator:
         dphi = phases_v[:, 1:] - phases_v[:, :1]   # (n_valid, n-1)
         feats = np.concatenate([damp_db, np.cos(dphi), np.sin(dphi)], axis=1)
 
-        # n_init=3 gives essentially the same cluster quality as 10 in our
-        # tests (12k cycles × 30 dims) but cuts fit time 3× — main speed win.
-        km = KMeans(n_clusters=self.n_clusters,
-                    n_init=3, random_state=self.random_state)
-        labels_v = km.fit_predict(feats)  # 0..k-1
+        # Classify-only mode: preloaded centroids → euclidean nearest-centroid
+        # assignment, no fit. Much faster and gives consistent labels across
+        # recordings. Feature dim must match the loaded centroid dim.
+        if self.centroids_ is not None:
+            if self.centroids_.shape[1] != feats.shape[1]:
+                logger.warning(
+                    "  Loaded centroids dim %d != feature dim %d; retraining",
+                    self.centroids_.shape[1], feats.shape[1])
+                self.centroids_ = None
+
+        if self.centroids_ is not None:
+            # Pairwise squared euclidean → argmin across centroids
+            diffs = feats[:, None, :] - self.centroids_[None, :, :]
+            labels_v = np.einsum("ijk,ijk->ij", diffs, diffs).argmin(axis=1)
+            logger.info("  Classified against %d preloaded centroids",
+                        self.centroids_.shape[0])
+        else:
+            # n_init=3 converges to the same solution as 10 on real EGG features
+            km = KMeans(n_clusters=self.n_clusters,
+                        n_init=3, random_state=self.random_state)
+            labels_v = km.fit_predict(feats)   # 0..k-1
+            self.centroids_ = km.cluster_centers_.copy()
 
         # Map labels to 1..k, leaving 0 for invalid cycles
         out = np.zeros(n_cycles, dtype=np.int32)
