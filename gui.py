@@ -114,15 +114,16 @@ class SettingsDialog(tk.Toplevel):
 
         tk.Label(pad, text="Clarity 阈值", bg=PANEL, fg=TEXT, font=FONT_UI
                  ).grid(row=1, column=0, sticky="w", pady=3)
-        scale_wrap = tk.Frame(pad, bg=PANEL)
-        scale_wrap.grid(row=1, column=1, sticky="ew", padx=(18, 0), pady=3)
-        ttk.Scale(scale_wrap, from_=0.80, to=1.00,
-                  variable=app.clarity_var, orient="horizontal",
-                  length=240).pack(side="left")
-        self.clarity_lbl = tk.Label(scale_wrap,
-                                    text=f"{app.clarity_var.get():.2f}",
-                                    bg=PANEL, fg=ACCENT, font=FONT_UI_B, width=5)
-        self.clarity_lbl.pack(side="left", padx=(10, 0))
+        wrap = tk.Frame(pad, bg=PANEL)
+        wrap.grid(row=1, column=1, sticky="w", padx=(18, 0), pady=3)
+        ttk.Spinbox(wrap, from_=0.80, to=1.00, increment=0.01,
+                    textvariable=app.clarity_var,
+                    format="%.2f", width=8, font=FONT_UI,
+                    ).pack(side="left")
+        tk.Label(wrap, text="(0.80 – 1.00)", bg=PANEL, fg=MUTED,
+                 font=FONT_UI).pack(side="left", padx=(8, 0))
+        # 兼容 update_clarity_label 调用；没有单独的数字显示了，做成 no-op
+        self.clarity_lbl = None
 
         # ─ 聚类（下次分析生效） ─
         tk.Label(pad, text="聚类  (下次分析生效)", bg=PANEL, fg=ACCENT, font=FONT_UI_B
@@ -185,11 +186,9 @@ class SettingsDialog(tk.Toplevel):
             pass
 
     def update_clarity_label(self):
-        """主 app 在 clarity_var 变化时调用，同步本对话框里的数值显示。"""
-        try:
-            self.clarity_lbl.configure(text=f"{self.app.clarity_var.get():.2f}")
-        except tk.TclError:
-            pass
+        """No-op now that clarity is a Spinbox bound to clarity_var directly.
+        Kept for API compatibility — callers don't need to know."""
+        return
 
 
 # ─── 对比对话框 ──────────────────────────────────────────────────────────────
@@ -340,16 +339,25 @@ class ProgressDialog(tk.Toplevel):
                  font=("Consolas", 10), wraplength=360, justify="left"
                  ).pack(anchor="w", pady=(4, 10))
 
-        self._pb = ttk.Progressbar(pad, mode="indeterminate",
+        # Determinate bar driven by the analyzer's progress_cb.
+        # maximum gets set once we know total stages (first callback).
+        self._pb = ttk.Progressbar(pad, mode="determinate",
                                    length=360,
-                                   style="Accent.Horizontal.TProgressbar")
+                                   style="Accent.Horizontal.TProgressbar",
+                                   maximum=1.0)
         self._pb.pack(fill="x")
-        self._pb.start(12)
+        # Auxiliary indeterminate animation is disabled — progress now
+        # comes from explicit stage advances.
 
-        self._status = tk.Label(pad, text="读取音频 …",
-                                bg=PANEL, fg=MUTED, font=FONT_UI,
-                                anchor="w", wraplength=360, justify="left")
-        self._status.pack(fill="x", pady=(10, 0))
+        step_row = tk.Frame(pad, bg=PANEL)
+        step_row.pack(fill="x", pady=(8, 0))
+        self._step_lbl = tk.Label(step_row, text="—",
+                                   bg=PANEL, fg=ACCENT, font=FONT_UI_B)
+        self._step_lbl.pack(side="left")
+        self._status = tk.Label(step_row, text="准备中…",
+                                 bg=PANEL, fg=TEXT, font=FONT_UI,
+                                 anchor="w", wraplength=320, justify="left")
+        self._status.pack(side="left", padx=(10, 0))
 
         # 居中到父窗口
         self.update_idletasks()
@@ -362,14 +370,24 @@ class ProgressDialog(tk.Toplevel):
             pass
 
     def set_status(self, text: str):
+        # Free-form log line tail; secondary info shown next to step counter.
         try:
             self._status.configure(text=text)
         except tk.TclError:
             pass
 
+    def set_progress(self, step: int, total: int, label: str):
+        """Update the determinate bar + stage counter + description."""
+        try:
+            if total > 0:
+                self._pb.configure(maximum=total, value=step)
+            self._step_lbl.configure(text=f"[{step}/{total}]")
+            self._status.configure(text=label)
+        except tk.TclError:
+            pass
+
     def close(self):
         try:
-            self._pb.stop()
             self.grab_release()
         except Exception:
             pass
@@ -449,6 +467,15 @@ class FonaDynApp(_TkBase):
                 family="Consolas", size=9)
         except Exception:
             pass
+
+        # tk.Menu 在 Windows 下 font 参数有时被原生菜单样式压制；用
+        # option database 强制所有 Menu 都用 YaHei UI，确保 metric 下拉
+        # 里中文和英文字形权重一致。
+        self.option_add("*Menu.font",         ("Microsoft YaHei UI", 10))
+        self.option_add("*Menu.background",   PANEL_HI)
+        self.option_add("*Menu.foreground",   TEXT)
+        self.option_add("*Menu.activeBackground", ACCENT)
+        self.option_add("*Menu.activeForeground", BG)
 
         self._init_style()
         self._build_ui()
@@ -959,8 +986,13 @@ class FonaDynApp(_TkBase):
                 analyzer.phon_calculator.n_clusters     = k_snap
                 if cent_snap is not None:
                     analyzer.cluster_calculator.centroids_ = cent_snap
+
+                def prog(step, total, label):
+                    self._msg_q.put(("progress", step, total, label))
+
                 data, out_file, grouped = analyzer.analyze_and_output_vrp(
-                    audio, return_df=True, plot_mode=plot_mode_snap)
+                    audio, return_df=True, plot_mode=plot_mode_snap,
+                    progress_cb=prog)
                 self._msg_q.put(("done", True, {
                     "df": grouped,
                     "csv": out_file,
@@ -1116,6 +1148,13 @@ class FonaDynApp(_TkBase):
                             and level in ("INFO", "OK", "META")
                             and text and not text.startswith("=")):
                         self._progress_dialog.set_status(text)
+                elif kind == "progress":
+                    step, total, label = rest
+                    if self._progress_dialog is not None:
+                        try:
+                            self._progress_dialog.set_progress(step, total, label)
+                        except Exception:
+                            pass
                 elif kind == "done":
                     ok, payload = rest
                     self._on_worker_done(ok, payload)

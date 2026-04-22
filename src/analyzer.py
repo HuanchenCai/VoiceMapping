@@ -407,14 +407,19 @@ class VoiceMapAnalyzer:
     # Metrics
     # ------------------------------------------------------------------
     def calculate_all_metrics(self, voice_signal, egg_signal,
-                               cycle_triggers) -> Dict[str, np.ndarray]:
+                               cycle_triggers,
+                               progress_cb=None,
+                               _base_step: int = 0,
+                               _total_steps: int = 0) -> Dict[str, np.ndarray]:
         logger.info("Calculating all metrics...")
 
+        def _step(offset: int, name: str):
+            if progress_cb is not None and _total_steps > 0:
+                progress_cb(_base_step + offset, _total_steps, name)
+
         # Precompute per-cycle EGG DFT once and share it across HRF, Entropy,
-        # and ClusterCalculator — previously each of those computed its own
-        # copy, tripling the cost of the Python-loop DFT on long recordings.
-        # Take max over all consumers' n_harmonics requirement so every slice
-        # fits. Cluster default is 10, HRF default 10, Entropy default 4.
+        # and ClusterCalculator — saves two passes over the Python-loop DFT.
+        _step(1, "EGG DFT (每周期)")
         _dft_n = max(self.config.n_harmonics,
                      self.cluster_calculator.n_harmonics,
                      self.config.sampen_amplitude_harmonics,
@@ -425,26 +430,34 @@ class VoiceMapAnalyzer:
             from metrics import _compute_cycle_dft
             _dft = _compute_cycle_dft(egg_signal, _idx, _dft_n)
 
+        _step(2, "SPL / Clarity / CPP")
         spl_values                           = self.spl_calculator.calculate(voice_signal, cycle_triggers)
         midi_values, clarity_values          = self.clarity_calculator.calculate(voice_signal, cycle_triggers)
         cpp_values                           = self.cpp_calculator.calculate(voice_signal, cycle_triggers)
+
+        _step(3, "SpecBal / Crest")
         specbal_values                       = self.specbal_calculator.calculate(voice_signal, cycle_triggers)
         crest_values                         = self.crest_calculator.calculate(voice_signal, cycle_triggers)
+
+        _step(4, "Qcontact / Entropy / HRFegg")
         qcontact_values, deggmax_v, ic_v     = self.qcontact_calculator.calculate(egg_signal, cycle_triggers)
         entropy_values                       = self.entropy_calculator.calculate(egg_signal, cycle_triggers, dft=_dft)
         hrf_values                           = self.hrf_calculator.calculate(egg_signal, cycle_triggers, dft=_dft)
+
+        _step(5, "EGG 波形聚类")
         cluster_values                       = self.cluster_calculator.calculate(egg_signal, cycle_triggers, dft=_dft)
 
-        # P1: voice-perturbation family (jitter/shimmer) + voice HNR
+        _step(6, "Jitter / Shimmer")
         perturb_values                       = self.perturb_calculator.calculate(voice_signal, cycle_triggers)
+        _step(7, "HNR")
         hnr_values                           = self.hnr_calculator.calculate(voice_signal, cycle_triggers)
-        # P2: vibrato on the already-computed per-cycle MIDI series
+        _step(8, "Vibrato")
         vib_rate, vib_extent                 = self.vibrato_calculator.calculate(midi_values, _idx)
-        # P2: formants + Singer's Formant Energy from pre-emphasised voice
+        _step(9, "Formants + Singer's Formant")
         formant_values                       = self.formant_calculator.calculate(voice_signal, cycle_triggers)
-        # P2: H1-H2 / H1-H3 spectral tilt (voice DFT per cycle)
+        _step(10, "H1-H2 / H1-H3")
         harmdiff_values                      = self.harmdiff_calculator.calculate(voice_signal, cycle_triggers)
-        # P3: EGG timing quotients (OQ / SPQ / CIQ)
+        _step(11, "OQ / SPQ / CIQ")
         oq_values                            = self.oq_calculator.calculate(egg_signal, cycle_triggers)
 
         base = {
@@ -482,6 +495,7 @@ class VoiceMapAnalyzer:
         }
         # Phonation-type cluster uses the already-computed quality metrics
         # as features — must run AFTER them.
+        _step(12, "Phonation cluster (cPhon)")
         base['phon'] = self.phon_calculator.calculate(base)
         return base
 
@@ -709,31 +723,56 @@ class VoiceMapAnalyzer:
     # ------------------------------------------------------------------
     # Full pipeline
     # ------------------------------------------------------------------
+    # Total pipeline stages reported via progress_cb. Pre + 12 metric
+    # sub-steps + filter + CSV (+ optional plot export). Total is 16 whether
+    # or not plot_mode writes PNGs — plot export is reported as step 16.
+    TOTAL_STAGES = 16
+
     def analyze_and_output_vrp(self, file_path: Optional[str] = None,
                                 return_df: bool = False,
                                 plot_mode: str = "per-metric",
-                                export_plots: Optional[bool] = None):
+                                export_plots: Optional[bool] = None,
+                                progress_cb=None):
+        """
+        progress_cb(step:int, total:int, label:str) — called at each
+        pipeline stage. step is 1-based, total == TOTAL_STAGES.
+        """
         logger.info("=" * 60)
         logger.info("VoiceMap Complete Analysis")
         logger.info("=" * 60)
 
+        total = self.TOTAL_STAGES
+
+        def _cb(step, label):
+            if progress_cb is not None:
+                progress_cb(step, total, label)
+
         audio_file = file_path or self.config.audio_file
 
         t0 = time.perf_counter()
+        _cb(1, "加载音频")
         voice, egg, sr, duration = self.load_audio(audio_file)
 
+        _cb(2, "预处理 (HPF / 带通滤波)")
         voice_p = self.preprocess_voice(voice)
         egg_p   = self.preprocess_egg(egg)
 
+        _cb(3, "周期检测 (phase-portrait)")
         logger.info("Cycle detection...")
         cycle_triggers = self.phase_portrait_cycle_detection(egg_p)
         cycle_count = int(np.sum(cycle_triggers > 0.5))
         logger.info("Detected cycles: %d", cycle_count)
 
-        metrics          = self.calculate_all_metrics(voice_p, egg_p, cycle_triggers)
+        # calculate_all_metrics reports 12 sub-stages starting at base_step=3
+        metrics = self.calculate_all_metrics(
+            voice_p, egg_p, cycle_triggers,
+            progress_cb=progress_cb,
+            _base_step=3, _total_steps=total)
+        # calculate_all_metrics ended at step 15 (= 3 + 12)
         filtered_metrics = self.apply_clarity_filtering(metrics)
 
         logger.info("Valid data points: %d", len(filtered_metrics['midi']))
+        _cb(16, "写 CSV" + (" + PNG" if plot_mode != "none" else ""))
         csv_result = self.output_vrp_csv(filtered_metrics,
                                           return_df=return_df,
                                           plot_mode=plot_mode,
