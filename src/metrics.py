@@ -1316,6 +1316,12 @@ class ClusterCalculator:
         dphi = phases_v[:, 1:] - phases_v[:, :1]   # (n_valid, n-1)
         feats = np.concatenate([damp_db, np.cos(dphi), np.sin(dphi)], axis=1)
 
+        # Expose the feature matrix so helpers (e.g. multi-wav joint training)
+        # can accumulate features across recordings without re-running the
+        # DFT pipeline.
+        self._last_features = feats
+        self._last_valid    = valid
+
         # Classify-only mode: preloaded centroids → euclidean nearest-centroid
         # assignment, no fit. Much faster and gives consistent labels across
         # recordings. Feature dim must match the loaded centroid dim.

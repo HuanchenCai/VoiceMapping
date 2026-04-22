@@ -81,6 +81,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--save-centroids", metavar="CSV",
                    help="after analysis, write the trained centroids to this CSV. "
                         "Ignored in --batch mode if --load-centroids is also set.")
+    p.add_argument("--train-centroids", nargs="+", metavar=("OUT.csv", "wav"),
+                   help="joint-train EGG cluster centroids across multiple WAVs "
+                        "and write OUT.csv. Usage: --train-centroids out.csv a.wav b.wav [...]. "
+                        "Exits after writing; does not run a normal analysis.")
 
     # Logging
     p.add_argument("-v", "--verbose", action="store_true",
@@ -162,6 +166,28 @@ def main():
     logger.info("Voice Mapping CLI")
 
     config = _build_config(args)
+
+    # --train-centroids shortcut: pool EGG features across all given wavs,
+    # fit a single K-means, write CSV, exit.
+    if args.train_centroids:
+        if len(args.train_centroids) < 2:
+            logger.error("--train-centroids needs OUT.csv and at least one wav")
+            sys.exit(1)
+        out_csv = args.train_centroids[0]
+        wavs    = args.train_centroids[1:]
+        for w in wavs:
+            if not os.path.exists(w):
+                logger.error("WAV not found: %s", w); sys.exit(1)
+        from analyzer import VoiceMapAnalyzer
+        a = VoiceMapAnalyzer(config)
+        if args.cluster_k is not None:
+            a.cluster_calculator.n_clusters = int(args.cluster_k)
+        if args.cluster_n_harm is not None:
+            a.cluster_calculator.n_harmonics = int(args.cluster_n_harm)
+        a.train_cluster_centroids(wavs)
+        a.save_centroids(out_csv)
+        logger.info("Joint centroids written: %s", out_csv)
+        return
 
     # Batch mode
     if args.batch:

@@ -209,6 +209,81 @@ class VoiceMapAnalyzer:
                     path, cent.shape[0], cent.shape[1])
 
     # ------------------------------------------------------------------
+    # Multi-recording joint centroid training.
+    # Pools per-cycle EGG shape features across every wav in the list,
+    # runs a single K-means fit, stashes the centroids on this analyzer
+    # *and* returns them so the caller can save_centroids() to disk.
+    # This is the canonical way to get cross-subject cluster-label parity.
+    # ------------------------------------------------------------------
+    def train_cluster_centroids(self, wav_paths, *,
+                                 n_clusters: Optional[int] = None,
+                                 n_harmonics: Optional[int] = None,
+                                 random_state: int = 0,
+                                 progress_cb=None) -> np.ndarray:
+        """
+        wav_paths    : iterable of .wav paths (stereo mic+EGG)
+        n_clusters   : override k (default: current cluster calculator k)
+        n_harmonics  : override n_harm (same)
+        progress_cb  : callable(step:int, total:int, msg:str) for UI updates
+        Returns the trained (k, 3·n_harm) centroid matrix.
+        """
+        from sklearn.cluster import KMeans
+        from metrics import _compute_cycle_dft
+
+        wavs = list(wav_paths)
+        if not wavs:
+            raise ValueError("train_cluster_centroids: empty wav list")
+
+        k     = int(n_clusters  if n_clusters  is not None else self.cluster_calculator.n_clusters)
+        nharm = int(n_harmonics if n_harmonics is not None else self.cluster_calculator.n_harmonics)
+
+        feats_all = []
+        for i, path in enumerate(wavs, 1):
+            if progress_cb:
+                progress_cb(i, len(wavs), f"loading {path}")
+            voice, egg, sr, _ = self.load_audio(path)
+            egg_p = self.preprocess_egg(egg)
+            trig  = self.phase_portrait_cycle_detection(egg_p)
+            idx   = np.where(trig > 0.5)[0]
+            if len(idx) < 2:
+                logger.warning("  %s: no cycles detected, skipping", path)
+                continue
+            amps, phases = _compute_cycle_dft(egg_p, idx, nharm)
+            # Same 3n feature recipe as ClusterCalculator
+            fund = amps[:, 0]
+            valid = fund > 1e-12
+            if valid.sum() == 0:
+                continue
+            a = amps[valid]; ph = phases[valid]
+            eps = 1e-15
+            damp_db = 20.0 * np.log10(
+                np.maximum(a[:, 1:], eps) / np.maximum(a[:, :1], eps))
+            dphi    = ph[:, 1:] - ph[:, :1]
+            feats   = np.concatenate([damp_db, np.cos(dphi), np.sin(dphi)], axis=1)
+            feats_all.append(feats)
+            logger.info("  %s: %d valid cycles contributed", path, feats.shape[0])
+
+        if not feats_all:
+            raise RuntimeError("train_cluster_centroids: no valid cycles across inputs")
+
+        X = np.vstack(feats_all)
+        logger.info("Fitting K-means on %d pooled cycles (k=%d, dim=%d)...",
+                    X.shape[0], k, X.shape[1])
+        if progress_cb:
+            progress_cb(len(wavs), len(wavs), f"fitting K-means on {X.shape[0]} cycles")
+        km = KMeans(n_clusters=k, n_init=5, random_state=random_state)
+        km.fit(X)
+        centroids = km.cluster_centers_.copy()
+
+        # Store on the analyzer so save_centroids() can dump them straight out
+        self.cluster_calculator.centroids_   = centroids
+        self.cluster_calculator.n_clusters   = k
+        self.cluster_calculator.n_harmonics  = nharm
+        logger.info("Joint centroids trained: k=%d  dim=%d  inertia=%.3g",
+                    centroids.shape[0], centroids.shape[1], km.inertia_)
+        return centroids
+
+    # ------------------------------------------------------------------
     # Audio I/O
     # ------------------------------------------------------------------
     def load_audio(self, file_path: str) -> Tuple[np.ndarray, np.ndarray, int, float]:
