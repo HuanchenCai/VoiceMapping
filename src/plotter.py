@@ -167,16 +167,49 @@ METRIC_CFG = {
         cmap=_CMAP["Total"],
         norm=LogNorm(vmin=1, vmax=10000, clip=True),     # SC: explin -> log axis
     ),
+    # ── EGG waveform clusters ───────────────────────────────────────────────
+    # maxCluster / maxCPhon: dominant cluster id (1..5). Use a discrete 5-step
+    # qualitative palette so you can visually distinguish which mode dominates
+    # each cell. vmin/vmax tight around the integer range → each bin maps to
+    # one colour.
+    "maxCluster": dict(
+        label="Dominant EGG cluster",
+        vmin=0.5, vmax=5.5, unit="",
+        cmap=plt.get_cmap("tab10", 5),
+        norm=None,
+    ),
+    "maxCPhon": dict(
+        label="Dominant phonation cluster",
+        vmin=0.5, vmax=5.5, unit="",
+        cmap=plt.get_cmap("Set2", 5),
+        norm=None,
+    ),
+    # Cluster k / cPhon k: percent of cycles in cell assigned to cluster k.
+    # Continuous 0-100% with a perceptually-ordered colormap.
+    **{f"Cluster {k}": dict(
+        label=f"EGG cluster {k} share",
+        vmin=0, vmax=100, unit="%",
+        cmap=plt.get_cmap("viridis"),
+        norm=None) for k in range(1, 6)},
+    **{f"cPhon {k}": dict(
+        label=f"Phonation cluster {k} share",
+        vmin=0, vmax=100, unit="%",
+        cmap=plt.get_cmap("magma"),
+        norm=None) for k in range(1, 6)},
 }
 
-# Metrics that are always zero when clustering is disabled – skip them.
-_SKIP_ZERO_METRICS = {
-    "maxCluster", "Cluster 1", "Cluster 2", "Cluster 3", "Cluster 4", "Cluster 5",
-    "maxCPhon",   "cPhon 1",   "cPhon 2",   "cPhon 3",   "cPhon 4",   "cPhon 5",
-}
+# Now that clustering is implemented, these columns can have real values.
+# Keep the set around so any future legacy "always-zero" metrics can be
+# listed here without code changes elsewhere.
+_SKIP_ZERO_METRICS: set = set()
 
-# Metrics excluded from the combined overview figure
-_SKIP_COMBINED = _SKIP_ZERO_METRICS | {"Icontact", "HRFegg"}
+# Metrics excluded from the combined overview figure (too many sub-metrics,
+# clutters the grid). Cluster breakdowns are still rendered individually.
+_SKIP_COMBINED = {
+    "Icontact", "HRFegg",
+    "Cluster 1", "Cluster 2", "Cluster 3", "Cluster 4", "Cluster 5",
+    "cPhon 1",   "cPhon 2",   "cPhon 3",   "cPhon 4",   "cPhon 5",
+}
 
 
 def _build_grid(df: pd.DataFrame, col: str) -> np.ma.MaskedArray:
