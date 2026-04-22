@@ -531,6 +531,9 @@ class FonaDynApp(_TkBase):
                                         command=self._save_centroids)
         self.cent_save_btn.pack(side="left", padx=(6, 0))
         self.cent_save_btn.state(["disabled"])   # 没分析过时禁用
+        ttk.Button(toolbar, text="多 wav 联合训练…", style="Ghost.TButton",
+                   command=self._train_centroids_from_many
+                   ).pack(side="left", padx=(6, 0))
         self.cent_status_lbl = tk.Label(toolbar,
                                          text=self._centroid_status_text(),
                                          bg=PANEL, fg=MUTED, font=FONT_UI)
@@ -947,6 +950,9 @@ class FonaDynApp(_TkBase):
                 elif kind == "done":
                     ok, payload = rest
                     self._on_worker_done(ok, payload)
+                elif kind == "train_done":
+                    ok, payload = rest
+                    self._on_train_done(ok, payload)
         except queue.Empty:
             pass
         self.after(80, self._drain_queue)
@@ -998,6 +1004,80 @@ class FonaDynApp(_TkBase):
             self._refresh_centroid_status()
         except Exception as e:  # noqa: BLE001
             self._append_log("ERROR", f"centroid 加载失败：{e}")
+
+    def _train_centroids_from_many(self):
+        """Pick multiple wavs → pool EGG features → one K-means → save CSV.
+        Produces centroids that yield consistent cluster labels across all
+        recordings analysed against them (cross-subject studies)."""
+        if self._worker and self._worker.is_alive():
+            self._append_log("WARNING", "分析进行中，训练已忽略")
+            return
+        paths = filedialog.askopenfilenames(
+            title="选择多个 .wav 做联合 centroid 训练",
+            filetypes=[("WAV", "*.wav"), ("所有", "*.*")])
+        if not paths:
+            return
+        paths = [str(Path(p)) for p in paths if str(p).lower().endswith(".wav")]
+        if not paths:
+            self._append_log("WARNING", "没有选到 .wav")
+            return
+        out_csv = filedialog.asksaveasfilename(
+            title="保存联合 centroid 到 CSV",
+            defaultextension=".csv",
+            filetypes=[("CSV", "*.csv")],
+            initialfile="cEGG_joint.csv")
+        if not out_csv:
+            return
+
+        # Modal progress dialog (reuse ProgressDialog shell)
+        dlg = ProgressDialog(self, f"{len(paths)} 个 wav")
+        self._progress_dialog = dlg
+        dlg.set_status("准备训练…")
+
+        k_snap     = int(self.cluster_k_var.get())
+        nharm_snap = int(self.cluster_nharm_var.get())
+
+        def work():
+            try:
+                from analyzer import VoiceMapAnalyzer
+                from config import VoiceMapConfig
+                cfg = VoiceMapConfig(
+                    clarity_threshold=float(self.clarity_var.get()),
+                    output_dir=self.output_dir_var.get())
+                a = VoiceMapAnalyzer(cfg)
+                a.cluster_calculator.n_clusters  = k_snap
+                a.cluster_calculator.n_harmonics = nharm_snap
+
+                def cb(step, total, msg):
+                    self._msg_q.put(("log", "INFO", f"[{step}/{total}] {msg}"))
+
+                a.train_cluster_centroids(paths, progress_cb=cb)
+                a.save_centroids(out_csv)
+                self._msg_q.put(("train_done", True, {
+                    "csv": out_csv, "n_wavs": len(paths), "analyzer": a}))
+            except Exception:  # noqa: BLE001
+                self._msg_q.put(("train_done", False, {"error": traceback.format_exc()}))
+
+        self._worker = threading.Thread(target=work, daemon=True)
+        self._worker.start()
+
+    def _on_train_done(self, ok: bool, payload: dict):
+        if self._progress_dialog is not None:
+            try: self._progress_dialog.close()
+            except Exception: pass
+            self._progress_dialog = None
+        if ok:
+            self._loaded_centroids      = payload["analyzer"].cluster_calculator.centroids_
+            self._loaded_centroids_path = payload["csv"]
+            self._last_analyzer         = payload["analyzer"]
+            self.cent_save_btn.state(["!disabled"])
+            self._refresh_centroid_status()
+            self._append_log("META",
+                             f"✓ 联合训练完成：{payload['n_wavs']} 个 wav → "
+                             f"{Path(payload['csv']).name}")
+            self._append_log("INFO", "已自动加载新 centroid；下一次拖 wav 分析会用它")
+        else:
+            self._append_log("ERROR", payload["error"])
 
     def _save_centroids(self):
         if self._last_analyzer is None:
