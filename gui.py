@@ -56,11 +56,14 @@ OK        = "#3fb950"
 WARN      = "#d29922"
 ERR       = "#f85149"
 
-FONT_UI    = ("Segoe UI", 10)
-FONT_UI_B  = ("Segoe UI Semibold", 10)
-FONT_TITLE = ("Segoe UI Semibold", 16)
-FONT_SUB   = ("Segoe UI", 10)
-FONT_DROP  = ("Segoe UI Semibold", 13)
+# Fonts. 用 Microsoft YaHei UI 作为主字体 —— Windows 自带，汉字与西文
+# 均有专门字形，不会出现 Segoe UI 为汉字回落到别的字体导致的"某些字看
+# 起来像加粗、某些不像"视觉不一致。
+FONT_UI    = ("Microsoft YaHei UI", 10)
+FONT_UI_B  = ("Microsoft YaHei UI", 10, "bold")
+FONT_TITLE = ("Microsoft YaHei UI", 16, "bold")
+FONT_SUB   = ("Microsoft YaHei UI", 10)
+FONT_DROP  = ("Microsoft YaHei UI", 13, "bold")
 FONT_MONO  = ("Consolas", 9)
 
 # Metric 分类。下拉按这个顺序分段显示，每段一个禁用的标题；
@@ -431,6 +434,22 @@ class FonaDynApp(_TkBase):
         except Exception:
             pass
 
+        # 统一所有 Tk 默认字体为一套（中文 + 英文同一家族，不再漂移）
+        try:
+            import tkinter.font as tkfont
+            for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont",
+                          "TkCaptionFont", "TkHeadingFont",
+                          "TkTooltipFont", "TkIconFont", "TkSmallCaptionFont"):
+                try:
+                    tkfont.nametofont(name).configure(
+                        family="Microsoft YaHei UI", size=10)
+                except tk.TclError:
+                    pass
+            tkfont.nametofont("TkFixedFont").configure(
+                family="Consolas", size=9)
+        except Exception:
+            pass
+
         self._init_style()
         self._build_ui()
         self._init_logging()
@@ -744,6 +763,23 @@ class FonaDynApp(_TkBase):
         self.bind("<Key-Left>",  on_key)
         self.bind("<Key-Right>", on_key)
 
+        # 鼠标滚轮在 Metric 按钮上循环切换 metric。
+        # Windows/macOS 用 <MouseWheel> (event.delta ±120),
+        # Linux X11 用 <Button-4> / <Button-5>。
+        def on_wheel(event):
+            delta = 0
+            if getattr(event, "num", 0) == 4:      delta = -1
+            elif getattr(event, "num", 0) == 5:    delta = +1
+            elif getattr(event, "delta", 0) > 0:   delta = -1
+            elif getattr(event, "delta", 0) < 0:   delta = +1
+            if delta:
+                self._cycle_metric(delta)
+            return "break"
+        for target in (self.metric_btn, self.nav_left, self.nav_right):
+            target.bind("<MouseWheel>", on_wheel)
+            target.bind("<Button-4>",  on_wheel)
+            target.bind("<Button-5>",  on_wheel)
+
     # ── 拖放 ──
     def _register_dnd(self):
         if not _DND_OK:
@@ -1040,12 +1076,10 @@ class FonaDynApp(_TkBase):
         self._showing_placeholder = False
         self._sync_fig_to_widget()
         self._fig.clear()
-        # 用固定边距替代 tight_layout：后者会随标题/colorbar 内容变化而
-        # 重新计算布局，导致每个 metric 的绘图区大小不一致；固定值能保证
-        # 切换 metric 时画面完全对齐，便于视觉比较。
-        # left 加宽到 0.13：之前 0.10 在 dpi=120 下 "SPL (dB)" 竖标签会被
-        # ◀ 按钮边缘压掉；0.13 给 y 刻度数字 + 旋转的 label + 一点空气。
-        self._fig.subplots_adjust(left=0.13, right=0.90, top=0.93, bottom=0.13)
+        # 固定边距（而不是 tight_layout）保证切 metric 时绘图区位置不跳。
+        # bottom=0.16 给 x 刻度 + "MIDI" 下标签留足空间（0.13 在 dpi=120
+        # 下会被 MIDI 文字截掉底部几像素）；top=0.90 给加了分类前缀的标题。
+        self._fig.subplots_adjust(left=0.13, right=0.90, top=0.90, bottom=0.16)
         ax = self._fig.add_subplot(111)
         ok = draw_vrp_on_ax(ax, self._fig, df, col)
         if not ok:

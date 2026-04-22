@@ -346,6 +346,34 @@ _SKIP_COMBINED = {
     "cPhon 1",   "cPhon 2",   "cPhon 3",   "cPhon 4",   "cPhon 5",
 }
 
+# Metric → short category tag for titling. Kept in sync with the GUI's
+# _METRIC_SECTIONS but trimmed to an ASCII prefix so matplotlib renders
+# it consistently (no reliance on Chinese-glyph font coverage at the
+# plot level).
+METRIC_CATEGORY = {
+    # Acoustic
+    **{m: "Acoustic" for m in (
+        "Clarity", "CPP", "SpecBal", "Crest", "Entropy",
+        "Jitter", "JitterRAP", "JitterPPQ5",
+        "Shimmer", "ShimmerDB", "ShimmerAPQ11", "HNR")},
+    # EGG
+    **{m: "EGG" for m in (
+        "Qcontact", "Icontact", "dEGGmax", "HRFegg",
+        "OQ", "SPQ", "CIQ")},
+    # Singing-specific
+    **{m: "Singing" for m in (
+        "VibratoRate", "VibratoExtent",
+        "F1", "F2", "F3", "SingersFormant",
+        "H1H2", "H1H3")},
+    # Cluster
+    **{m: "Cluster" for m in (
+        "maxCluster", "Cluster 1", "Cluster 2", "Cluster 3",
+        "Cluster 4", "Cluster 5",
+        "maxCPhon", "cPhon 1", "cPhon 2", "cPhon 3",
+        "cPhon 4", "cPhon 5")},
+    "Total": "Density",
+}
+
 
 def _build_grid(df: pd.DataFrame, col: str) -> np.ma.MaskedArray:
     """Fill a (SPL × MIDI) masked array from grouped VRP data."""
@@ -433,7 +461,16 @@ def _draw_vrp_ax(ax, fig, df: pd.DataFrame, col: str) -> bool:
     ax.grid(which="major", color="#555555", linewidth=0.4, linestyle="--")
     ax.grid(which="minor", color="#3a3a3a", linewidth=0.2)
 
-    ax.set_title(f"{cfg['label']}{unit_str}", color="white", fontsize=9, pad=4)
+    # Title: main label + unit, with a small grey category tag on the right
+    # so users can tell at a glance whether this is an Acoustic / EGG /
+    # Singing / Cluster / Density metric.
+    main_title = f"{cfg['label']}{unit_str}"
+    ax.set_title(main_title, color="white", fontsize=9, pad=4)
+    cat = METRIC_CATEGORY.get(col)
+    if cat:
+        ax.text(1.0, 1.02, cat, transform=ax.transAxes,
+                ha="right", va="bottom",
+                color="#7d8590", fontsize=7, style="italic")
     return True
 
 
