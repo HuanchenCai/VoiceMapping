@@ -114,37 +114,39 @@ class SettingsDialog(tk.Toplevel):
         ttk.Spinbox(pad, from_=3, to=20, textvariable=app.cluster_nharm_var,
                     width=6).grid(row=4, column=1, sticky="w", padx=(18, 0), pady=3)
 
-        # ─ Centroid CSV（跨录音共享聚类标签） ─
-        tk.Label(pad, text="Centroid CSV  (跨录音可比)", bg=PANEL, fg=ACCENT, font=FONT_UI_B
-                 ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(18, 6))
-
-        cent_row = tk.Frame(pad, bg=PANEL)
-        cent_row.grid(row=6, column=0, columnspan=2, sticky="w", pady=3)
-        ttk.Button(cent_row, text="加载", style="Ghost.TButton",
-                   command=app._load_centroids).pack(side="left")
-        ttk.Button(cent_row, text="保存上次分析", style="Ghost.TButton",
-                   command=app._save_centroids).pack(side="left", padx=(6, 0))
-        self.cent_status = tk.Label(cent_row, text=app._centroid_status_text(),
-                                     bg=PANEL, fg=MUTED, font=FONT_UI)
-        self.cent_status.pack(side="left", padx=(10, 0))
-
         # ─ 输出 ─
         tk.Label(pad, text="输出", bg=PANEL, fg=ACCENT, font=FONT_UI_B
-                 ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(18, 6))
+                 ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(18, 6))
 
         tk.Label(pad, text="目录", bg=PANEL, fg=TEXT, font=FONT_UI
-                 ).grid(row=8, column=0, sticky="w", pady=3)
+                 ).grid(row=6, column=0, sticky="w", pady=3)
         out_row = tk.Frame(pad, bg=PANEL)
-        out_row.grid(row=8, column=1, sticky="ew", padx=(18, 0), pady=3)
+        out_row.grid(row=6, column=1, sticky="ew", padx=(18, 0), pady=3)
         ttk.Entry(out_row, textvariable=app.output_dir_var, width=32
                   ).pack(side="left")
         ttk.Button(out_row, text="…", style="Ghost.TButton",
                    command=app._pick_output_dir, width=3
                    ).pack(side="left", padx=(6, 0))
 
+        # 自动导出 PNG 开关
+        tk.Label(pad, text="自动导出 PNG", bg=PANEL, fg=TEXT, font=FONT_UI
+                 ).grid(row=7, column=0, sticky="w", pady=3)
+        exp_row = tk.Frame(pad, bg=PANEL)
+        exp_row.grid(row=7, column=1, sticky="w", padx=(18, 0), pady=3)
+        ttk.Checkbutton(exp_row, variable=app.export_plots_var,
+                        text="分析完成后输出到 plots/").pack(anchor="w")
+        layout_row = tk.Frame(exp_row, bg=PANEL)
+        layout_row.pack(anchor="w", pady=(4, 0))
+        ttk.Radiobutton(layout_row, variable=app.plot_layout_var,
+                        value="per-metric", text="每 metric 一张图"
+                        ).pack(side="left")
+        ttk.Radiobutton(layout_row, variable=app.plot_layout_var,
+                        value="combined", text="合并为一张总览"
+                        ).pack(side="left", padx=(12, 0))
+
         # ─ 关闭 ─
         btn_row = tk.Frame(pad, bg=PANEL)
-        btn_row.grid(row=9, column=0, columnspan=2, sticky="e", pady=(22, 0))
+        btn_row.grid(row=8, column=0, columnspan=2, sticky="e", pady=(22, 0))
         ttk.Button(btn_row, text="完成", style="Accent.TButton",
                    command=self.destroy).pack()
 
@@ -259,6 +261,9 @@ class FonaDynApp(_TkBase):
         # 聚类参数（下次分析生效）
         self.cluster_k_var    = tk.IntVar(value=5)
         self.cluster_nharm_var = tk.IntVar(value=10)
+        # PNG 导出：默认关（GUI 自己渲染，不需要存盘），开启时用哪种布局
+        self.export_plots_var = tk.BooleanVar(value=False)
+        self.plot_layout_var  = tk.StringVar(value="per-metric")  # or "combined"
         self.metric_var     = tk.StringVar(value="")
         self.csv_path_var   = tk.StringVar(value="—")
 
@@ -475,17 +480,40 @@ class FonaDynApp(_TkBase):
         self.log_text.tag_configure("META",    foreground=ACCENT)
 
     def _build_right_panel(self, parent):
-        # 左右两条独立的导航带（宽 42px），始终占位，彻底不遮挡图像
-        self.nav_left = tk.Frame(parent, bg=PANEL, width=42)
+        # 顶栏：放和当前 voice map 强相关的工具（centroid 加载/保存 + 状态）。
+        # 跟绘图放一起，用户看图时能顺手操作；分析参数才留在 Settings 里。
+        toolbar = tk.Frame(parent, bg=PANEL, height=34)
+        toolbar.pack(side="top", fill="x", padx=8, pady=(6, 0))
+        toolbar.pack_propagate(False)
+
+        tk.Label(toolbar, text="Centroid", bg=PANEL, fg=MUTED, font=FONT_UI
+                 ).pack(side="left")
+        ttk.Button(toolbar, text="加载", style="Ghost.TButton",
+                   command=self._load_centroids).pack(side="left", padx=(8, 0))
+        self.cent_save_btn = ttk.Button(toolbar, text="保存当前",
+                                        style="Ghost.TButton",
+                                        command=self._save_centroids)
+        self.cent_save_btn.pack(side="left", padx=(6, 0))
+        self.cent_save_btn.state(["disabled"])   # 没分析过时禁用
+        self.cent_status_lbl = tk.Label(toolbar,
+                                         text=self._centroid_status_text(),
+                                         bg=PANEL, fg=MUTED, font=FONT_UI)
+        self.cent_status_lbl.pack(side="left", padx=(12, 0))
+
+        # Middle: nav_left + canvas + nav_right
+        middle = tk.Frame(parent, bg=PANEL)
+        middle.pack(side="top", fill="both", expand=True)
+
+        self.nav_left = tk.Frame(middle, bg=PANEL, width=42)
         self.nav_left.pack(side="left", fill="y")
         self.nav_left.pack_propagate(False)
 
-        self.nav_right = tk.Frame(parent, bg=PANEL, width=42)
+        self.nav_right = tk.Frame(middle, bg=PANEL, width=42)
         self.nav_right.pack(side="right", fill="y")
         self.nav_right.pack_propagate(False)
 
         self._fig = Figure(figsize=(7, 5), dpi=120, facecolor=PANEL)
-        self._canvas = FigureCanvasTkAgg(self._fig, master=parent)
+        self._canvas = FigureCanvasTkAgg(self._fig, master=middle)
         cw = self._canvas.get_tk_widget()
         cw.configure(bg=PANEL, highlightthickness=0, bd=0)
         cw.pack(side="left", fill="both", expand=True, pady=6)
@@ -707,6 +735,13 @@ class FonaDynApp(_TkBase):
         k_snap      = int(self.cluster_k_var.get())
         nharm_snap  = int(self.cluster_nharm_var.get())
         cent_snap   = self._loaded_centroids
+        # 用户可选的导出模式：不导出 / 每个 metric 一张 / 合并为一张
+        if not self.export_plots_var.get():
+            plot_mode_snap = "none"
+        elif self.plot_layout_var.get() == "combined":
+            plot_mode_snap = "combined"
+        else:
+            plot_mode_snap = "per-metric"
 
         def work():
             try:
@@ -718,10 +753,8 @@ class FonaDynApp(_TkBase):
                 analyzer.phon_calculator.n_clusters     = k_snap
                 if cent_snap is not None:
                     analyzer.cluster_calculator.centroids_ = cent_snap
-                # export_plots=False: GUI embeds plots in-memory; saving 22
-                # PNGs per run would add ~8s of dead work.
                 data, out_file, grouped = analyzer.analyze_and_output_vrp(
-                    audio, return_df=True, export_plots=False)
+                    audio, return_df=True, plot_mode=plot_mode_snap)
                 self._msg_q.put(("done", True, {
                     "df": grouped,
                     "csv": out_file,
@@ -750,6 +783,11 @@ class FonaDynApp(_TkBase):
             self._last_analyzer = payload.get("analyzer")
             self.csv_path_var.set(payload["csv"])
             self.open_csv_btn.state(["!disabled"])
+            # 有了 analyzer 就能保存 centroid
+            try:
+                self.cent_save_btn.state(["!disabled"])
+            except (AttributeError, tk.TclError):
+                pass
             self._set_status(f"完成 · {payload['points']:,} 点", OK)
             self._append_log("META", f"✓ {payload['csv']}")
             self._refresh_metric_dropdown()
@@ -927,13 +965,11 @@ class FonaDynApp(_TkBase):
             self._append_log("ERROR", f"centroid 保存失败：{e}")
 
     def _refresh_centroid_status(self):
-        if self._settings_dialog is not None:
-            try:
-                if self._settings_dialog.winfo_exists():
-                    self._settings_dialog.cent_status.configure(
-                        text=self._centroid_status_text())
-            except tk.TclError:
-                pass
+        # 顶栏状态
+        try:
+            self.cent_status_lbl.configure(text=self._centroid_status_text())
+        except (AttributeError, tk.TclError):
+            pass
 
     # ── 设置对话框 ──
     def _open_settings(self):

@@ -17,7 +17,7 @@ import logging
 
 from config import VoiceMapConfig, DEFAULT_CONFIG
 from logger import setup_logger, get_logger
-from plotter import plot_vrp_dataframe
+from plotter import plot_vrp_dataframe, plot_vrp_combined
 from metrics import (
     SPLCalculator, ClarityCalculator, CPPCalculator, SpecBalCalculator,
     CrestCalculator, QcontactCalculator, EntropyCalculator, HRFCalculator,
@@ -427,7 +427,19 @@ class VoiceMapAnalyzer:
     # ------------------------------------------------------------------
     def output_vrp_csv(self, metrics: Dict[str, np.ndarray],
                         return_df: bool = False,
-                        export_plots: bool = True):
+                        plot_mode: str = "per-metric",
+                        export_plots: Optional[bool] = None):
+        """
+        plot_mode:
+          "none"       — skip PNG export (fastest; GUI embeds in-memory)
+          "per-metric" — one PNG per active metric (default; CLI-compatible)
+          "combined"   — single overview PNG with a grid of all metrics
+
+        `export_plots` is a legacy bool kwarg. False ⇒ "none", True ⇒ keep
+        current plot_mode; kept so older callers still work.
+        """
+        if export_plots is False:
+            plot_mode = "none"
         logger.info("Outputting VRP CSV...")
         spl_corr = metrics['spl'] + self.config.spl_correction_db
 
@@ -511,18 +523,23 @@ class VoiceMapAnalyzer:
                          grouped['Clarity'].mean())
         logger.info("Saved: %s", out_file)
 
-        # --- Generate VRP map images (optional) ---
-        # With 22 metrics each savefig at dpi=150 costs ~0.4s → PNG export
-        # dominates total runtime (~8s for a 10s analysis). GUI embeds the
-        # plots in-memory and doesn't need the PNGs; CLI keeps them by default.
-        if export_plots:
+        # --- Generate VRP map images ---
+        # 22 PNGs at dpi=150 via savefig cost ~0.4s each → dominates wall time.
+        # Caller picks the trade-off: none / per-metric / combined overview.
+        if plot_mode == "none":
+            logger.info("Skipping PNG export (plot_mode=none)")
+        else:
             plot_dir = os.path.join(self.config.output_dir, "plots")
             ts_base  = os.path.splitext(os.path.basename(out_file))[0]
-            saved    = plot_vrp_dataframe(grouped, ts_base, plot_dir)
-            if saved:
-                logger.info("Plots saved to: %s  (%d images)", plot_dir, len(saved))
-        else:
-            logger.info("Skipping PNG export (GUI mode)")
+            if plot_mode == "combined":
+                saved_path = plot_vrp_combined(grouped, ts_base, plot_dir)
+                if saved_path:
+                    logger.info("Combined overview saved: %s", saved_path)
+            else:   # "per-metric"
+                saved = plot_vrp_dataframe(grouped, ts_base, plot_dir)
+                if saved:
+                    logger.info("Plots saved to: %s  (%d images)",
+                                plot_dir, len(saved))
 
         if return_df:
             return out_file, grouped
@@ -533,7 +550,8 @@ class VoiceMapAnalyzer:
     # ------------------------------------------------------------------
     def analyze_and_output_vrp(self, file_path: Optional[str] = None,
                                 return_df: bool = False,
-                                export_plots: bool = True):
+                                plot_mode: str = "per-metric",
+                                export_plots: Optional[bool] = None):
         logger.info("=" * 60)
         logger.info("VoiceMap Complete Analysis")
         logger.info("=" * 60)
@@ -557,6 +575,7 @@ class VoiceMapAnalyzer:
         logger.info("Valid data points: %d", len(filtered_metrics['midi']))
         csv_result = self.output_vrp_csv(filtered_metrics,
                                           return_df=return_df,
+                                          plot_mode=plot_mode,
                                           export_plots=export_plots)
         if return_df:
             out_file, grouped_df = csv_result
