@@ -766,11 +766,9 @@ class FonaDynApp(_TkBase):
         # 用固定边距替代 tight_layout：后者会随标题/colorbar 内容变化而
         # 重新计算布局，导致每个 metric 的绘图区大小不一致；固定值能保证
         # 切换 metric 时画面完全对齐，便于视觉比较。
-        # left：留给 "SPL (dB)" 竖向标签
-        # right：留给 colorbar + tick 数字（~5 位数字 @ fontsize=7）
-        # top：留给 metric 标题
-        # bottom：留给 x-ticks + "MIDI" 标签
-        self._fig.subplots_adjust(left=0.10, right=0.90, top=0.93, bottom=0.13)
+        # left 加宽到 0.13：之前 0.10 在 dpi=120 下 "SPL (dB)" 竖标签会被
+        # ◀ 按钮边缘压掉；0.13 给 y 刻度数字 + 旋转的 label + 一点空气。
+        self._fig.subplots_adjust(left=0.13, right=0.90, top=0.93, bottom=0.13)
         ax = self._fig.add_subplot(111)
         ok = draw_vrp_on_ax(ax, self._fig, df, col)
         if not ok:
