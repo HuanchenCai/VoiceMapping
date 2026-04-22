@@ -452,7 +452,20 @@ def _draw_vrp_ax(ax, fig, df: pd.DataFrame, col: str) -> bool:
     if vmin >= vmax:
         vmax = vmin + 1.0
 
-    ax.set_facecolor("#333333")
+    # ── Colour scheme ────────────────────────────────────────────────────
+    # White background for the plot area so exported PNGs and Excel
+    # figures drop straight into papers/slides without inverting. Empty
+    # cells are a slightly-off-white so you can still see them against
+    # the plot face. All text and axis chrome is black/dark-grey for
+    # contrast.
+    _BG_AX       = "#ffffff"   # plot area
+    _BG_EMPTY    = "#f2f2f2"   # NaN / masked cells
+    _FG_TEXT     = "#1a1a1a"   # title / ticks / labels
+    _FG_SPINE    = "#444444"
+    _GRID_MAJOR  = "#cccccc"
+    _GRID_MINOR  = "#e6e6e6"
+    _CAT_TAG     = "#777777"
+    ax.set_facecolor(_BG_AX)
 
     midi_edges = np.arange(MIDI_MIN - 0.5, MIDI_MAX + 1.5)
     spl_edges  = np.arange(SPL_MIN  - 0.5, SPL_MAX  + 1.5)
@@ -463,7 +476,7 @@ def _draw_vrp_ax(ax, fig, df: pd.DataFrame, col: str) -> bool:
         cmap_obj = plt.get_cmap(raw_cmap).copy()
     else:
         cmap_obj = raw_cmap
-    cmap_obj.set_bad(color="#333333")
+    cmap_obj.set_bad(color=_BG_EMPTY)
 
     norm = cfg.get("norm") or Normalize(vmin=vmin, vmax=vmax)
 
@@ -476,52 +489,48 @@ def _draw_vrp_ax(ax, fig, df: pd.DataFrame, col: str) -> bool:
 
     unit_str = f" [{cfg['unit']}]" if cfg["unit"] else ""
     cbar = fig.colorbar(mesh, ax=ax, fraction=0.03, pad=0.01)
-    # 不再在颜色条旁重复单位——标题里 "CPP [dB]" 已经写过了，
-    # 重复标注会让不同 metric 的颜色条宽度变化（有的有 "dB" / "slope" / ""），
-    # 进而让整张图的尺寸参差不齐。
-    cbar.ax.yaxis.set_tick_params(color="white")
-    plt.setp(cbar.ax.yaxis.get_ticklabels(), color="white", fontsize=7)
+    cbar.ax.yaxis.set_tick_params(color=_FG_TEXT)
+    plt.setp(cbar.ax.yaxis.get_ticklabels(), color=_FG_TEXT, fontsize=7)
+    cbar.outline.set_edgecolor(_FG_SPINE)
 
     # X axis: major ticks every 6 semitones labelled as MIDI numbers
     major_ticks = list(range(30, MIDI_MAX + 1, 6))
     ax.set_xticks(major_ticks)
-    ax.set_xticklabels([str(m) for m in major_ticks], color="white", fontsize=7)
+    ax.set_xticklabels([str(m) for m in major_ticks], color=_FG_TEXT, fontsize=7)
     ax.xaxis.set_minor_locator(mticker.MultipleLocator(1))
     ax.set_xlim(MIDI_MIN - 0.5, MIDI_MAX + 0.5)
-    ax.set_xlabel("MIDI", color="white", fontsize=7)
+    ax.set_xlabel("MIDI", color=_FG_TEXT, fontsize=7)
 
     # Y axis: SPL in dB
     ax.set_yticks(range(SPL_MIN, SPL_MAX + 1, 10))
     ax.set_yticklabels(
         [str(v) for v in range(SPL_MIN, SPL_MAX + 1, 10)],
-        color="white", fontsize=7,
+        color=_FG_TEXT, fontsize=7,
     )
     ax.yaxis.set_minor_locator(mticker.MultipleLocator(5))
     ax.set_ylim(SPL_MIN - 0.5, SPL_MAX + 0.5)
-    ax.set_ylabel("SPL (dB)", color="white", fontsize=7)
+    ax.set_ylabel("SPL (dB)", color=_FG_TEXT, fontsize=7)
 
-    ax.tick_params(axis="both", which="both", colors="white", labelsize=7)
+    ax.tick_params(axis="both", which="both", colors=_FG_TEXT, labelsize=7)
     for spine in ax.spines.values():
-        spine.set_edgecolor("#666666")
-    ax.grid(which="major", color="#555555", linewidth=0.4, linestyle="--")
-    ax.grid(which="minor", color="#3a3a3a", linewidth=0.2)
+        spine.set_edgecolor(_FG_SPINE)
+    ax.grid(which="major", color=_GRID_MAJOR, linewidth=0.4, linestyle="--")
+    ax.grid(which="minor", color=_GRID_MINOR, linewidth=0.2)
 
-    # Title: main label + unit, with a small grey category tag on the right
-    # so users can tell at a glance whether this is an Acoustic / EGG /
-    # Singing / Cluster / Density metric.
+    # Title + category tag
     main_title = f"{cfg['label']}{unit_str}"
-    ax.set_title(main_title, color="white", fontsize=9, pad=4)
+    ax.set_title(main_title, color=_FG_TEXT, fontsize=9, pad=4)
     cat = METRIC_CATEGORY.get(col)
     if cat:
         ax.text(1.0, 1.02, cat, transform=ax.transAxes,
                 ha="right", va="bottom",
-                color="#7d8590", fontsize=7, style="italic")
+                color=_CAT_TAG, fontsize=7, style="italic")
     return True
 
 
 def _plot_one(df: pd.DataFrame, col: str, out_path: str, basename: str) -> None:
     fig, ax = plt.subplots(figsize=(10, 6))
-    fig.patch.set_facecolor("#1a1a1a")
+    fig.patch.set_facecolor("white")
     if not _draw_vrp_ax(ax, fig, df, col):
         plt.close(fig)
         return
@@ -548,7 +557,7 @@ def plot_vrp_combined(
 
     nrows = (len(metrics) + ncols - 1) // ncols
     fig, axes = plt.subplots(nrows, ncols, figsize=(ncols * 7, nrows * 5), squeeze=False)
-    fig.patch.set_facecolor("#1a1a1a")
+    fig.patch.set_facecolor("white")
 
     for idx, col in enumerate(metrics):
         _draw_vrp_ax(axes[idx // ncols][idx % ncols], fig, df, col)
@@ -556,7 +565,7 @@ def plot_vrp_combined(
     for idx in range(len(metrics), nrows * ncols):
         axes[idx // ncols][idx % ncols].set_visible(False)
 
-    fig.suptitle(basename, color="white", fontsize=13, y=1.01)
+    fig.suptitle(basename, color="#1a1a1a", fontsize=13, y=1.01)
     fig.tight_layout()
 
     os.makedirs(out_dir, exist_ok=True)
@@ -639,8 +648,14 @@ def draw_vrp_comparison(df_a: pd.DataFrame,
 
     cfg = METRIC_CFG.get(col, dict(label=col, vmin=None, vmax=None,
                                      unit="", cmap="viridis", norm=None))
+    # Comparison palette: white canvas, dark text. Matches the single-metric
+    # style so an A|B|Δ export sits next to a single-metric one in a paper
+    # without colour-scheme mismatch.
+    _BG_AX, _BG_EMPTY = "#ffffff", "#f2f2f2"
+    _FG_TEXT, _FG_SPINE, _GRID = "#1a1a1a", "#444444", "#cccccc"
+
     fig.clear()
-    fig.patch.set_facecolor("#1a1a1a")
+    fig.patch.set_facecolor("white")
     axes = fig.subplots(1, 3)
 
     midi_edges = np.arange(MIDI_MIN - 0.5, MIDI_MAX + 1.5)
@@ -648,8 +663,8 @@ def draw_vrp_comparison(df_a: pd.DataFrame,
 
     # Left + middle: per-metric palette
     for ax, grid, label in ((axes[0], ga, label_a), (axes[1], gb, label_b)):
-        ax.set_facecolor("#333333")
-        ax.set_title(f"{label} · {cfg['label']}", color="white", fontsize=9)
+        ax.set_facecolor(_BG_AX)
+        ax.set_title(f"{label} · {cfg['label']}", color=_FG_TEXT, fontsize=9)
         if grid.count() == 0:
             ax.text(0.5, 0.5, "no data", ha="center", va="center",
                     color="#888", transform=ax.transAxes)
@@ -659,21 +674,27 @@ def draw_vrp_comparison(df_a: pd.DataFrame,
         vmax = cfg["vmax"] if cfg["vmax"] is not None else float(np.nanmax(grid))
         raw_cmap = cfg["cmap"]
         cmap_obj = plt.get_cmap(raw_cmap).copy() if isinstance(raw_cmap, str) else raw_cmap
-        cmap_obj.set_bad(color="#333333")
+        cmap_obj.set_bad(color=_BG_EMPTY)
         norm = cfg.get("norm") or Normalize(vmin=vmin, vmax=vmax)
         mesh = ax.pcolormesh(midi_edges, spl_edges, grid,
                               cmap=cmap_obj, norm=norm, shading="flat")
-        fig.colorbar(mesh, ax=ax, fraction=0.03, pad=0.01)
-        ax.tick_params(colors="white", labelsize=6)
-        ax.set_xlabel("MIDI", color="white", fontsize=7)
-        ax.set_ylabel("SPL (dB)", color="white", fontsize=7)
+        cb = fig.colorbar(mesh, ax=ax, fraction=0.03, pad=0.01)
+        cb.ax.yaxis.set_tick_params(color=_FG_TEXT)
+        plt.setp(cb.ax.yaxis.get_ticklabels(), color=_FG_TEXT, fontsize=6)
+        cb.outline.set_edgecolor(_FG_SPINE)
+        ax.tick_params(colors=_FG_TEXT, labelsize=6)
+        ax.set_xlabel("MIDI", color=_FG_TEXT, fontsize=7)
+        ax.set_ylabel("SPL (dB)", color=_FG_TEXT, fontsize=7)
+        for sp in ax.spines.values():
+            sp.set_edgecolor(_FG_SPINE)
+        ax.grid(which="major", color=_GRID, linewidth=0.3, linestyle="--")
 
     # Right: A − B, diverging palette symmetric around 0
     diff = ga.filled(np.nan) - gb.filled(np.nan)
     diff_ma = np.ma.masked_invalid(diff)
     axd = axes[2]
-    axd.set_facecolor("#333333")
-    axd.set_title(f"Δ = {label_a} − {label_b}", color="white", fontsize=9)
+    axd.set_facecolor(_BG_AX)
+    axd.set_title(f"Δ = {label_a} − {label_b}", color=_FG_TEXT, fontsize=9)
     if diff_ma.count() == 0:
         axd.text(0.5, 0.5, "no overlap", ha="center", va="center",
                  color="#888", transform=axd.transAxes)
@@ -682,12 +703,19 @@ def draw_vrp_comparison(df_a: pd.DataFrame,
         absmax = float(np.nanmax(np.abs(diff_ma)))
         if absmax == 0:
             absmax = 1.0
+        diff_cmap = plt.get_cmap("RdBu_r").copy()
+        diff_cmap.set_bad(color=_BG_EMPTY)
         mesh = axd.pcolormesh(midi_edges, spl_edges, diff_ma,
-                               cmap=plt.get_cmap("RdBu_r"),
+                               cmap=diff_cmap,
                                vmin=-absmax, vmax=absmax, shading="flat")
-        fig.colorbar(mesh, ax=axd, fraction=0.03, pad=0.01)
-        axd.tick_params(colors="white", labelsize=6)
-        axd.set_xlabel("MIDI", color="white", fontsize=7)
+        cb = fig.colorbar(mesh, ax=axd, fraction=0.03, pad=0.01)
+        cb.ax.yaxis.set_tick_params(color=_FG_TEXT)
+        plt.setp(cb.ax.yaxis.get_ticklabels(), color=_FG_TEXT, fontsize=6)
+        cb.outline.set_edgecolor(_FG_SPINE)
+        axd.tick_params(colors=_FG_TEXT, labelsize=6)
+        axd.set_xlabel("MIDI", color=_FG_TEXT, fontsize=7)
+        for sp in axd.spines.values():
+            sp.set_edgecolor(_FG_SPINE)
 
     fig.subplots_adjust(left=0.05, right=0.97, top=0.90,
                          bottom=0.12, wspace=0.25)

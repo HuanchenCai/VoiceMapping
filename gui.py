@@ -1174,6 +1174,9 @@ class FonaDynApp(_TkBase):
         self._showing_placeholder = False
         self._sync_fig_to_widget()
         self._fig.clear()
+        # Voice map 白底 — 导出截图和在面板里展示同一套配色，一致且
+        # 直接可用于文章/幻灯（不用再做反色处理）。占位保留深色。
+        self._fig.patch.set_facecolor("white")
         # 固定边距（而不是 tight_layout）保证切 metric 时绘图区位置不跳。
         # bottom=0.16 给 x 刻度 + "MIDI" 下标签留足空间（0.13 在 dpi=120
         # 下会被 MIDI 文字截掉底部几像素）；top=0.90 给加了分类前缀的标题。
