@@ -1090,9 +1090,18 @@ class FonaDynApp(_TkBase):
             return
         df = self._last_df
 
+        # 对聚类 share 列（Cluster 1..N / cPhon 1..N）放宽过滤：哪怕本次
+        # K-means 碰巧把某个簇跑空（所有点被更近的其它中心抢光），下拉里
+        # 也要保留全部 k 个条目，让用户看到 "这个簇这次为空"，而不是
+        # 神秘地少一个。maxCluster / maxCPhon 保留常规过滤。
+        import re as _re
+        _cluster_share_re = _re.compile(r"^(Cluster|cPhon)\s+\d+$")
+
         def _has_data(col):
             if col not in df.columns:
                 return False
+            if _cluster_share_re.match(col):
+                return True    # always present for k=current
             try:
                 return float(df[col].abs().sum()) > 0
             except Exception:

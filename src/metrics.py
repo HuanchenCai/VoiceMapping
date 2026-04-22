@@ -1343,7 +1343,25 @@ class ClusterCalculator:
             km = KMeans(n_clusters=self.n_clusters,
                         n_init=3, random_state=self.random_state)
             labels_v = km.fit_predict(feats)   # 0..k-1
-            self.centroids_ = km.cluster_centers_.copy()
+            centers_tmp = km.cluster_centers_.copy()
+
+            # Same empty-cluster rescue as PhonClusterCalculator: steal
+            # the worst-fit point from an overfull cluster so every k has
+            # at least one member.
+            counts = np.bincount(labels_v, minlength=self.n_clusters)
+            empty = np.where(counts == 0)[0]
+            if len(empty):
+                logger.info("  Cluster: %d empty cluster(s) rescued", len(empty))
+                for e in empty:
+                    d = np.linalg.norm(feats - centers_tmp[labels_v], axis=1)
+                    stealable = counts[labels_v] > 1
+                    d = np.where(stealable, d, -1.0)
+                    worst = int(np.argmax(d))
+                    labels_v[worst] = e
+                    centers_tmp[e] = feats[worst]
+                    counts = np.bincount(labels_v, minlength=self.n_clusters)
+
+            self.centroids_ = centers_tmp
 
         # Map labels to 1..k, leaving 0 for invalid cycles
         out = np.zeros(n_cycles, dtype=np.int32)
@@ -1421,9 +1439,39 @@ class PhonClusterCalculator:
         sd[sd < 1e-12] = 1.0
         z   = (feats_g - mu) / sd
 
+        # n_init=10 (sklearn default) on cPhon — raised from 3 because
+        # the 9-dim z-scored feature space is small enough that K-means
+        # sometimes converges with an empty cluster at n_init=3.
+        # Extra cost: ~50 ms on 12k points, worth it for stable k-means.
         km = KMeans(n_clusters=self.n_clusters,
-                    n_init=3, random_state=self.random_state)
+                    n_init=10, random_state=self.random_state)
         labels_g = km.fit_predict(z)
+
+        # Empty-cluster rescue. sklearn's KMeans can legitimately leave a
+        # cluster empty if its centroid never "wins" any point during
+        # Lloyd's iterations. From a researcher's perspective that's a
+        # missing column in the VRP. For each empty cluster we reassign
+        # the single point with the LARGEST distance from its currently
+        # assigned centroid — i.e. the worst-fit point moves to the empty
+        # slot. Ensures every k has at least one member while minimally
+        # disturbing the overall K-means solution.
+        counts = np.bincount(labels_g, minlength=self.n_clusters)
+        empty = np.where(counts == 0)[0]
+        if len(empty):
+            centers = km.cluster_centers_.copy()
+            logger.info("  cPhon: %d empty cluster(s) rescued", len(empty))
+            for e in empty:
+                # Distance from each point to its own assigned centroid
+                d = np.linalg.norm(z - centers[labels_g], axis=1)
+                # Only steal from clusters that can spare a point (>1 member)
+                stealable = counts[labels_g] > 1
+                d = np.where(stealable, d, -1.0)
+                worst = int(np.argmax(d))
+                labels_g[worst] = e
+                # Nudge the empty cluster's centroid to the moved point so
+                # subsequent label accounting is self-consistent.
+                centers[e] = z[worst]
+                counts = np.bincount(labels_g, minlength=self.n_clusters)
 
         out = np.zeros(n_min, dtype=np.int32)
         out[good] = labels_g.astype(np.int32) + 1

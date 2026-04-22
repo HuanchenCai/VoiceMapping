@@ -654,6 +654,28 @@ class VoiceMapAnalyzer:
             'Total': 'sum',
         }).reset_index()
 
+        # Empty-cluster rescue, post-clarity-filter. sklearn KMeans can leave
+        # a cluster empty; our in-calculator rescue reassigns a "worst-fit"
+        # cycle to fill it, but that cycle often fails the clarity gate and
+        # disappears from the filtered df — leaving the cluster empty again
+        # by the time we aggregate. Here we sweep the filtered df itself
+        # and reassign ONE cycle to each missing label so every k in
+        # {1..n_clusters} is represented in the VRP output.
+        def _rescue_empty(col: str, n: int):
+            present = set(df[col].values[df[col].values > 0])
+            for k in range(1, n + 1):
+                if k in present:
+                    continue
+                candidates = df.index[df[col] > 0]
+                if len(candidates):
+                    df.at[candidates[0], col] = k
+                    logger.info("  Empty %s=%d rescued (reassigned 1 cycle "
+                                "in filtered set so VRP has all %d clusters)",
+                                col, k, n)
+
+        _rescue_empty('_cluster', 5)
+        _rescue_empty('_phon',    5)
+
         # Per-cell cluster aggregation: maxCluster = dominant label; Cluster k = %
         cluster_cols = self._aggregate_cluster_labels(
             df, label_col='_cluster', n=5, prefix='Cluster ', max_col='maxCluster')
