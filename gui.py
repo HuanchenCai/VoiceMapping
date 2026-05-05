@@ -900,6 +900,45 @@ class FonaDynApp(_TkBase):
                                          bg=PANEL, fg=MUTED, font=FONT_UI)
         self.cent_status_lbl.pack(side="left", padx=(12, 0))
 
+        # ── M2 plot toolbar — fit / annotate / save / copy ────────────────
+        plot_tb = tk.Frame(parent, bg=PANEL, height=34)
+        plot_tb.pack(side="top", fill="x", padx=8, pady=(4, 0))
+        plot_tb.pack_propagate(False)
+
+        tk.Label(plot_tb, text="绘图", bg=PANEL, fg=MUTED, font=FONT_UI
+                 ).pack(side="left")
+
+        # Fit dropdown
+        self.fit_btn = ttk.Button(plot_tb, text="拟合 ▾", style="Ghost.TButton",
+                                   command=self._open_fit_menu)
+        self.fit_btn.pack(side="left", padx=(8, 0))
+
+        # Annotation toggle
+        self.annot_btn = ttk.Button(plot_tb, text="标注", style="Ghost.TButton",
+                                     command=self._toggle_annotation_mode)
+        self.annot_btn.pack(side="left", padx=(6, 0))
+
+        # Reset overlays
+        ttk.Button(plot_tb, text="复位", style="Ghost.TButton",
+                   command=self._clear_overlays).pack(side="left", padx=(6, 0))
+
+        # Save / Copy on the right side
+        ttk.Button(plot_tb, text="复制图片", style="Ghost.TButton",
+                   command=self._copy_canvas).pack(side="right")
+        self.save_btn = ttk.Button(plot_tb, text="保存 ▾", style="Ghost.TButton",
+                                    command=self._open_save_menu)
+        self.save_btn.pack(side="right", padx=(0, 6))
+
+        # All these need a populated canvas to make sense; disable until first analysis.
+        for b in (self.fit_btn, self.annot_btn, self.save_btn):
+            b.state(["disabled"])
+
+        # Overlay state
+        from plot_overlay import OverlayManager
+        self._overlay_mgr = OverlayManager()
+        self._annot_mode_on = False
+        self._annot_canvas_cid = None    # mpl_connect id for click capture
+
         # Middle: nav_left + canvas + nav_right
         middle = tk.Frame(parent, bg=PANEL)
         middle.pack(side="top", fill="both", expand=True)
@@ -1214,6 +1253,8 @@ class FonaDynApp(_TkBase):
                 self.cent_save_btn.state(["!disabled"])
             except (AttributeError, tk.TclError):
                 pass
+            # M2 plot toolbar (拟合 / 标注 / 保存 / 复制) — 分析完才能用
+            self._enable_plot_toolbar()
             self._set_status(f"完成 · {payload['points']:,} 点", OK)
             self._append_log("META", f"✓ {payload['csv']}")
             self._refresh_metric_dropdown()
@@ -1309,6 +1350,15 @@ class FonaDynApp(_TkBase):
                 return
 
         self._showing_placeholder = False
+        # Drop overlay artists from previous metric; fig.clear() below
+        # would orphan them and the OverlayManager would lose its handles
+        # (calling .remove() later would error). Clear bookkeeping now.
+        if hasattr(self, "_overlay_mgr"):
+            self._overlay_mgr.clear()
+        # If user was in annotation mode, exit it (cursor + binding) so
+        # the next click on a fresh heatmap doesn't trigger a stale prompt.
+        if getattr(self, "_annot_mode_on", False):
+            self._toggle_annotation_mode()
         self._sync_fig_to_widget()
         self._fig.clear()
         # Voice map 白底 — 导出截图和在面板里展示同一套配色，一致且
@@ -1561,6 +1611,177 @@ class FonaDynApp(_TkBase):
         self.status_lbl.configure(text=text, fg=color)
         self.status_dot.configure(fg=color)
 
+    # ── M2 plot toolbar handlers ────────────────────────────────────────
+    def _enable_plot_toolbar(self):
+        """Called after first successful analysis."""
+        try:
+            for b in (self.fit_btn, self.annot_btn, self.save_btn):
+                b.state(["!disabled"])
+        except (AttributeError, tk.TclError):
+            pass
+
+    def _clear_overlays(self):
+        """Remove fits / annotations from the current heatmap, redraw."""
+        if hasattr(self, "_overlay_mgr"):
+            self._overlay_mgr.clear()
+            try:
+                self._canvas.draw_idle()
+            except Exception:
+                pass
+
+    def _open_fit_menu(self):
+        """Popup with fit method choices; clicking applies and draws."""
+        if self._last_df is None:
+            return
+        m = tk.Menu(self, tearoff=0,
+                    bg=PANEL_HI, fg=TEXT,
+                    activebackground=ACCENT, activeforeground=BG,
+                    font="TkMenuFont", bd=0)
+        m.add_command(label="  在图上叠加：", state="disabled",
+                      foreground=ACCENT)
+        m.add_separator()
+        m.add_command(label="  音域中心线 (linear)",
+                      command=lambda: self._apply_fit("center", "linear"))
+        m.add_command(label="  音域中心线 (polynomial deg=3)",
+                      command=lambda: self._apply_fit("center", "polynomial"))
+        m.add_command(label="  音域中心线 (spline)",
+                      command=lambda: self._apply_fit("center", "spline"))
+        m.add_command(label="  音域中心线 (lowess)",
+                      command=lambda: self._apply_fit("center", "lowess"))
+        m.add_separator()
+        m.add_command(label="  当前 metric 趋势 (twin axis, polynomial)",
+                      command=lambda: self._apply_fit("trend", "polynomial"))
+        m.add_command(label="  当前 metric 趋势 (twin axis, lowess)",
+                      command=lambda: self._apply_fit("trend", "lowess"))
+        m.add_separator()
+        m.add_command(label="  清除叠加",
+                      command=self._clear_overlays)
+        try:
+            x = self.fit_btn.winfo_rootx()
+            y = self.fit_btn.winfo_rooty() + self.fit_btn.winfo_height()
+            m.tk_popup(x, y)
+        finally:
+            m.grab_release()
+
+    def _apply_fit(self, kind: str, method: str):
+        if self._last_df is None or self._showing_placeholder:
+            return
+        from plot_overlay import fit_voice_center, fit_metric_trend
+        ax = self._fig.axes[0] if self._fig.axes else None
+        if ax is None:
+            return
+        if kind == "center":
+            artists = fit_voice_center(self._last_df, ax,
+                                        method=method, color="#ff3e88")
+        else:   # "trend"
+            col = self.metric_var.get()
+            artists = fit_metric_trend(self._last_df, col, ax,
+                                        method=method, color="#00d9ff")
+        self._overlay_mgr.add(artists)
+        self._canvas.draw_idle()
+        self._append_log("META", f"叠加 {kind}/{method}")
+
+    def _toggle_annotation_mode(self):
+        """Click toggle: next canvas click captures (x, y) and prompts text."""
+        if self._last_df is None:
+            return
+        cw = self._canvas.get_tk_widget()
+        if self._annot_mode_on:
+            # Turn off
+            try:
+                if self._annot_canvas_cid is not None:
+                    self._canvas.mpl_disconnect(self._annot_canvas_cid)
+            except Exception:
+                pass
+            self._annot_canvas_cid = None
+            self._annot_mode_on = False
+            self.annot_btn.configure(text="标注")
+            cw.configure(cursor="")
+        else:
+            # Turn on — next plot click prompts for text
+            self._annot_mode_on = True
+            self.annot_btn.configure(text="标注 ◉")
+            cw.configure(cursor="cross")
+            self._annot_canvas_cid = self._canvas.mpl_connect(
+                "button_press_event", self._on_canvas_click_for_annotation)
+
+    def _on_canvas_click_for_annotation(self, event):
+        if not self._annot_mode_on:
+            return
+        if event.xdata is None or event.ydata is None:
+            return  # outside axes
+        # Round to integer (MIDI, dB) since the heatmap is on those grids
+        x_data = float(event.xdata)
+        y_data = float(event.ydata)
+        # Prompt for text
+        from tkinter import simpledialog
+        text = simpledialog.askstring(
+            "标注", f"在 (MIDI={x_data:.1f}, SPL={y_data:.1f}) 处的标注文本：",
+            parent=self)
+        if not text:
+            return
+        from plot_overlay import add_annotation
+        ax = event.inaxes
+        artists = add_annotation(ax, x_data, y_data, text)
+        self._overlay_mgr.add(artists)
+        self._canvas.draw_idle()
+        self._append_log("META", f"标注 ({x_data:.1f}, {y_data:.1f}): {text}")
+        # One-shot: turn off mode after each annotation so cursor returns to normal
+        self._toggle_annotation_mode()
+
+    def _open_save_menu(self):
+        """Popup of formats; click → file dialog with that format."""
+        if self._last_df is None:
+            return
+        from plot_overlay import SAVE_FORMATS
+        m = tk.Menu(self, tearoff=0,
+                    bg=PANEL_HI, fg=TEXT,
+                    activebackground=ACCENT, activeforeground=BG,
+                    font="TkMenuFont", bd=0)
+        m.add_command(label="  保存当前画布为：", state="disabled",
+                      foreground=ACCENT)
+        m.add_separator()
+        for desc, ext in SAVE_FORMATS:
+            m.add_command(label=f"  {desc} (.{ext})",
+                          command=lambda e=ext, d=desc: self._save_canvas(e, d))
+        try:
+            x = self.save_btn.winfo_rootx()
+            y = self.save_btn.winfo_rooty() + self.save_btn.winfo_height()
+            m.tk_popup(x, y)
+        finally:
+            m.grab_release()
+
+    def _save_canvas(self, fmt: str, desc: str = ""):
+        col = self.metric_var.get() or "voice_map"
+        from plot_overlay import save_figure
+        from tkinter import filedialog
+        default = f"{Path(self.last_csv).stem if self.last_csv else 'voice_map'}_{col}.{fmt}"
+        path = filedialog.asksaveasfilename(
+            title=f"保存为 {desc}",
+            defaultextension=f".{fmt}",
+            filetypes=[(desc, f"*.{fmt}")],
+            initialfile=default,
+            initialdir=str(Path(self.output_dir_var.get())))
+        if not path:
+            return
+        try:
+            save_figure(self._fig, path, fmt=fmt, dpi=300)
+            self._append_log("META", f"✓ 已保存: {path}")
+        except Exception as e:  # noqa: BLE001
+            self._append_log("ERROR", f"保存失败: {e}")
+
+    def _copy_canvas(self):
+        from plot_overlay import copy_figure_to_clipboard
+        if self._last_df is None or self._showing_placeholder:
+            return
+        ok = copy_figure_to_clipboard(self._fig)
+        if ok:
+            self._append_log("META", "✓ 已复制到剪贴板")
+        else:
+            self._append_log("ERROR",
+                              "复制失败 — 检查 pywin32 (Win) 或 xclip/wl-copy (Linux)")
+
+    # ────────────────────────────────────────────────────────────────────
     def _open_compare_dialog(self):
         """A | B | A-B comparison on two previously-written VRP CSVs."""
         CompareDialog(self)
