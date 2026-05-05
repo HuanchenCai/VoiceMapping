@@ -104,6 +104,136 @@ _DEFAULT_METRIC_CHAIN = ["CPP", "Clarity", "SpecBal", "Crest"]
 
 
 # ─── 设置对话框 ──────────────────────────────────────────────────────────────
+class MetricPopup(tk.Toplevel):
+    """Scrollable metric picker, replacing tk.Menu.
+
+    Native tk.Menu doesn't respond to mouse wheel and gets unwieldy with
+    80+ items. A Toplevel + Listbox + Scrollbar gives:
+      - native mouse wheel scroll
+      - Up/Down/PageUp/PageDown keyboard nav
+      - section headers as non-selectable accent-coloured rows
+      - Esc / focus-out to dismiss
+    """
+
+    def __init__(self, app: "FonaDynApp", sections, current=None, on_select=None):
+        super().__init__(app)
+        self.app = app
+        self.on_select = on_select or (lambda _k: None)
+        self.transient(app)
+        self.overrideredirect(True)
+        self.configure(bg=PANEL_HI, bd=1, relief="solid",
+                        highlightthickness=1, highlightbackground=BORDER)
+
+        # Build flat list: [(display_text, key_or_None_for_header), ...]
+        items = []
+        for section_title, metrics in sections:
+            items.append((f"  {section_title}", None))
+            for m in metrics:
+                items.append((f"      {m}", m))
+        self._items = items
+
+        # Listbox with conservative max height; scroll for the rest.
+        max_visible = min(max(len(items), 6), 22)
+        self.lb = tk.Listbox(
+            self, height=max_visible, width=28,
+            bg=PANEL_HI, fg=TEXT,
+            selectbackground=ACCENT, selectforeground=BG,
+            activestyle="none",
+            font="TkMenuFont",
+            bd=0, highlightthickness=0,
+            exportselection=False,
+        )
+        sb = ttk.Scrollbar(self, command=self.lb.yview)
+        self.lb.configure(yscrollcommand=sb.set)
+        self.lb.pack(side="left", fill="both", expand=True, padx=(2, 0), pady=2)
+        sb.pack(side="right", fill="y", pady=2)
+
+        # Populate
+        for i, (txt, key) in enumerate(items):
+            self.lb.insert("end", txt)
+            if key is None:
+                # Header row: ACCENT colour, can't be selected (skip in handler)
+                self.lb.itemconfigure(i, foreground=ACCENT,
+                                       selectbackground=PANEL_HI,
+                                       selectforeground=ACCENT)
+
+        # Pre-select current metric if given
+        if current is not None:
+            for i, (_, key) in enumerate(items):
+                if key == current:
+                    self.lb.selection_set(i)
+                    self.lb.see(i)
+                    self.lb.activate(i)
+                    break
+
+        # Bindings
+        # Mouse wheel: Listbox handles natively but binding explicitly so
+        # the popup itself (not just the listbox) catches the event.
+        def on_wheel(e):
+            if hasattr(e, "delta") and e.delta:
+                self.lb.yview_scroll(-int(e.delta / 120), "units")
+            elif getattr(e, "num", 0) == 4:
+                self.lb.yview_scroll(-1, "units")
+            elif getattr(e, "num", 0) == 5:
+                self.lb.yview_scroll(1, "units")
+            return "break"
+        for w in (self, self.lb):
+            w.bind("<MouseWheel>", on_wheel)
+            w.bind("<Button-4>",   on_wheel)
+            w.bind("<Button-5>",   on_wheel)
+
+        # Click / Enter to commit
+        self.lb.bind("<ButtonRelease-1>", self._on_click)
+        self.lb.bind("<Return>",          self._on_click)
+        self.lb.bind("<Double-Button-1>", self._on_click)
+        # Esc / focus-out to dismiss
+        self.bind("<Escape>",  lambda _e: self.destroy())
+        self.bind("<FocusOut>", self._on_focus_out)
+
+        # Position next to the metric button
+        self.update_idletasks()
+        try:
+            x = app.metric_btn.winfo_rootx()
+            y = app.metric_btn.winfo_rooty() + app.metric_btn.winfo_height()
+            # Don't fall off screen
+            sw = self.winfo_screenwidth()
+            sh = self.winfo_screenheight()
+            ww = max(self.winfo_reqwidth(), 220)
+            wh = max(self.winfo_reqheight(), 100)
+            if x + ww > sw:
+                x = sw - ww - 8
+            if y + wh > sh:
+                y = max(0, app.metric_btn.winfo_rooty() - wh)
+            self.geometry(f"+{x}+{y}")
+        except tk.TclError:
+            pass
+
+        self.focus_force()
+        self.lb.focus_set()
+
+    def _on_click(self, _e=None):
+        sel = self.lb.curselection()
+        if not sel:
+            return
+        idx = sel[0]
+        _, key = self._items[idx]
+        if key is None:
+            # User clicked a header row — keep popup open, do nothing
+            return
+        self.on_select(key)
+        self.destroy()
+
+    def _on_focus_out(self, _e=None):
+        # The popup loses focus when user clicks elsewhere → close.
+        # Only do this if focus left the popup tree entirely.
+        try:
+            new = self.focus_get()
+        except tk.TclError:
+            new = None
+        if new is None or (new is not self and not str(new).startswith(str(self))):
+            self.destroy()
+
+
 class SettingsDialog(tk.Toplevel):
     """所有分析/输出相关的可配置项都在这里。现在只有 Clarity 阈值和输出目录，
     随着新 metric（clustering / jitter / formants 等）加进来会继续扩展。"""
@@ -672,20 +802,18 @@ class FonaDynApp(_TkBase):
         side = tk.Frame(bar, bg=BG)
         side.pack(side="right", padx=(14, 0))
         tk.Label(side, text="Metric", bg=BG, fg=MUTED, font=FONT_UI).pack(anchor="w")
-        self.metric_btn = ttk.Menubutton(side, textvariable=self.metric_var,
-                                          style="Metric.TMenubutton", width=18)
+        # 用 Button + 自定义 Toplevel popup（Listbox + Scrollbar）替代
+        # 原生 tk.Menu —— 80+ metric 时原生菜单太长且滚轮不响应。Listbox
+        # 原生支持鼠标滚轮、键盘方向键、Page Up/Down，并能显示分类节标题。
+        self.metric_btn = ttk.Button(side, textvariable=self.metric_var,
+                                      style="Metric.TMenubutton",
+                                      width=18, command=self._open_metric_popup)
         self.metric_btn.pack()
-        # 用字符串 "TkMenuFont" 引用已经 configure 过的命名字体。
-        # 传 Python 元组 ("Microsoft YaHei UI", 10) 看似能工作但实际上
-        # Tk 会为每个 Menu 创建一个匿名字体对象，加上菜单本身的默认
-        # 字体，两层字形叠加就产生视觉上的 "幻影"。
-        self.metric_menu = tk.Menu(self.metric_btn, tearoff=0,
-                                    bg=PANEL_HI, fg=TEXT,
-                                    activebackground=ACCENT, activeforeground=BG,
-                                    font="TkMenuFont", bd=0)
-        self.metric_btn["menu"] = self.metric_menu
         self.metric_btn.state(["disabled"])
-        # metric_var 的变化 = 菜单里点击 or 键盘方向键触发 → 自动重绘
+        self._metric_popup = None        # 当前弹出的 popup（单例）
+        # 保留 metric_menu 引用为 None 兼容旧代码（_refresh_metric_dropdown 用过）
+        self.metric_menu = None
+        # metric_var 的变化 = popup 选中 / 键盘 ← → 触发 → 自动重绘
         self.metric_var.trace_add("write", self._on_metric_change)
 
     def _build_left_panel(self, parent):
@@ -1118,35 +1246,17 @@ class FonaDynApp(_TkBase):
             except Exception:
                 return True
 
-        # 清空菜单
-        self.metric_menu.delete(0, "end")
-        flat = []   # 用于键盘 ← → 和 ◀ ▶ 按钮的扁平列表
-        first_section = True
+        # Build per-section availability data; popup reads this on open.
+        sections_avail = []   # [(section_title, [metric, ...]), ...]
+        flat = []              # for keyboard ← → / ◀ ▶ cycling
         for section_title, cols in _METRIC_SECTIONS:
             avail = [c for c in cols if _has_data(c)]
             if not avail:
                 continue
-            if not first_section:
-                self.metric_menu.add_separator()
-            first_section = False
-            # 节标题：不要 state="disabled"，否则 Windows 原生菜单会给
-            # 一层 emboss 的灰色底字 + 我们的 disabledforeground 叠起来
-            # 产生 "幻影"。改成可点击但 command 为 no-op 的普通 item，
-            # 通过 foreground / activebackground 全显式指定颜色，hover
-            # 时保持不高亮（activebackground 与底色相同）。
-            self.metric_menu.add_command(
-                label=f"  {section_title}",
-                foreground=ACCENT,
-                background=PANEL_HI,
-                activeforeground=ACCENT,
-                activebackground=PANEL_HI,
-                command=lambda: None)
-            for m in avail:
-                self.metric_menu.add_command(
-                    label=f"      {m}",
-                    command=lambda x=m: self.metric_var.set(x))
-                flat.append(m)
+            sections_avail.append((section_title, avail))
+            flat.extend(avail)
 
+        self._metric_sections_avail = sections_avail
         self._metric_flat = flat
 
         if not flat:
@@ -1164,6 +1274,25 @@ class FonaDynApp(_TkBase):
         col = self.metric_var.get()
         if col and self._last_df is not None and col in self._last_df.columns:
             self._render_metric(col)
+
+    # ── Metric 弹窗（替代 tk.Menu，支持鼠标滚轮 + 键盘上下） ──
+    def _open_metric_popup(self):
+        if not getattr(self, "_metric_sections_avail", None):
+            return
+        # 单例：已开则关掉重开（让用户用 Esc / 失焦关）
+        if self._metric_popup is not None:
+            try:
+                if self._metric_popup.winfo_exists():
+                    self._metric_popup.destroy()
+            except tk.TclError:
+                pass
+            self._metric_popup = None
+
+        self._metric_popup = MetricPopup(
+            self,
+            sections=self._metric_sections_avail,
+            current=self.metric_var.get(),
+            on_select=lambda k: self.metric_var.set(k))
 
     def _render_metric(self, col: str):
         if self._last_df is None or col not in self._last_df.columns:
