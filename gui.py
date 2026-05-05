@@ -173,9 +173,12 @@ class MetricPopup(tk.Toplevel):
                     self.lb.activate(i)
                     break
 
-        # Bindings
-        # Mouse wheel: Listbox handles natively but binding explicitly so
-        # the popup itself (not just the listbox) catches the event.
+        # Mouse wheel — needs to scroll OUR listbox even when the cursor
+        # is over a different widget below. Use bind_all so events
+        # anywhere are caught while the popup is open. Without bind_all,
+        # wheel events on the metric button (still under cursor right
+        # after popup open) cycle metrics in the main view instead of
+        # scrolling our list.
         def on_wheel(e):
             if hasattr(e, "delta") and e.delta:
                 self.lb.yview_scroll(-int(e.delta / 120), "units")
@@ -184,10 +187,10 @@ class MetricPopup(tk.Toplevel):
             elif getattr(e, "num", 0) == 5:
                 self.lb.yview_scroll(1, "units")
             return "break"
-        for w in (self, self.lb):
-            w.bind("<MouseWheel>", on_wheel)
-            w.bind("<Button-4>",   on_wheel)
-            w.bind("<Button-5>",   on_wheel)
+        # Save existing bind_all funcs so we can restore on destroy
+        self._prev_wheel    = self.bind_all("<MouseWheel>", on_wheel)
+        self._prev_wheel_up = self.bind_all("<Button-4>",   on_wheel)
+        self._prev_wheel_dn = self.bind_all("<Button-5>",   on_wheel)
 
         # Click / Enter to commit
         self.lb.bind("<ButtonRelease-1>", self._on_click)
@@ -266,6 +269,14 @@ class MetricPopup(tk.Toplevel):
                 self._outside_binding = None
         except (tk.TclError, Exception):
             pass
+        # Release our bind_all wheel handlers. Widget-level bindings
+        # (metric_btn / nav_left / nav_right) live in a separate binding
+        # table and are unaffected by unbind_all of the global sequence.
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            try:
+                self.unbind_all(seq)
+            except (tk.TclError, Exception):
+                pass
         try:
             super().destroy()
         except tk.TclError:
@@ -885,6 +896,10 @@ class FonaDynApp(_TkBase):
                                      command=self._export_excel)
         self.excel_btn.pack(side="left")
         self.excel_btn.state(["disabled"])
+        self.report_btn = ttk.Button(btn_row2, text="生成报告", style="Ghost.TButton",
+                                       command=self._export_report)
+        self.report_btn.pack(side="left", padx=(6, 0))
+        self.report_btn.state(["disabled"])
         ttk.Button(btn_row2, text="对比 2 段录音…", style="Ghost.TButton",
                    command=self._open_compare_dialog
                    ).pack(side="left", padx=(6, 0))
@@ -1284,6 +1299,7 @@ class FonaDynApp(_TkBase):
             self.open_csv_btn.state(["!disabled"])
             try:
                 self.excel_btn.state(["!disabled"])
+                self.report_btn.state(["!disabled"])
             except (AttributeError, tk.TclError):
                 pass
             # 有了 analyzer 就能保存 centroid
@@ -1823,6 +1839,28 @@ class FonaDynApp(_TkBase):
     def _open_compare_dialog(self):
         """A | B | A-B comparison on two previously-written VRP CSVs."""
         CompareDialog(self)
+
+    def _export_report(self):
+        """生成中文嗓音分析报告 (.md)：每项指标按临床阈值自动分级。"""
+        if self._last_df is None or self.last_csv is None:
+            self._append_log("WARNING", "还没分析过，无法生成报告")
+            return
+        default = str(Path(self.last_csv).with_suffix(".report.md"))
+        path = filedialog.asksaveasfilename(
+            title="导出嗓音分析报告",
+            defaultextension=".md",
+            filetypes=[("Markdown", "*.md"), ("Text", "*.txt")],
+            initialfile=Path(default).name,
+            initialdir=str(Path(default).parent))
+        if not path:
+            return
+        try:
+            from report import generate_report
+            audio_name = self.audio_path.name if self.audio_path else "(unknown)"
+            generate_report(self._last_df, path, audio_name=audio_name)
+            self._append_log("META", f"✓ 报告已导出：{path}")
+        except Exception as e:  # noqa: BLE001
+            self._append_log("ERROR", f"报告生成失败：{e}")
 
     def _export_excel(self):
         """一次分析完成后，可导出 .xlsx：Summary + Grouped + 每 metric 一个 heatmap sheet。"""

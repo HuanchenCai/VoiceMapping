@@ -88,6 +88,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--excel", action="store_true",
                    help="also write a .xlsx alongside the CSV: Summary + "
                         "Grouped + one heatmap pivot sheet per metric.")
+    p.add_argument("--report", action="store_true",
+                   help="also write a clinical narrative .md report next to "
+                        "the CSV. Each metric is graded against published "
+                        "thresholds with auto-observations.")
     p.add_argument("--compare", nargs=2, metavar=("CSV_A", "CSV_B"),
                    help="compare two previously-written VRP CSVs (A | B | A-B). "
                         "Exits after writing the comparison PNG; no new analysis.")
@@ -160,6 +164,16 @@ def _run_one(args, config, logger, audio_path: str, save_centroids_once: bool = 
             logger.info("Excel saved: %s", xlsx_path)
         except Exception as e:  # noqa: BLE001
             logger.error("Excel export failed: %s", e)
+
+    if args.report:
+        from report import generate_report
+        rpt_path = os.path.splitext(out_csv)[0] + ".report.md"
+        try:
+            generate_report(grouped, rpt_path,
+                            audio_name=os.path.basename(audio_path))
+            logger.info("Report saved: %s", rpt_path)
+        except Exception as e:  # noqa: BLE001
+            logger.error("Report export failed: %s", e)
 
     if save_centroids_once and args.save_centroids:
         try:
