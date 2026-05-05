@@ -426,7 +426,15 @@ class VoiceMapAnalyzer:
     # ------------------------------------------------------------------
     def calculate_all_metrics(self, voice_signal, egg_signal,
                                cycle_triggers,
-                               progress_cb=None) -> Dict[str, np.ndarray]:
+                               progress_cb=None,
+                               partial_cb=None) -> Dict[str, np.ndarray]:
+        """
+        progress_cb(step, total, label) — per-stage progress.
+        partial_cb(metrics_phase_a)     — fires after the first 4 stages
+                  (DFT + SPL/Clarity/CPP + SpecBal/Crest + Qcontact/Entropy/HRFegg).
+                  Lets the GUI show a first-pass heatmap before the slow
+                  metrics (cluster, MFCC, formants) finish.
+        """
         logger.info("Calculating all metrics...")
 
         # _step reports progress against the absolute stage index from
@@ -462,6 +470,24 @@ class VoiceMapAnalyzer:
         qcontact_values, deggmax_v, ic_v     = self.qcontact_calculator.calculate(egg_signal, cycle_triggers)
         entropy_values                       = self.entropy_calculator.calculate(egg_signal, cycle_triggers, dft=_dft)
         hrf_values                           = self.hrf_calculator.calculate(egg_signal, cycle_triggers, dft=_dft)
+
+        # ── Phase A complete — fire partial_cb so the GUI can render a
+        # first-pass voice map with these 11 quick metrics while we
+        # continue with the slow stuff (cluster K-means, formants, MFCC).
+        if partial_cb is not None:
+            partial_cb({
+                'midi':     midi_values,
+                'spl':      spl_values,
+                'clarity':  clarity_values,
+                'cpp':      cpp_values,
+                'specbal':  specbal_values,
+                'crest':    crest_values,
+                'qcontact': qcontact_values,
+                'deggmax':  deggmax_v,
+                'icontact': ic_v,
+                'entropy':  entropy_values,
+                'hrf':      hrf_values,
+            })
 
         _step(8)   # "EGG 波形聚类"
         cluster_values                       = self.cluster_calculator.calculate(egg_signal, cycle_triggers, dft=_dft)
@@ -628,7 +654,8 @@ class VoiceMapAnalyzer:
     def output_vrp_csv(self, metrics: Dict[str, np.ndarray],
                         return_df: bool = False,
                         plot_mode: str = "per-metric",
-                        export_plots: Optional[bool] = None):
+                        export_plots: Optional[bool] = None,
+                        write_disk: bool = True):
         """
         plot_mode:
           "none"       — skip PNG export (fastest; GUI embeds in-memory)
@@ -838,10 +865,14 @@ class VoiceMapAnalyzer:
             grouped[col] = grouped[col].fillna(0)
         grouped = grouped[standard_columns]
 
-        os.makedirs(self.config.output_dir, exist_ok=True)
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        out_file = f"{self.config.output_dir}/complete_vrp_results_{ts}_VRP.csv"
-        grouped.to_csv(out_file, index=False, sep=';')
+        if write_disk:
+            os.makedirs(self.config.output_dir, exist_ok=True)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            out_file = f"{self.config.output_dir}/complete_vrp_results_{ts}_VRP.csv"
+            grouped.to_csv(out_file, index=False, sep=';')
+            logger.info("Saved: %s", out_file)
+        else:
+            out_file = ""   # no disk write — caller is doing a partial render
 
         logger.info("=== VRP Statistics ===")
         logger.info("Unique (MIDI,dB) pairs: %d  Total cycles: %d",
@@ -849,13 +880,14 @@ class VoiceMapAnalyzer:
         logger.info("MIDI %.1f  SPL %.1f dB  Clarity %.3f",
                          grouped['MIDI'].mean(), grouped['dB'].mean(),
                          grouped['Clarity'].mean())
-        logger.info("Saved: %s", out_file)
 
         # --- Generate VRP map images ---
         # 22 PNGs at dpi=150 via savefig cost ~0.4s each → dominates wall time.
         # Caller picks the trade-off: none / per-metric / combined overview.
-        if plot_mode == "none":
-            logger.info("Skipping PNG export (plot_mode=none)")
+        # Skip entirely if no disk write requested (partial render path).
+        if not write_disk or plot_mode == "none":
+            if plot_mode == "none":
+                logger.info("Skipping PNG export (plot_mode=none)")
         else:
             plot_dir = os.path.join(self.config.output_dir, "plots")
             ts_base  = os.path.splitext(os.path.basename(out_file))[0]
@@ -918,10 +950,15 @@ class VoiceMapAnalyzer:
                                 return_df: bool = False,
                                 plot_mode: str = "per-metric",
                                 export_plots: Optional[bool] = None,
-                                progress_cb=None):
+                                progress_cb=None,
+                                partial_cb=None):
         """
-        progress_cb(step:int, total:int, label:str) — called at each
-        pipeline stage. step is 1-based, total == TOTAL_STAGES.
+        progress_cb(step, total, label) — called at each pipeline stage.
+        partial_cb(grouped_df)          — fires after the first-pass
+                                          metrics finish (~half the total
+                                          time on numba-warm). Lets a GUI
+                                          render the first heatmap before
+                                          the slow metrics complete.
         """
         logger.info("=" * 60)
         logger.info("VoiceMap Complete Analysis")
@@ -949,9 +986,25 @@ class VoiceMapAnalyzer:
         cycle_count = int(np.sum(cycle_triggers > 0.5))
         logger.info("Detected cycles: %d", cycle_count)
 
-        # calculate_all_metrics handles stages 4–15 internally.
+        # Wrap user's partial_cb so it gets a grouped DataFrame instead of
+        # the raw per-cycle metrics dict — way more useful for rendering.
+        def _partial_to_grouped(partial_metrics):
+            if partial_cb is None:
+                return
+            try:
+                filt = self.apply_clarity_filtering(partial_metrics)
+                _, partial_grouped = self.output_vrp_csv(
+                    filt, return_df=True,
+                    plot_mode="none", write_disk=False)
+                partial_cb(partial_grouped)
+            except Exception:
+                logger.exception("partial_cb failed (non-fatal)")
+
+        # calculate_all_metrics handles stages 4–21 internally.
         metrics = self.calculate_all_metrics(
-            voice_p, egg_p, cycle_triggers, progress_cb=progress_cb)
+            voice_p, egg_p, cycle_triggers,
+            progress_cb=progress_cb,
+            partial_cb=_partial_to_grouped if partial_cb else None)
 
         filtered_metrics = self.apply_clarity_filtering(metrics)
 

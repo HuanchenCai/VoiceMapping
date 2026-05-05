@@ -1266,9 +1266,15 @@ class FonaDynApp(_TkBase):
                 def prog(step, total, label):
                     self._msg_q.put(("progress", step, total, label))
 
+                def partial(partial_grouped):
+                    # Fires roughly halfway — analyzer hands us a partial
+                    # grouped DataFrame (just the fast metrics filled,
+                    # rest are zero). Main thread renders early heatmap.
+                    self._msg_q.put(("partial", partial_grouped))
+
                 data, out_file, grouped = analyzer.analyze_and_output_vrp(
                     audio, return_df=True, plot_mode=plot_mode_snap,
-                    progress_cb=prog)
+                    progress_cb=prog, partial_cb=partial)
                 self._msg_q.put(("done", True, {
                     "df": grouped,
                     "csv": out_file,
@@ -1280,6 +1286,15 @@ class FonaDynApp(_TkBase):
 
         self._worker = threading.Thread(target=work, daemon=True)
         self._worker.start()
+
+    def _on_partial_ready(self, partial_df):
+        """Phase A done — show first heatmap with fast metrics. Phase B
+        is still running on the worker thread; full df arrives via 'done'."""
+        self._last_df = partial_df
+        # Refresh dropdown sections to whatever's non-zero in the partial set
+        self._refresh_metric_dropdown()
+        self._append_log("META",
+                          "✓ 第一组指标完成，先出图，剩余指标后台继续…")
 
     def _on_worker_done(self, ok: bool, payload: dict):
         self.progress.stop()
@@ -1465,6 +1480,9 @@ class FonaDynApp(_TkBase):
                             self._progress_dialog.set_progress(step, total, label)
                         except Exception:
                             pass
+                elif kind == "partial":
+                    (partial_df,) = rest
+                    self._on_partial_ready(partial_df)
                 elif kind == "done":
                     ok, payload = rest
                     self._on_worker_done(ok, payload)

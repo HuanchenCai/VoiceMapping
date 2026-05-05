@@ -1275,43 +1275,59 @@ class FormantExtrasCalculator(MetricCalculator):
             except np.linalg.LinAlgError:
                 pass
 
-        # Per-frame root finding → B1/B2/B3
+        # ── Bandwidths from LPC spectrum -3 dB width (fast) ──────────────
+        # Original implementation used np.roots in a Python loop (27 s on
+        # 3 k frames) and the batched eigvals replacement turned out to
+        # also be serial under the hood (LAPACK dispatches per-batch).
+        # Switching to LPC-spectrum peak picking + -3 dB FWHM matches the
+        # speed of the existing FormantCalculator (~3 s) and is the same
+        # method most clinical tools (Praat alternative track) use anyway.
+        from scipy.signal import find_peaks
+        nfft_sp  = 1024
+        A_sp     = np.fft.rfft(lpc, nfft_sp, axis=1)
+        H        = 1.0 / np.maximum(np.abs(A_sp), 1e-12)
+        log_H    = 20.0 * np.log10(np.maximum(H, 1e-12))
+        freqs_sp = np.fft.rfftfreq(nfft_sp, 1.0 / sr)
+        band_m   = (freqs_sp >= 90.0) & (freqs_sp <= 5500.0)
+        freqs_band = freqs_sp[band_m]
+        # Min peak distance in bins ~ 150 Hz
+        min_gap = max(1, int(150.0 / (sr / nfft_sp)))
+
         b1 = np.zeros(n_frames)
         b2 = np.zeros(n_frames)
         b3 = np.zeros(n_frames)
         f_disp = np.zeros(n_frames)
+
         for i in range(n_frames):
             if not valid[i]:
                 continue
-            try:
-                roots = np.roots(lpc[i])
-            except np.linalg.LinAlgError:
+            spec_db = log_H[i, band_m]
+            pk, _ = find_peaks(spec_db, distance=min_gap)
+            if len(pk) == 0:
                 continue
-            # Keep complex roots in the upper half (positive imaginary)
-            roots = roots[np.imag(roots) > 0.01]
-            if len(roots) == 0:
+            pf = freqs_band[pk]
+            keep = pf >= 200.0   # F1 floor (skip pitch artefacts)
+            pk, pf = pk[keep], pf[keep]
+            if len(pk) == 0:
                 continue
-            # Frequencies + bandwidths
-            angles = np.angle(roots)
-            fs     = angles * sr / (2.0 * np.pi)
-            bws    = -np.log(np.maximum(np.abs(roots), 1e-12)) * sr / np.pi
-            # Filter to plausible formant range and bandwidth < 600 Hz
-            keep = (fs >= 90) & (fs <= 5500) & (bws < 600.0) & (bws > 0)
-            fs, bws = fs[keep], bws[keep]
-            if len(fs) == 0:
-                continue
-            order_idx = np.argsort(fs)
-            fs, bws = fs[order_idx], bws[order_idx]
-            # F1 floor 200 Hz to skip pitch artefacts
-            keep2 = fs >= 200.0
-            fs, bws = fs[keep2], bws[keep2]
-            if len(fs) == 0:
-                continue
+            bws = np.empty(len(pk))
+            for j, p in enumerate(pk):
+                peak_db = spec_db[p]
+                thr     = peak_db - 3.0
+                # Walk left to first sample below thr
+                lo = p
+                while lo > 0 and spec_db[lo] > thr:
+                    lo -= 1
+                hi = p
+                while hi < len(spec_db) - 1 and spec_db[hi] > thr:
+                    hi += 1
+                bws[j] = freqs_band[hi] - freqs_band[lo]
+            # pf already ascending from find_peaks
             if len(bws) >= 1: b1[i] = bws[0]
             if len(bws) >= 2: b2[i] = bws[1]
             if len(bws) >= 3: b3[i] = bws[2]
-            if len(fs) >= 3:
-                f_disp[i] = (fs[2] - fs[0]) / 2.0
+            if len(pf) >= 3:
+                f_disp[i] = (pf[2] - pf[0]) / 2.0
 
         # SPR (singing power ratio): hi-band / lo-band (dB)
         nfft_sp = 2048
