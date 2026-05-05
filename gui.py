@@ -859,6 +859,10 @@ class FonaDynApp(_TkBase):
                                       width=18, command=self._open_metric_popup)
         self.metric_btn.pack()
         self.metric_btn.state(["disabled"])
+        # Belt-and-suspenders: also bind explicit <Button-1> in case the
+        # ttk.Button command-on-style misfires under the custom Menubutton
+        # style. Cheap to have both.
+        self.metric_btn.bind("<Button-1>", self._on_metric_btn_click, add="+")
         self._metric_popup = None        # 当前弹出的 popup（单例）
         # 保留 metric_menu 引用为 None 兼容旧代码（_refresh_metric_dropdown 用过）
         self.metric_menu = None
@@ -1066,9 +1070,9 @@ class FonaDynApp(_TkBase):
         self.bind("<Key-Left>",  on_key)
         self.bind("<Key-Right>", on_key)
 
-        # 鼠标滚轮在 Metric 按钮上循环切换 metric。
-        # Windows/macOS 用 <MouseWheel> (event.delta ±120),
-        # Linux X11 用 <Button-4> / <Button-5>。
+        # 鼠标滚轮在画布两侧的 nav 条上 = 切换 metric（与 ◀ ▶ 等价）。
+        # **不要**在 metric 按钮上绑定滚轮 —— 按钮的功能是"点开列表"，
+        # 滚轮在按钮上不应该改 metric，以免混淆"按钮就是切换器"的预期。
         def on_wheel(event):
             delta = 0
             if getattr(event, "num", 0) == 4:      delta = -1
@@ -1078,7 +1082,7 @@ class FonaDynApp(_TkBase):
             if delta:
                 self._cycle_metric(delta)
             return "break"
-        for target in (self.metric_btn, self.nav_left, self.nav_right):
+        for target in (self.nav_left, self.nav_right):
             target.bind("<MouseWheel>", on_wheel)
             target.bind("<Button-4>",  on_wheel)
             target.bind("<Button-5>",  on_wheel)
@@ -1384,6 +1388,18 @@ class FonaDynApp(_TkBase):
         col = self.metric_var.get()
         if col and self._last_df is not None and col in self._last_df.columns:
             self._render_metric(col)
+
+    def _on_metric_btn_click(self, _event=None):
+        """Explicit click handler so the popup opens reliably even if the
+        ttk.Button + custom Menubutton style swallows the `command=` callback."""
+        # Don't fire when button is disabled (no analysis yet).
+        try:
+            if "disabled" in self.metric_btn.state():
+                return
+        except Exception:
+            pass
+        self._open_metric_popup()
+        return "break"
 
     # ── Metric 弹窗（替代 tk.Menu，支持鼠标滚轮 + 键盘上下） ──
     def _open_metric_popup(self):
