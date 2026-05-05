@@ -119,7 +119,14 @@ class MetricPopup(tk.Toplevel):
         super().__init__(app)
         self.app = app
         self.on_select = on_select or (lambda _k: None)
+        self._closing = False
+        self._outside_binding = None
         self.transient(app)
+        # Borderless via overrideredirect — but that combined with eager
+        # FocusOut on some Windows versions makes the popup vanish before
+        # the user sees it. We keep overrideredirect for the look but
+        # detect "click outside" via a root-level ButtonPress binding
+        # (set up after 100 ms so the popup has time to appear).
         self.overrideredirect(True)
         self.configure(bg=PANEL_HI, bd=1, relief="solid",
                         highlightthickness=1, highlightbackground=BORDER)
@@ -186,9 +193,13 @@ class MetricPopup(tk.Toplevel):
         self.lb.bind("<ButtonRelease-1>", self._on_click)
         self.lb.bind("<Return>",          self._on_click)
         self.lb.bind("<Double-Button-1>", self._on_click)
-        # Esc / focus-out to dismiss
+        # Esc dismisses immediately
         self.bind("<Escape>",  lambda _e: self.destroy())
-        self.bind("<FocusOut>", self._on_focus_out)
+        # Outside-click dismiss: bind on root after a grace period so the
+        # initial focus dance doesn't immediately close us. Don't use
+        # FocusOut — Windows fires it during overrideredirect's first
+        # mapping and the popup self-destructs before user sees it.
+        self.after(150, self._install_outside_click)
 
         # Position next to the metric button
         self.update_idletasks()
@@ -223,15 +234,42 @@ class MetricPopup(tk.Toplevel):
         self.on_select(key)
         self.destroy()
 
-    def _on_focus_out(self, _e=None):
-        # The popup loses focus when user clicks elsewhere → close.
-        # Only do this if focus left the popup tree entirely.
+    def _install_outside_click(self):
+        if self._closing or not self.winfo_exists():
+            return
         try:
-            new = self.focus_get()
+            self._outside_binding = self.app.bind(
+                "<ButtonPress>", self._on_root_click, add="+")
         except tk.TclError:
-            new = None
-        if new is None or (new is not self and not str(new).startswith(str(self))):
-            self.destroy()
+            pass
+
+    def _on_root_click(self, event):
+        if self._closing:
+            return
+        # Walk up event.widget's master chain. If it reaches `self`, the
+        # click was inside the popup → keep it open. Otherwise close.
+        w = event.widget
+        while w is not None:
+            if w is self:
+                return
+            try:
+                w = w.master
+            except Exception:
+                break
+        self.destroy()
+
+    def destroy(self):
+        self._closing = True
+        try:
+            if self._outside_binding is not None:
+                self.app.unbind("<ButtonPress>", self._outside_binding)
+                self._outside_binding = None
+        except (tk.TclError, Exception):
+            pass
+        try:
+            super().destroy()
+        except tk.TclError:
+            pass
 
 
 class SettingsDialog(tk.Toplevel):
