@@ -121,12 +121,21 @@ class MetricPopup(tk.Toplevel):
         self.on_select = on_select or (lambda _k: None)
         self._closing = False
         self._outside_binding = None
+        # Hide immediately so the user never sees the popup at its
+        # default (0, 0) position before we move it. deiconify() at the
+        # end after geometry is set.
+        self.withdraw()
         self.transient(app)
         # Borderless via overrideredirect — but that combined with eager
         # FocusOut on some Windows versions makes the popup vanish before
         # the user sees it. We keep overrideredirect for the look but
         # detect "click outside" via a root-level ButtonPress binding
         # (set up after 100 ms so the popup has time to appear).
+        # IMPORTANT: overrideredirect must be set BEFORE we move the
+        # window into position on a non-primary monitor — but on Windows
+        # the WM ignores subsequent geometry() calls on a borderless
+        # window that has already been mapped. We solve this by keeping
+        # the window withdrawn until geometry is final, then deiconify.
         self.overrideredirect(True)
         self.configure(bg=PANEL_HI, bd=1, relief="solid",
                         highlightthickness=1, highlightbackground=BORDER)
@@ -205,20 +214,68 @@ class MetricPopup(tk.Toplevel):
         self.after(150, self._install_outside_click)
 
         # Position next to the metric button
-        self.update_idletasks()
+        # update_idletasks BOTH on the popup (for own size) AND on the
+        # button's toplevel (so winfo_rootx/y on the button is current —
+        # without this, on first popup creation winfo_rootx can return 0
+        # because Windows hasn't laid out the parent geometry yet).
         try:
-            x = app.metric_btn.winfo_rootx()
-            y = app.metric_btn.winfo_rooty() + app.metric_btn.winfo_height()
-            # Don't fall off screen
+            app.update_idletasks()
+        except tk.TclError:
+            pass
+        self.update_idletasks()
+        # Width/height: the popup gets a default 1x1 from the WM until
+        # explicitly sized. Compute from reqwidth/reqheight so we get the
+        # natural list size, NOT whatever stale value winfo_geometry has.
+        try:
+            ww = max(self.winfo_reqwidth(), 240)
+            wh = max(self.winfo_reqheight(), 200)
+            bx = app.metric_btn.winfo_rootx()
+            by = app.metric_btn.winfo_rooty()
+            bh = app.metric_btn.winfo_height()
             sw = self.winfo_screenwidth()
             sh = self.winfo_screenheight()
-            ww = max(self.winfo_reqwidth(), 220)
-            wh = max(self.winfo_reqheight(), 100)
+            x = bx
+            y = by + bh
+            # Right-edge clamp (popup wider than what fits to the right).
             if x + ww > sw:
-                x = sw - ww - 8
+                x = max(0, sw - ww - 8)
+            # Bottom-edge: flip above the button if no room below.
             if y + wh > sh:
-                y = max(0, app.metric_btn.winfo_rooty() - wh)
-            self.geometry(f"+{x}+{y}")
+                y = max(0, by - wh)
+            # Sanity: if button rootx/y came back zeroed (rare race on
+            # Windows when popup is created before button is mapped),
+            # fall back to centring on the parent toplevel rather than
+            # silently landing at (0, 0) under the main window.
+            if bx <= 0 and by <= 0:
+                pw = app.winfo_width()
+                ph = app.winfo_height()
+                ax = app.winfo_rootx()
+                ay = app.winfo_rooty()
+                x = ax + max(0, (pw - ww) // 2)
+                y = ay + 80
+            import sys as _sys
+            print(f"[METRIC POPUP] geom — btn=({bx},{by}) bh={bh} "
+                  f"req=({ww}x{wh}) → set=+{x}+{y}",
+                  file=_sys.stderr, flush=True)
+            self.geometry(f"{ww}x{wh}+{x}+{y}")
+        except tk.TclError as e:
+            import sys as _sys
+            print(f"[METRIC POPUP] geom EXC: {e}",
+                  file=_sys.stderr, flush=True)
+
+        # Now show the popup (was withdrawn at the top of __init__ to
+        # hide the (0, 0) flash before geometry was set). Force to front
+        # — on Windows, borderless toplevels can spawn under the parent.
+        try:
+            self.deiconify()
+            self.lift()
+            self.attributes("-topmost", True)
+            # Drop topmost after a beat so we don't permanently float
+            # above all other apps when the user Alt-Tabs away.
+            self.after(200, lambda: self.attributes("-topmost", False))
+            import sys as _sys
+            print(f"[METRIC POPUP] post-deiconify geom: {self.winfo_geometry()}",
+                  file=_sys.stderr, flush=True)
         except tk.TclError:
             pass
 
@@ -669,6 +726,7 @@ class FonaDynApp(_TkBase):
         self.option_add("*Menu.activeForeground", BG)
 
         self._init_style()
+        self._build_menubar()
         self._build_ui()
         self._init_logging()
         self._register_dnd()
@@ -812,6 +870,52 @@ class FonaDynApp(_TkBase):
         self._build_left_panel(self.left)
         self._build_right_panel(self.right)
 
+    def _build_menubar(self):
+        """Praat 风格顶部菜单栏：每个 metric 分类一个顶级菜单。
+        点击 metric 直接 set metric_var → trace 触发重绘。
+        分析未完成或某 metric 全零时，对应项 disable。"""
+        mb = tk.Menu(self, tearoff=0,
+                     bg=PANEL_HI, fg=TEXT,
+                     activebackground=ACCENT, activeforeground=BG,
+                     borderwidth=0)
+
+        # 文件菜单：常用入口（Open / 设置 / Quit）
+        m_file = tk.Menu(mb, tearoff=0,
+                          bg=PANEL_HI, fg=TEXT,
+                          activebackground=ACCENT, activeforeground=BG,
+                          borderwidth=0)
+        m_file.add_command(label="打开 WAV...", command=self._pick_audio)
+        m_file.add_command(label="打开输出目录", command=self._open_output_dir)
+        m_file.add_separator()
+        m_file.add_command(label="设置...", command=self._open_settings)
+        m_file.add_separator()
+        m_file.add_command(label="退出", command=self.destroy)
+        mb.add_cascade(label="文件", menu=m_file)
+
+        # 每个 metric 分类一个顶级菜单
+        # metric_section_menus: section_title -> (Menu, [(label, end_index), ...])
+        # 用来 _refresh_metric_dropdown 时按 section 启用/禁用单个 item。
+        self._metric_section_menus = {}
+        for section_title, metrics in _METRIC_SECTIONS:
+            m = tk.Menu(mb, tearoff=0,
+                        bg=PANEL_HI, fg=TEXT,
+                        activebackground=ACCENT, activeforeground=BG,
+                        selectcolor=ACCENT, borderwidth=0)
+            entries = []   # [(metric_name, item_index), ...]
+            for name in metrics:
+                m.add_radiobutton(label=name,
+                                   variable=self.metric_var,
+                                   value=name)
+                entries.append((name, m.index("end")))
+                # 默认全部 disable，等分析完后 _refresh_metric_dropdown 启用可用的
+                m.entryconfig(m.index("end"), state="disabled")
+            mb.add_cascade(label=section_title.split(" · ", 1)[-1],
+                           menu=m)
+            self._metric_section_menus[section_title] = (m, entries)
+
+        self.config(menu=mb)
+        self._menubar = mb
+
     def _build_header(self, parent):
         head = tk.Frame(parent, bg=BG)
         head.pack(fill="x", pady=(0, 8))
@@ -851,31 +955,19 @@ class FonaDynApp(_TkBase):
         side = tk.Frame(bar, bg=BG)
         side.pack(side="right", padx=(14, 0))
         tk.Label(side, text="Metric", bg=BG, fg=MUTED, font=FONT_UI).pack(anchor="w")
-        # 用 tk.Button + 自定义 Toplevel popup（Listbox + Scrollbar）替代
-        # 原生 tk.Menu —— 80+ metric 时原生菜单太长且滚轮不响应。Listbox
-        # 原生支持鼠标滚轮、键盘方向键、Page Up/Down，并能显示分类节标题。
-        # **必须用 tk.Button 而不是 ttk.Button**：ttk.Button + 自定义
-        # Menubutton 样式（之前的 hack）会让 ttk 把 Menubutton.indicator
-        # 元素塞进 Button 的 layout，事件分发被搅乱，command= 和
-        # <Button-1> 都打不到回调，按钮按下去毫无反应。
-        self.metric_btn = tk.Button(side, textvariable=self.metric_var,
+        # 当前 metric 的展示标签（不再可点开 popup —— 选 metric 走顶部菜单栏，
+        # Praat 风格：每个分类一个顶级 cascade）。保留 widget 名 metric_btn 是
+        # 为了让其它地方（_refresh_metric_dropdown / _cycle_metric / 旧代码）
+        # 不用大改。它现在就是一个 disabled-look label。
+        self.metric_btn = tk.Label(side, textvariable=self.metric_var,
                                     bg=PANEL_HI, fg=TEXT,
-                                    activebackground=BORDER, activeforeground=TEXT,
                                     disabledforeground=MUTED,
-                                    font=FONT_UI, bd=0, relief="flat",
-                                    padx=10, pady=4, width=18,
-                                    cursor="hand2",
-                                    command=self._open_metric_popup)
+                                    font=FONT_UI,
+                                    width=18, padx=10, pady=4,
+                                    relief="flat", anchor="w")
         self.metric_btn.pack()
         self.metric_btn.config(state="disabled")
-        # Belt-and-suspenders: also bind <Button-1>. tk.Button's command=
-        # is reliable, but a previous iteration of this code (ttk.Button
-        # styled as Menubutton) silently dropped clicks — keep the
-        # explicit binding so any future regression of that flavour
-        # still gets the popup open.
-        self.metric_btn.bind("<Button-1>", self._on_metric_btn_click, add="+")
-        self._metric_popup = None        # 当前弹出的 popup（单例）
-        # 保留 metric_menu 引用为 None 兼容旧代码（_refresh_metric_dropdown 用过）
+        self._metric_popup = None
         self.metric_menu = None
         # metric_var 的变化 = popup 选中 / 键盘 ← → 触发 → 自动重绘
         self.metric_var.trace_add("write", self._on_metric_change)
@@ -1371,7 +1463,7 @@ class FonaDynApp(_TkBase):
             except Exception:
                 return True
 
-        # Build per-section availability data; popup reads this on open.
+        # Build per-section availability data
         sections_avail = []   # [(section_title, [metric, ...]), ...]
         flat = []              # for keyboard ← → / ◀ ▶ cycling
         for section_title, cols in _METRIC_SECTIONS:
@@ -1383,6 +1475,18 @@ class FonaDynApp(_TkBase):
 
         self._metric_sections_avail = sections_avail
         self._metric_flat = flat
+
+        # 同步 menubar：每个 section 内逐项设 normal / disabled
+        if hasattr(self, "_metric_section_menus"):
+            for section_title, (menu, entries) in self._metric_section_menus.items():
+                avail_set = set()
+                for st, cols in sections_avail:
+                    if st == section_title:
+                        avail_set = set(cols)
+                        break
+                for name, idx in entries:
+                    menu.entryconfig(
+                        idx, state=("normal" if name in avail_set else "disabled"))
 
         if not flat:
             self.metric_btn.config(state="disabled")
@@ -1400,35 +1504,8 @@ class FonaDynApp(_TkBase):
         if col and self._last_df is not None and col in self._last_df.columns:
             self._render_metric(col)
 
-    def _on_metric_btn_click(self, _event=None):
-        """Explicit click handler — kept as a fallback in case the
-        Button's command= callback misfires for any reason."""
-        try:
-            if str(self.metric_btn.cget("state")) == "disabled":
-                return
-        except Exception:
-            pass
-        self._open_metric_popup()
-        return "break"
-
-    # ── Metric 弹窗（替代 tk.Menu，支持鼠标滚轮 + 键盘上下） ──
-    def _open_metric_popup(self):
-        if not getattr(self, "_metric_sections_avail", None):
-            return
-        # 单例：已开则关掉重开（让用户用 Esc / 失焦关）
-        if self._metric_popup is not None:
-            try:
-                if self._metric_popup.winfo_exists():
-                    self._metric_popup.destroy()
-            except tk.TclError:
-                pass
-            self._metric_popup = None
-
-        self._metric_popup = MetricPopup(
-            self,
-            sections=self._metric_sections_avail,
-            current=self.metric_var.get(),
-            on_select=lambda k: self.metric_var.set(k))
+    # 旧的 popup 入口已下线（改用顶部菜单栏）。保留方法名空操作，避免
+    # 万一某个旧代码路径还在调它就抛 AttributeError。
 
     def _render_metric(self, col: str):
         if self._last_df is None or col not in self._last_df.columns:
