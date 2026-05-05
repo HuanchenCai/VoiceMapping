@@ -851,17 +851,28 @@ class FonaDynApp(_TkBase):
         side = tk.Frame(bar, bg=BG)
         side.pack(side="right", padx=(14, 0))
         tk.Label(side, text="Metric", bg=BG, fg=MUTED, font=FONT_UI).pack(anchor="w")
-        # 用 Button + 自定义 Toplevel popup（Listbox + Scrollbar）替代
+        # 用 tk.Button + 自定义 Toplevel popup（Listbox + Scrollbar）替代
         # 原生 tk.Menu —— 80+ metric 时原生菜单太长且滚轮不响应。Listbox
         # 原生支持鼠标滚轮、键盘方向键、Page Up/Down，并能显示分类节标题。
-        self.metric_btn = ttk.Button(side, textvariable=self.metric_var,
-                                      style="Metric.TMenubutton",
-                                      width=18, command=self._open_metric_popup)
+        # **必须用 tk.Button 而不是 ttk.Button**：ttk.Button + 自定义
+        # Menubutton 样式（之前的 hack）会让 ttk 把 Menubutton.indicator
+        # 元素塞进 Button 的 layout，事件分发被搅乱，command= 和
+        # <Button-1> 都打不到回调，按钮按下去毫无反应。
+        self.metric_btn = tk.Button(side, textvariable=self.metric_var,
+                                    bg=PANEL_HI, fg=TEXT,
+                                    activebackground=BORDER, activeforeground=TEXT,
+                                    disabledforeground=MUTED,
+                                    font=FONT_UI, bd=0, relief="flat",
+                                    padx=10, pady=4, width=18,
+                                    cursor="hand2",
+                                    command=self._open_metric_popup)
         self.metric_btn.pack()
-        self.metric_btn.state(["disabled"])
-        # Belt-and-suspenders: also bind explicit <Button-1> in case the
-        # ttk.Button command-on-style misfires under the custom Menubutton
-        # style. Cheap to have both.
+        self.metric_btn.config(state="disabled")
+        # Belt-and-suspenders: also bind <Button-1>. tk.Button's command=
+        # is reliable, but a previous iteration of this code (ttk.Button
+        # styled as Menubutton) silently dropped clicks — keep the
+        # explicit binding so any future regression of that flavour
+        # still gets the popup open.
         self.metric_btn.bind("<Button-1>", self._on_metric_btn_click, add="+")
         self._metric_popup = None        # 当前弹出的 popup（单例）
         # 保留 metric_menu 引用为 None 兼容旧代码（_refresh_metric_dropdown 用过）
@@ -1223,7 +1234,7 @@ class FonaDynApp(_TkBase):
         self.drop_label.configure(text=p.name, fg=ACCENT)
         self.drop_sub.configure(text=str(p.parent))
 
-        self.metric_btn.state(["disabled"])
+        self.metric_btn.config(state="disabled")
         self.open_csv_btn.state(["disabled"])
         self.progress.start(12)
         self._set_status("分析中…", ACCENT)
@@ -1374,12 +1385,12 @@ class FonaDynApp(_TkBase):
         self._metric_flat = flat
 
         if not flat:
-            self.metric_btn.state(["disabled"])
+            self.metric_btn.config(state="disabled")
             self._set_nav_visible(False)
             self._show_placeholder("无可用 metric")
             return
 
-        self.metric_btn.state(["!disabled"])
+        self.metric_btn.config(state="normal")
         self._set_nav_visible(len(flat) > 1)
         default = next((m for m in _DEFAULT_METRIC_CHAIN if m in flat), flat[0])
         self.metric_var.set(default)   # trace → _on_metric_change → _render
@@ -1390,11 +1401,10 @@ class FonaDynApp(_TkBase):
             self._render_metric(col)
 
     def _on_metric_btn_click(self, _event=None):
-        """Explicit click handler so the popup opens reliably even if the
-        ttk.Button + custom Menubutton style swallows the `command=` callback."""
-        # Don't fire when button is disabled (no analysis yet).
+        """Explicit click handler — kept as a fallback in case the
+        Button's command= callback misfires for any reason."""
         try:
-            if "disabled" in self.metric_btn.state():
+            if str(self.metric_btn.cget("state")) == "disabled":
                 return
         except Exception:
             pass
