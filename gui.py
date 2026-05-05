@@ -1510,9 +1510,10 @@ class FonaDynApp(_TkBase):
             self._render_metric(col)
 
     def _popup_metric_menu(self):
-        """点 metric 按钮 → 弹下拉菜单（最朴素的 tk_popup 用法）。
-        每个分类一段，前面一个 disabled 标签当节标题（— Acoustic —），
-        然后是 radiobutton 项目。无可用 metric 直接不弹。"""
+        """点 metric 按钮 → 弹下拉菜单。
+        tk.Menu 本身不支持鼠标滚轮，所以把所有 metric 一坨平铺会显得很长
+        且没法滚。改成 cascade：顶层只列分类（5 个），鼠标 hover 自动展开
+        子菜单看具体 metric。每个子菜单最长 ~43 项，竖向能放下。"""
         if str(self.metric_btn.cget("state")) == "disabled":
             return
         sa = getattr(self, "_metric_sections_avail", None)
@@ -1522,20 +1523,21 @@ class FonaDynApp(_TkBase):
         m = tk.Menu(self, tearoff=0,
                     bg=PANEL_HI, fg=TEXT,
                     activebackground=ACCENT, activeforeground=BG,
-                    disabledforeground=ACCENT,
                     selectcolor=ACCENT, borderwidth=0)
-        first = True
+        # 持有 cascade 子菜单的引用 —— Tk 的 add_cascade 不会持有 menu
+        # 对象的 Python 引用，函数返回后 sub 被 GC，下拉就空了。
+        self._popup_submenus = []
         for section_title, cols in sa:
-            if not first:
-                m.add_separator()
-            first = False
-            # 节标题：disabled 项当 label。我们让 disabledforeground=ACCENT，
-            # 所以即便不可点，颜色也是醒目的强调色。
-            m.add_command(label=f"  {section_title}", state="disabled")
+            sub = tk.Menu(m, tearoff=0,
+                          bg=PANEL_HI, fg=TEXT,
+                          activebackground=ACCENT, activeforeground=BG,
+                          selectcolor=ACCENT, borderwidth=0)
             for c in cols:
-                m.add_radiobutton(label=f"      {c}",
-                                   variable=self.metric_var,
-                                   value=c)
+                sub.add_radiobutton(label=c,
+                                     variable=self.metric_var,
+                                     value=c)
+            m.add_cascade(label=section_title, menu=sub)
+            self._popup_submenus.append(sub)
 
         # 在按钮正下方弹出。tk_popup 自己处理屏幕边界裁剪。
         x = self.metric_btn.winfo_rootx()
