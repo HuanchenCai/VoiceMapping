@@ -959,12 +959,17 @@ class FonaDynApp(_TkBase):
         # Praat 风格：每个分类一个顶级 cascade）。保留 widget 名 metric_btn 是
         # 为了让其它地方（_refresh_metric_dropdown / _cycle_metric / 旧代码）
         # 不用大改。它现在就是一个 disabled-look label。
-        self.metric_btn = tk.Label(side, textvariable=self.metric_var,
+        # 点开 → tk.Menu.tk_popup，最朴素的下拉。Tk 内置的 popup 机制
+        # 自己处理定位、键盘焦点、点外面消失，不踩 overrideredirect /
+        # 多屏 / withdraw 那一堆坑。同时顶部菜单栏也保留可用，两条路。
+        self.metric_btn = tk.Button(side, textvariable=self.metric_var,
                                     bg=PANEL_HI, fg=TEXT,
+                                    activebackground=BORDER, activeforeground=TEXT,
                                     disabledforeground=MUTED,
-                                    font=FONT_UI,
-                                    width=18, padx=10, pady=4,
-                                    relief="flat", anchor="w")
+                                    font=FONT_UI, bd=0, relief="flat",
+                                    padx=10, pady=4, width=18,
+                                    cursor="hand2",
+                                    command=self._popup_metric_menu)
         self.metric_btn.pack()
         self.metric_btn.config(state="disabled")
         self._metric_popup = None
@@ -1504,8 +1509,41 @@ class FonaDynApp(_TkBase):
         if col and self._last_df is not None and col in self._last_df.columns:
             self._render_metric(col)
 
-    # 旧的 popup 入口已下线（改用顶部菜单栏）。保留方法名空操作，避免
-    # 万一某个旧代码路径还在调它就抛 AttributeError。
+    def _popup_metric_menu(self):
+        """点 metric 按钮 → 弹下拉菜单（最朴素的 tk_popup 用法）。
+        每个分类一段，前面一个 disabled 标签当节标题（— Acoustic —），
+        然后是 radiobutton 项目。无可用 metric 直接不弹。"""
+        if str(self.metric_btn.cget("state")) == "disabled":
+            return
+        sa = getattr(self, "_metric_sections_avail", None)
+        if not sa:
+            return
+
+        m = tk.Menu(self, tearoff=0,
+                    bg=PANEL_HI, fg=TEXT,
+                    activebackground=ACCENT, activeforeground=BG,
+                    disabledforeground=ACCENT,
+                    selectcolor=ACCENT, borderwidth=0)
+        first = True
+        for section_title, cols in sa:
+            if not first:
+                m.add_separator()
+            first = False
+            # 节标题：disabled 项当 label。我们让 disabledforeground=ACCENT，
+            # 所以即便不可点，颜色也是醒目的强调色。
+            m.add_command(label=f"  {section_title}", state="disabled")
+            for c in cols:
+                m.add_radiobutton(label=f"      {c}",
+                                   variable=self.metric_var,
+                                   value=c)
+
+        # 在按钮正下方弹出。tk_popup 自己处理屏幕边界裁剪。
+        x = self.metric_btn.winfo_rootx()
+        y = self.metric_btn.winfo_rooty() + self.metric_btn.winfo_height()
+        try:
+            m.tk_popup(x, y)
+        finally:
+            m.grab_release()
 
     def _render_metric(self, col: str):
         if self._last_df is None or col not in self._last_df.columns:
