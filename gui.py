@@ -76,21 +76,29 @@ _METRIC_SECTIONS: list = [
         "ShimmerAPQ3", "ShimmerAPQ5", "ShimmerAPQ11",
         "HNR", "NHR",
         "PPE", "ZCR",
+        # M1 add-on
+        "RMS", "F0_Hz",
+        "SpectralCentroid", "SpectralBandwidth", "SpectralRolloff85",
+        "SpectralFlatness", "SpectralSlope",
+        "SpectralSkewness", "SpectralKurtosis",
+        "AlphaRatio", "HammarbergIndex", "GNE",
+        *(f"MFCC{i+1}" for i in range(13)),
     ]),
     ("EGG · 电声门图", [
         "Qcontact", "Icontact", "dEGGmax", "HRFegg",
         "OQ", "SPQ", "CIQ",
     ]),
     ("唱歌特异性 · Singing-specific", [
-        "VibratoRate", "VibratoExtent",
+        "VibratoRate", "VibratoExtent", "VibratoJitter",
         "F1", "F2", "F3", "SingersFormant",
+        "B1", "B2", "B3", "FormantDispersion", "SPR",
         "H1H2", "H1H3",
     ]),
     ("聚类 · Cluster / cPhon", [
         "maxCluster", "Cluster 1", "Cluster 2", "Cluster 3", "Cluster 4", "Cluster 5",
         "maxCPhon",   "cPhon 1",   "cPhon 2",   "cPhon 3",   "cPhon 4",   "cPhon 5",
     ]),
-    ("密度 · Density", ["Total"]),
+    ("密度 · Density", ["Total", "MPT", "VoicingRatio", "DUV"]),
 ]
 _DEFAULT_METRIC_CHAIN = ["CPP", "Clarity", "SpecBal", "Crest"]
 

@@ -420,6 +420,31 @@ METRIC_CATEGORY = {
 }
 
 
+# ── Merge any keys from metrics_registry that aren't already in our
+# hand-crafted METRIC_CFG / METRIC_CATEGORY. This lets new metrics
+# (M1 add-ons, future user plugins) appear in plots automatically by
+# just calling register(MetricSpec(...)) — no plotter edit needed.
+def _merge_registry_into_plotter():
+    try:
+        from metrics_registry import REGISTRY
+    except ImportError:
+        return
+    for spec in REGISTRY.values():
+        cmap = spec.cmap
+        if isinstance(cmap, str) and cmap in _CMAP:
+            cmap = _CMAP[cmap]
+        if spec.key not in METRIC_CFG:
+            METRIC_CFG[spec.key] = dict(
+                label=spec.label or spec.key,
+                vmin=spec.vmin, vmax=spec.vmax,
+                unit=spec.unit, cmap=cmap, norm=spec.norm)
+        if spec.key not in METRIC_CATEGORY:
+            METRIC_CATEGORY[spec.key] = spec.category
+
+
+_merge_registry_into_plotter()
+
+
 def _build_grid(df: pd.DataFrame, col: str) -> np.ma.MaskedArray:
     """Fill a (SPL × MIDI) masked array from grouped VRP data."""
     n_midi = MIDI_MAX - MIDI_MIN + 1

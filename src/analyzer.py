@@ -27,6 +27,10 @@ from metrics import (
     OpenQuotientCalculator,
     # Add-on voice quality metrics (待验证)
     NHRCalculator, CPPSCalculator, PPECalculator, ZCRCalculator,
+    # M1 add-on: spectral / MFCC / formant extras / integrative / vibrato jitter
+    SpectralMomentsCalculator, F0HzCalculator, MFCCCalculator,
+    FormantExtrasCalculator, IntegrativeMetricsCalculator,
+    VibratoJitterCalculator,
 )
 
 logger = get_logger(__name__)
@@ -164,6 +168,13 @@ class VoiceMapAnalyzer:
         self.cpps_calculator     = CPPSCalculator(self.config)
         self.ppe_calculator      = PPECalculator(self.config)
         self.zcr_calculator      = ZCRCalculator(self.config)
+        # M1 add-on (待验证): spectral moments, MFCC, formant extras, integrative, vibrato jitter.
+        self.spec_moments_calculator   = SpectralMomentsCalculator(self.config)
+        self.f0hz_calculator           = F0HzCalculator(self.config)
+        self.mfcc_calculator           = MFCCCalculator(self.config)
+        self.formant_extras_calculator = FormantExtrasCalculator(self.config)
+        self.integrative_calculator    = IntegrativeMetricsCalculator(self.config)
+        self.vib_jitter_calculator     = VibratoJitterCalculator(self.config)
 
         logger.info("VoiceMap analyzer initialized (numba=%s)", _NUMBA)
 
@@ -469,10 +480,27 @@ class VoiceMapAnalyzer:
         harmdiff_values                      = self.harmdiff_calculator.calculate(voice_signal, cycle_triggers)
         _step(14)  # "OQ / SPQ / CIQ"
         oq_values                            = self.oq_calculator.calculate(egg_signal, cycle_triggers)
-        _step(15)  # "Add-on: CPPS / PPE / ZCR"
+        _step(15)  # "CPPS / PPE / ZCR"
         cpps_values                          = self.cpps_calculator.calculate(cpp_values)
         ppe_values                           = self.ppe_calculator.calculate(cycle_triggers)
         zcr_values                           = self.zcr_calculator.calculate(voice_signal, cycle_triggers)
+
+        _step(16)  # "M1: 频谱矩 + RMS + F0_Hz"
+        spec_moments                         = self.spec_moments_calculator.calculate(voice_signal, cycle_triggers)
+        f0hz_values                          = self.f0hz_calculator.calculate(midi_values)
+
+        _step(17)  # "M1: MFCC 1-13"
+        mfcc_values                          = self.mfcc_calculator.calculate(voice_signal, cycle_triggers)
+
+        _step(18)  # "M1: 共振峰带宽 + SPR + GNE"
+        formant_extras                       = self.formant_extras_calculator.calculate(voice_signal, cycle_triggers)
+
+        _step(19)  # "M1: MPT + Voicing + DUV"
+        integ_values                         = self.integrative_calculator.calculate(
+                                                    voice_signal, midi_values, cycle_triggers)
+
+        _step(20)  # "M1: Vibrato Jitter"
+        vib_jitter_values                    = self.vib_jitter_calculator.calculate(vib_rate)
 
         base = {
             'midi':     midi_values,
@@ -501,6 +529,29 @@ class VoiceMapAnalyzer:
             'cpps':          cpps_values,
             'ppe':           ppe_values,
             'zcr':           zcr_values,
+            # M1 add-on
+            'rms':           spec_moments['rms'],
+            'f0_hz':         f0hz_values,
+            'spec_centroid':  spec_moments['spec_centroid'],
+            'spec_bandwidth': spec_moments['spec_bandwidth'],
+            'spec_rolloff85': spec_moments['spec_rolloff85'],
+            'spec_flatness':  spec_moments['spec_flatness'],
+            'spec_slope':     spec_moments['spec_slope'],
+            'spec_skewness':  spec_moments['spec_skewness'],
+            'spec_kurtosis':  spec_moments['spec_kurtosis'],
+            'alpha_ratio':    spec_moments['alpha_ratio'],
+            'hammarberg':     spec_moments['hammarberg'],
+            'b1':             formant_extras['b1'],
+            'b2':             formant_extras['b2'],
+            'b3':             formant_extras['b3'],
+            'formant_dispersion': formant_extras['formant_dispersion'],
+            'spr':            formant_extras['spr'],
+            'gne':            formant_extras['gne'],
+            'mpt':            integ_values['mpt'],
+            'voicing_ratio':  integ_values['voicing_ratio'],
+            'duv':            integ_values['duv'],
+            'vib_jitter':     vib_jitter_values,
+            **{f'mfcc{i+1}': mfcc_values[f'mfcc{i+1}'] for i in range(13)},
             'vibrato_rate':   vib_rate,
             'vibrato_extent': vib_extent,
             'f1':  formant_values['f1'],
@@ -515,7 +566,7 @@ class VoiceMapAnalyzer:
         }
         # Phonation-type cluster uses the already-computed quality metrics
         # as features — must run AFTER them.
-        _step(16)   # "Phonation cluster (cPhon)"
+        _step(21)   # "Phonation cluster (cPhon)"
         base['phon'] = self.phon_calculator.calculate(base)
         return base
 
@@ -639,6 +690,30 @@ class VoiceMapAnalyzer:
             'CPPS':          _pad(metrics.get('cpps'),          base_n),
             'PPE':           _pad(metrics.get('ppe'),           base_n),
             'ZCR':           _pad(metrics.get('zcr'),           base_n),
+            # M1 add-on (待验证)
+            'RMS':                _pad(metrics.get('rms'),               base_n),
+            'F0_Hz':              _pad(metrics.get('f0_hz'),             base_n),
+            'SpectralCentroid':   _pad(metrics.get('spec_centroid'),     base_n),
+            'SpectralBandwidth':  _pad(metrics.get('spec_bandwidth'),    base_n),
+            'SpectralRolloff85':  _pad(metrics.get('spec_rolloff85'),    base_n),
+            'SpectralFlatness':   _pad(metrics.get('spec_flatness'),     base_n),
+            'SpectralSlope':      _pad(metrics.get('spec_slope'),        base_n),
+            'SpectralSkewness':   _pad(metrics.get('spec_skewness'),     base_n),
+            'SpectralKurtosis':   _pad(metrics.get('spec_kurtosis'),     base_n),
+            'AlphaRatio':         _pad(metrics.get('alpha_ratio'),       base_n),
+            'HammarbergIndex':    _pad(metrics.get('hammarberg'),        base_n),
+            'B1':                 _pad(metrics.get('b1'),                base_n),
+            'B2':                 _pad(metrics.get('b2'),                base_n),
+            'B3':                 _pad(metrics.get('b3'),                base_n),
+            'FormantDispersion':  _pad(metrics.get('formant_dispersion'),base_n),
+            'SPR':                _pad(metrics.get('spr'),               base_n),
+            'GNE':                _pad(metrics.get('gne'),               base_n),
+            'MPT':                _pad(metrics.get('mpt'),               base_n),
+            'VoicingRatio':       _pad(metrics.get('voicing_ratio'),     base_n),
+            'DUV':                _pad(metrics.get('duv'),               base_n),
+            'VibratoJitter':      _pad(metrics.get('vib_jitter'),        base_n),
+            **{f'MFCC{i+1}':      _pad(metrics.get(f'mfcc{i+1}'),        base_n)
+               for i in range(13)},
             'VibratoRate':   _pad(metrics.get('vibrato_rate'),   base_n),
             'VibratoExtent': _pad(metrics.get('vibrato_extent'), base_n),
             'F1':            _pad(metrics.get('f1'),  base_n),
@@ -673,6 +748,19 @@ class VoiceMapAnalyzer:
             'ShimmerAPQ3': 'mean', 'ShimmerAPQ5': 'mean', 'ShimmerAPQ11': 'mean',
             'HNR': 'mean', 'NHR': 'mean',
             'CPPS': 'mean', 'PPE': 'mean', 'ZCR': 'mean',
+            # M1 add-on
+            'RMS': 'mean', 'F0_Hz': 'mean',
+            'SpectralCentroid': 'mean', 'SpectralBandwidth': 'mean',
+            'SpectralRolloff85': 'mean', 'SpectralFlatness': 'mean',
+            'SpectralSlope': 'mean', 'SpectralSkewness': 'mean',
+            'SpectralKurtosis': 'mean',
+            'AlphaRatio': 'mean', 'HammarbergIndex': 'mean',
+            'B1': 'mean', 'B2': 'mean', 'B3': 'mean',
+            'FormantDispersion': 'mean',
+            'SPR': 'mean', 'GNE': 'mean',
+            'MPT': 'mean', 'VoicingRatio': 'mean', 'DUV': 'mean',
+            'VibratoJitter': 'mean',
+            **{f'MFCC{i+1}': 'mean' for i in range(13)},
             'VibratoRate': 'mean', 'VibratoExtent': 'mean',
             'F1': 'mean', 'F2': 'mean', 'F3': 'mean',
             'SingersFormant': 'mean',
@@ -724,6 +812,17 @@ class VoiceMapAnalyzer:
             'HNR',
             # Add-on voice-quality (待验证)
             'NHR', 'CPPS', 'PPE', 'ZCR',
+            # M1 add-on (待验证)
+            'RMS', 'F0_Hz',
+            'SpectralCentroid', 'SpectralBandwidth', 'SpectralRolloff85',
+            'SpectralFlatness', 'SpectralSlope',
+            'SpectralSkewness', 'SpectralKurtosis',
+            'AlphaRatio', 'HammarbergIndex',
+            'B1', 'B2', 'B3', 'FormantDispersion',
+            'SPR', 'GNE',
+            'MPT', 'VoicingRatio', 'DUV',
+            'VibratoJitter',
+            *(f'MFCC{i+1}' for i in range(13)),
             # P2 (singing-specific)
             'VibratoRate', 'VibratoExtent',
             'F1', 'F2', 'F3', 'SingersFormant',
@@ -797,9 +896,14 @@ class VoiceMapAnalyzer:
         "Formants + Singer's Formant",       # 12
         "H1-H2 / H1-H3",                     # 13
         "OQ / SPQ / CIQ",                    # 14
-        "Add-on: CPPS / PPE / ZCR",          # 15
-        "Phonation cluster (cPhon)",         # 16
-        "写 CSV",                            # 17
+        "CPPS / PPE / ZCR",                  # 15
+        "M1: 频谱矩 + RMS + F0_Hz",          # 16
+        "M1: MFCC 1-13",                     # 17
+        "M1: 共振峰带宽 + SPR + GNE",        # 18
+        "M1: MPT + Voicing + DUV",           # 19
+        "M1: Vibrato Jitter",                # 20
+        "Phonation cluster (cPhon)",         # 21
+        "写 CSV",                            # 22
     )
     TOTAL_STAGES = len(_STAGE_LABELS)
 
@@ -852,7 +956,7 @@ class VoiceMapAnalyzer:
         filtered_metrics = self.apply_clarity_filtering(metrics)
 
         logger.info("Valid data points: %d", len(filtered_metrics['midi']))
-        _cb(17)  # "写 CSV"
+        _cb(22)  # "写 CSV"
         csv_result = self.output_vrp_csv(filtered_metrics,
                                           return_df=return_df,
                                           plot_mode=plot_mode,

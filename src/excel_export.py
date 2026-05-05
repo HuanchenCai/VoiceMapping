@@ -35,18 +35,26 @@ _METRIC_COLS = [
     "Shimmer", "ShimmerDB",
     "ShimmerAPQ3", "ShimmerAPQ5", "ShimmerAPQ11",
     "HNR", "NHR", "PPE", "ZCR",
+    # M1 add-on
+    "RMS", "F0_Hz",
+    "SpectralCentroid", "SpectralBandwidth", "SpectralRolloff85",
+    "SpectralFlatness", "SpectralSlope",
+    "SpectralSkewness", "SpectralKurtosis",
+    "AlphaRatio", "HammarbergIndex", "GNE",
+    *(f"MFCC{i+1}" for i in range(13)),
     # EGG
     "Qcontact", "Icontact", "dEGGmax", "HRFegg",
     "OQ", "SPQ", "CIQ",
     # Singing-specific
-    "VibratoRate", "VibratoExtent",
+    "VibratoRate", "VibratoExtent", "VibratoJitter",
     "F1", "F2", "F3", "SingersFormant",
+    "B1", "B2", "B3", "FormantDispersion", "SPR",
     "H1H2", "H1H3",
     # Cluster
     "maxCluster", "Cluster 1", "Cluster 2", "Cluster 3", "Cluster 4", "Cluster 5",
     "maxCPhon", "cPhon 1", "cPhon 2", "cPhon 3", "cPhon 4", "cPhon 5",
     # Density
-    "Total",
+    "Total", "MPT", "VoicingRatio", "DUV",
 ]
 
 

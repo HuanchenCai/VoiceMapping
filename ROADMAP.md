@@ -2,6 +2,34 @@
 
 按优先级 / 依赖关系组织。完成一个在 `DEV_LOG.md` 标 ✅ 并打勾这里对应条目。
 
+## 软件深度完善 plan（M1-M7 → A1）
+
+- [x] **M1** — Metric 注册表 (`metrics_registry.py`) + 22 个新 metric (CSV 60 → 82 列)
+- [ ] **M2** — 绘图增强：拟合线 / 标注 / 多格式导出 / 复制剪贴板
+- [ ] **M3** — 多聚类模型（GMM、Hierarchical、DBSCAN、Spectral、BIRCH）+ 正交分析
+- [ ] **M4** — 色彩主题（Default / Colorblind-safe / Print-friendly / High-contrast）
+- [ ] **M5** — 使用场景预设（普通 / 语音专家 / 医疗 / 歌手 / TTS / 戏曲）+ 中英语言切换
+- [ ] **M6** — UI 美化（顶部菜单栏 / 状态栏 / 最近文件 / 快捷键）
+- [ ] **M7** — 机器学习 pipeline（训练→推理，预测目标待定）
+- [ ] **A1** — 软著申请材料包（M1-M6 完成后做）
+
+------
+
+### M1 P2 列指标（注册表已就位，加新 metric 只改一处）
+
+待加：
+- 频谱衍生：Spectral Contrast / Decrease / Flux / Roll-off (50%/95%)
+- 倒谱/感知：Δ-MFCC / ΔΔ-MFCC / LPCC / PLP / CQCC
+- 韵律：Speech Rate / Pause Rate / Articulation Rate / DVB
+- Formant 衍生：FCR / VSA / F1-F2 plane
+- EGG 高级：EGGW25 / EGGW50 / CFx / PIC / DECPA
+- 唱歌进阶：Vibrato Onset/Offset、Tremor (<4 Hz)
+- 临床合成：AVQI / DSI / CSID
+- 非线性：RPDE / DFA / Lempel-Ziv / Hurst / Lyapunov
+- CAPE-V 类：Roughness / Strain / Breathiness / Tension（需 ML）
+
+------
+
 ## Milestone 1 — 回填未测试功能验证（本轮迭代的 P0）
 
 目标：`DEV_LOG.md` 里 🟡 untested 一栏**清零**。每条都是 code 已有、只需人工跑一遍。

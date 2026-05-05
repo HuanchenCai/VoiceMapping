@@ -591,6 +591,264 @@ class HRFCalculator(MetricCalculator):
         return hrf
 
 
+# ───────────────────────────────────────────────────────────────────────────
+# M1 ADD-ON: spectral moments + raw scalars (待验证).
+# Frame-based STFT on the voice channel; everything assigned per cycle.
+# Centroid / Bandwidth / Rolloff / Flatness / Slope / Skewness / Kurtosis
+# all share one rfft pass to keep cost low.
+# ───────────────────────────────────────────────────────────────────────────
+class SpectralMomentsCalculator(MetricCalculator):
+    """7 spectral descriptors per cycle from one STFT pass."""
+
+    KEYS = (
+        "spec_centroid", "spec_bandwidth", "spec_rolloff85",
+        "spec_flatness", "spec_slope",
+        "spec_skewness", "spec_kurtosis",
+        "alpha_ratio", "hammarberg",
+        "rms",
+    )
+
+    def __init__(self, config: VoiceMapConfig,
+                 win_ms: float = 25.0, hop_ms: float = 10.0,
+                 rolloff_pct: float = 0.85,
+                 alpha_lo: float = 50.0, alpha_mid: float = 1000.0, alpha_hi: float = 5000.0,
+                 hamm_lo: float = 0.0, hamm_mid: float = 2000.0, hamm_hi: float = 5000.0):
+        super().__init__(config)
+        self.win_ms, self.hop_ms = float(win_ms), float(hop_ms)
+        self.rolloff_pct = float(rolloff_pct)
+        self.alpha_lo, self.alpha_mid, self.alpha_hi = alpha_lo, alpha_mid, alpha_hi
+        self.hamm_lo,  self.hamm_mid,  self.hamm_hi  = hamm_lo,  hamm_mid,  hamm_hi
+
+    def calculate(self, voice: np.ndarray,
+                  cycle_triggers: np.ndarray) -> Dict[str, np.ndarray]:
+        logger.info("Calculating spectral moments + Alpha/Hammarberg + RMS...")
+        idx = np.where(cycle_triggers > 0.5)[0]
+        n_cycles = max(len(idx) - 1, 0)
+        z = lambda: np.zeros(n_cycles)
+        if n_cycles == 0:
+            return {k: z() for k in self.KEYS}
+
+        sr  = self.sample_rate
+        win = int(self.win_ms * 0.001 * sr)
+        hop = int(self.hop_ms * 0.001 * sr)
+        if len(voice) < win or hop < 1:
+            return {k: z() for k in self.KEYS}
+
+        n_frames = 1 + (len(voice) - win) // hop
+        starts   = np.arange(n_frames) * hop
+        frames   = sliding_window_view(voice, win)[starts]    # (n_frames, win)
+        hann     = np.hanning(win)
+        frames_w = (frames - frames.mean(axis=1, keepdims=True)) * hann
+
+        # FFT (single pass shared across all moments)
+        nfft = 1
+        while nfft < 2 * win:
+            nfft *= 2
+        X    = np.fft.rfft(frames_w, nfft, axis=1)
+        mag  = np.abs(X)
+        psd  = mag ** 2                                    # power
+        freqs = np.fft.rfftfreq(nfft, 1.0 / sr)
+
+        total_pow = psd.sum(axis=1)
+        safe_pow  = np.maximum(total_pow, 1e-15)
+
+        # Centroid
+        centroid = (psd * freqs[None, :]).sum(axis=1) / safe_pow
+
+        # Bandwidth (std around centroid)
+        diff   = freqs[None, :] - centroid[:, None]
+        var    = (psd * (diff ** 2)).sum(axis=1) / safe_pow
+        bandwidth = np.sqrt(np.maximum(var, 0.0))
+
+        # Rolloff: smallest freq where cumulative power exceeds rolloff_pct
+        cum = np.cumsum(psd, axis=1)
+        thr = self.rolloff_pct * total_pow[:, None]
+        idx_roll = (cum >= thr).argmax(axis=1)             # first True
+        rolloff = freqs[idx_roll]
+
+        # Spectral flatness = geomean / mean of magnitude
+        log_mag  = np.log(np.maximum(mag, 1e-15))
+        flatness = np.exp(log_mag.mean(axis=1)) / np.maximum(mag.mean(axis=1), 1e-15)
+
+        # Spectral slope: linear fit of log10(mag) vs frequency in 0-5 kHz
+        slope_band = (freqs >= 0) & (freqs <= 5000)
+        f_band = freqs[slope_band]
+        if len(f_band) >= 2:
+            log_sub = np.log10(np.maximum(mag[:, slope_band], 1e-15))
+            x = f_band - f_band.mean()
+            denom = (x ** 2).sum()
+            slope = (log_sub * x).sum(axis=1) / max(denom, 1e-12)
+        else:
+            slope = np.zeros(n_frames)
+
+        # Skewness / kurtosis of the spectral distribution (using PSD as weights)
+        norm_psd = psd / safe_pow[:, None]
+        skewness = (norm_psd * (diff ** 3)).sum(axis=1) / np.maximum(bandwidth ** 3, 1e-15)
+        kurtosis = (norm_psd * (diff ** 4)).sum(axis=1) / np.maximum(bandwidth ** 4, 1e-15) - 3.0
+
+        # Alpha Ratio (E_low / E_high in dB)
+        m_low  = (freqs >= self.alpha_lo)  & (freqs < self.alpha_mid)
+        m_high = (freqs >= self.alpha_mid) & (freqs <= self.alpha_hi)
+        e_low  = psd[:, m_low ].sum(axis=1)
+        e_high = psd[:, m_high].sum(axis=1)
+        alpha = 10.0 * np.log10(np.maximum(e_low, 1e-15) /
+                                 np.maximum(e_high, 1e-15))
+
+        # Hammarberg Index: max(0-2k, dB) − max(2-5k, dB)
+        m_hl = (freqs >= self.hamm_lo)  & (freqs < self.hamm_mid)
+        m_hh = (freqs >= self.hamm_mid) & (freqs <= self.hamm_hi)
+        # Use mag dB so it's a level difference
+        mag_db = 20.0 * np.log10(np.maximum(mag, 1e-15))
+        hamm = mag_db[:, m_hl].max(axis=1) - mag_db[:, m_hh].max(axis=1)
+
+        # RMS per frame from time-domain windowed energy
+        rms_frame = np.sqrt(np.mean(frames ** 2, axis=1))
+
+        # Assign each cycle to its enclosing frame
+        cycle_starts = idx[:-1]
+        frame_idx    = np.clip(cycle_starts // hop, 0, n_frames - 1)
+
+        return {
+            "spec_centroid":   centroid[frame_idx],
+            "spec_bandwidth":  bandwidth[frame_idx],
+            "spec_rolloff85":  rolloff[frame_idx],
+            "spec_flatness":   flatness[frame_idx],
+            "spec_slope":      slope[frame_idx],
+            "spec_skewness":   skewness[frame_idx],
+            "spec_kurtosis":   kurtosis[frame_idx],
+            "alpha_ratio":     alpha[frame_idx],
+            "hammarberg":      hamm[frame_idx],
+            "rms":             rms_frame[frame_idx],
+        }
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# M1 ADD-ON: F0 in Hz (raw frequency, complement to MIDI).
+# Reuses the same NSDF result that ClarityCalculator produced; we just
+# convert MIDI back to Hz. This calculator is a no-op that takes the
+# pre-computed midi array from the analyzer.
+# ───────────────────────────────────────────────────────────────────────────
+class F0HzCalculator(MetricCalculator):
+    """Convert MIDI per-cycle to Hz."""
+
+    @staticmethod
+    def midi_to_hz(midi: np.ndarray) -> np.ndarray:
+        return 440.0 * np.power(2.0, (midi - 69.0) / 12.0)
+
+    def calculate(self, midi_per_cycle: np.ndarray) -> np.ndarray:
+        if len(midi_per_cycle) == 0:
+            return np.zeros(0)
+        valid = midi_per_cycle > 0
+        out = np.zeros_like(midi_per_cycle, dtype=np.float64)
+        out[valid] = self.midi_to_hz(midi_per_cycle[valid])
+        if valid.any():
+            v = out[valid]
+            logger.info("  F0_Hz: mean=%.1f Hz  range=[%.1f, %.1f]",
+                        float(v.mean()), float(v.min()), float(v.max()))
+        return out
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# M1 ADD-ON: MFCC 1-13 (待验证).
+# Standard 13-coefficient mel-frequency cepstrum, computed per frame
+# (25 ms / 10 ms hop) on the voice channel. Each cycle is assigned the
+# MFCC of its enclosing frame. Self-contained — no librosa dependency.
+# ───────────────────────────────────────────────────────────────────────────
+def _hz_to_mel(hz):
+    return 2595.0 * np.log10(1.0 + hz / 700.0)
+
+
+def _mel_to_hz(mel):
+    return 700.0 * (np.power(10.0, mel / 2595.0) - 1.0)
+
+
+def _build_mel_filterbank(sr: float, n_fft: int, n_mels: int = 26,
+                           f_min: float = 0.0, f_max: float = None) -> np.ndarray:
+    """Triangular mel filterbank, shape (n_mels, n_fft//2+1)."""
+    if f_max is None:
+        f_max = sr / 2.0
+    mel_pts  = np.linspace(_hz_to_mel(f_min), _hz_to_mel(f_max), n_mels + 2)
+    hz_pts   = _mel_to_hz(mel_pts)
+    bin_pts  = np.floor((n_fft + 1) * hz_pts / sr).astype(int)
+    bin_pts  = np.clip(bin_pts, 0, n_fft // 2)
+    fb = np.zeros((n_mels, n_fft // 2 + 1), dtype=np.float64)
+    for m in range(n_mels):
+        l, c, r = bin_pts[m], bin_pts[m + 1], bin_pts[m + 2]
+        if c > l:
+            fb[m, l:c] = (np.arange(l, c) - l) / max(c - l, 1)
+        if r > c:
+            fb[m, c:r] = (r - np.arange(c, r)) / max(r - c, 1)
+    return fb
+
+
+class MFCCCalculator(MetricCalculator):
+    """13 MFCC coefficients per cycle (待验证)."""
+
+    KEYS = tuple(f"mfcc{i}" for i in range(1, 14))
+
+    def __init__(self, config: VoiceMapConfig,
+                 win_ms: float = 25.0, hop_ms: float = 10.0,
+                 n_mels: int = 26, n_mfcc: int = 13,
+                 f_min: float = 0.0, f_max: Optional[float] = None):
+        super().__init__(config)
+        self.win_ms, self.hop_ms = float(win_ms), float(hop_ms)
+        self.n_mels = int(n_mels)
+        self.n_mfcc = int(n_mfcc)
+        self.f_min  = float(f_min)
+        self.f_max  = f_max if f_max is not None else config.sample_rate / 2.0
+
+    def calculate(self, voice: np.ndarray,
+                  cycle_triggers: np.ndarray) -> Dict[str, np.ndarray]:
+        logger.info("Calculating MFCC 1-%d (n_mels=%d)...",
+                    self.n_mfcc, self.n_mels)
+        idx = np.where(cycle_triggers > 0.5)[0]
+        n_cycles = max(len(idx) - 1, 0)
+        z = lambda: np.zeros(n_cycles)
+        if n_cycles == 0:
+            return {k: z() for k in self.KEYS}
+
+        sr  = self.sample_rate
+        win = int(self.win_ms * 0.001 * sr)
+        hop = int(self.hop_ms * 0.001 * sr)
+        if len(voice) < win or hop < 1:
+            return {k: z() for k in self.KEYS}
+
+        # Pre-emphasis (standard for MFCC)
+        v_pe = np.empty_like(voice)
+        v_pe[0]  = voice[0]
+        v_pe[1:] = voice[1:] - 0.97 * voice[:-1]
+
+        n_frames = 1 + (len(v_pe) - win) // hop
+        starts   = np.arange(n_frames) * hop
+        frames   = sliding_window_view(v_pe, win)[starts]
+        frames_w = (frames - frames.mean(axis=1, keepdims=True)) * np.hamming(win)
+
+        nfft = 1
+        while nfft < 2 * win:
+            nfft *= 2
+        X    = np.fft.rfft(frames_w, nfft, axis=1)
+        psd  = (np.abs(X)) ** 2
+
+        # Mel filterbank → log → DCT-II truncated to n_mfcc
+        fb       = _build_mel_filterbank(sr, nfft, self.n_mels,
+                                          self.f_min, self.f_max)
+        mel_pow  = psd @ fb.T                                # (n_frames, n_mels)
+        log_mel  = np.log(np.maximum(mel_pow, 1e-15))
+
+        # DCT-II type, orthogonal-norm
+        from scipy.fft import dct as _dct
+        mfcc = _dct(log_mel, type=2, axis=1, norm="ortho")[:, :self.n_mfcc]
+
+        # Assign per cycle
+        cycle_starts = idx[:-1]
+        frame_idx    = np.clip(cycle_starts // hop, 0, n_frames - 1)
+
+        out = {f"mfcc{i+1}": mfcc[frame_idx, i] for i in range(self.n_mfcc)}
+        logger.info("  MFCC1: mean=%.2f  MFCC13: mean=%.2f",
+                    float(out["mfcc1"].mean()), float(out["mfcc13"].mean()))
+        return out
+
+
 # ---------------------------------------------------------------------------
 # P3: Open Quotient / Speed Quotient / Contact Index Quotient.
 #
@@ -946,6 +1204,247 @@ class FormantCalculator(MetricCalculator):
         _report("F2", out["f2"], "Hz")
         _report("F3", out["f3"], "Hz")
         _report("SFE", out["sfe"], "dB")
+        return out
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# M1 ADD-ON: Formant bandwidths B1/B2/B3 + Singing Power Ratio + simplified GNE.
+# Independent LPC root-finding pass — separate from FormantCalculator's
+# spectrum-peak F1/F2/F3 so the two coexist (B1/B2/B3 here may not align
+# perfectly with F1/F2/F3 over there since they come from different
+# tracker designs; documented as 待验证).
+# ───────────────────────────────────────────────────────────────────────────
+class FormantExtrasCalculator(MetricCalculator):
+    """B1/B2/B3 from LPC roots + Formant Dispersion + Singing Power Ratio + GNE-like."""
+
+    KEYS = ("b1", "b2", "b3", "formant_dispersion", "spr", "gne")
+
+    def __init__(self, config: VoiceMapConfig,
+                 win_ms: float = 25.0, hop_ms: float = 10.0,
+                 lpc_order: Optional[int] = None,
+                 spr_lo_band: Tuple[float, float] = (0.0, 2000.0),
+                 spr_hi_band: Tuple[float, float] = (2000.0, 4000.0)):
+        super().__init__(config)
+        self.win_ms, self.hop_ms = float(win_ms), float(hop_ms)
+        self.lpc_order = int(lpc_order or (2 + 2 * config.sample_rate // 1000))
+        self.spr_lo = spr_lo_band
+        self.spr_hi = spr_hi_band
+
+    def calculate(self, voice: np.ndarray,
+                  cycle_triggers: np.ndarray) -> Dict[str, np.ndarray]:
+        logger.info("Calculating B1/B2/B3 + Formant Dispersion + SPR + GNE-like...")
+        idx = np.where(cycle_triggers > 0.5)[0]
+        n_cycles = max(len(idx) - 1, 0)
+        z = lambda: np.zeros(n_cycles)
+        if n_cycles == 0:
+            return {k: z() for k in self.KEYS}
+
+        sr  = self.sample_rate
+        win = int(self.win_ms * 0.001 * sr)
+        hop = int(self.hop_ms * 0.001 * sr)
+        if len(voice) < win or hop < 1:
+            return {k: z() for k in self.KEYS}
+
+        # Pre-emphasis
+        v_pe = np.empty_like(voice)
+        v_pe[0]  = voice[0]
+        v_pe[1:] = voice[1:] - 0.97 * voice[:-1]
+
+        n_frames = 1 + (len(v_pe) - win) // hop
+        starts   = np.arange(n_frames) * hop
+        frames   = sliding_window_view(v_pe, win)[starts]
+        frames_w = (frames - frames.mean(axis=1, keepdims=True)) * np.hamming(win)
+
+        # Batched autocorr → Levinson-Durbin via np.linalg.solve
+        nfft_ac = 1
+        while nfft_ac < 2 * win:
+            nfft_ac *= 2
+        X_ac = np.fft.rfft(frames_w, nfft_ac, axis=1)
+        acf  = np.fft.irfft(X_ac * np.conj(X_ac), nfft_ac, axis=1)[:, :self.lpc_order + 1]
+
+        valid = acf[:, 0] > 1e-12
+        p = self.lpc_order
+        lpc = np.zeros((n_frames, p + 1))
+        lpc[:, 0] = 1.0
+        if valid.any():
+            ij  = np.arange(p)[:, None] - np.arange(p)[None, :]
+            R   = acf[valid][:, np.abs(ij)]
+            rhs = -acf[valid, 1:p + 1, None]
+            try:
+                lpc[valid, 1:] = np.linalg.solve(R, rhs)[..., 0]
+            except np.linalg.LinAlgError:
+                pass
+
+        # Per-frame root finding → B1/B2/B3
+        b1 = np.zeros(n_frames)
+        b2 = np.zeros(n_frames)
+        b3 = np.zeros(n_frames)
+        f_disp = np.zeros(n_frames)
+        for i in range(n_frames):
+            if not valid[i]:
+                continue
+            try:
+                roots = np.roots(lpc[i])
+            except np.linalg.LinAlgError:
+                continue
+            # Keep complex roots in the upper half (positive imaginary)
+            roots = roots[np.imag(roots) > 0.01]
+            if len(roots) == 0:
+                continue
+            # Frequencies + bandwidths
+            angles = np.angle(roots)
+            fs     = angles * sr / (2.0 * np.pi)
+            bws    = -np.log(np.maximum(np.abs(roots), 1e-12)) * sr / np.pi
+            # Filter to plausible formant range and bandwidth < 600 Hz
+            keep = (fs >= 90) & (fs <= 5500) & (bws < 600.0) & (bws > 0)
+            fs, bws = fs[keep], bws[keep]
+            if len(fs) == 0:
+                continue
+            order_idx = np.argsort(fs)
+            fs, bws = fs[order_idx], bws[order_idx]
+            # F1 floor 200 Hz to skip pitch artefacts
+            keep2 = fs >= 200.0
+            fs, bws = fs[keep2], bws[keep2]
+            if len(fs) == 0:
+                continue
+            if len(bws) >= 1: b1[i] = bws[0]
+            if len(bws) >= 2: b2[i] = bws[1]
+            if len(bws) >= 3: b3[i] = bws[2]
+            if len(fs) >= 3:
+                f_disp[i] = (fs[2] - fs[0]) / 2.0
+
+        # SPR (singing power ratio): hi-band / lo-band (dB)
+        nfft_sp = 2048
+        Xsp     = np.fft.rfft(frames_w, nfft_sp, axis=1)
+        psd     = (np.abs(Xsp)) ** 2
+        freqs   = np.fft.rfftfreq(nfft_sp, 1.0 / sr)
+        m_lo = (freqs >= self.spr_lo[0]) & (freqs < self.spr_lo[1])
+        m_hi = (freqs >= self.spr_hi[0]) & (freqs <= self.spr_hi[1])
+        e_lo = psd[:, m_lo].sum(axis=1)
+        e_hi = psd[:, m_hi].sum(axis=1)
+        spr  = 10.0 * np.log10(np.maximum(e_hi, 1e-15) /
+                                np.maximum(e_lo, 1e-15))
+
+        # GNE-like: simplified Michaelis-style coherence between two
+        # adjacent frequency bands of the LPC residual envelope. Real
+        # GNE bandpasses + Hilbert envelopes; we approximate with two
+        # frequency bands from the spectrum and take their normalised
+        # cross-power. Marked 待验证.
+        m_g1 = (freqs >= 500.0)  & (freqs < 1500.0)
+        m_g2 = (freqs >= 1500.0) & (freqs <= 2500.0)
+        e_g1 = psd[:, m_g1].sum(axis=1)
+        e_g2 = psd[:, m_g2].sum(axis=1)
+        gne_proxy = np.minimum(e_g1, e_g2) / np.maximum(np.maximum(e_g1, e_g2), 1e-15)
+
+        # Cycle assignment
+        cycle_starts = idx[:-1]
+        frame_idx    = np.clip(cycle_starts // hop, 0, n_frames - 1)
+
+        return {
+            "b1":                  b1[frame_idx],
+            "b2":                  b2[frame_idx],
+            "b3":                  b3[frame_idx],
+            "formant_dispersion":  f_disp[frame_idx],
+            "spr":                 spr[frame_idx],
+            "gne":                 gne_proxy[frame_idx],
+        }
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# M1 ADD-ON: Whole-recording integrative metrics — MPT, Voicing Ratio, DUV.
+# These produce one scalar per recording, which we then broadcast to every
+# (MIDI, dB) cell so the metric still appears in the VRP grid (uniform
+# colour). For per-VRP-cell analytics they're less useful; for whole-
+# recording reporting (e.g. clinical summary) they're invaluable.
+# ───────────────────────────────────────────────────────────────────────────
+class IntegrativeMetricsCalculator(MetricCalculator):
+    """MPT (s), Voicing Ratio (0-1), DUV (% unvoiced) — one value broadcast per cycle."""
+
+    KEYS = ("mpt", "voicing_ratio", "duv")
+
+    def calculate(self, voice: np.ndarray, midi_per_cycle: np.ndarray,
+                  cycle_triggers: np.ndarray) -> Dict[str, np.ndarray]:
+        idx = np.where(cycle_triggers > 0.5)[0]
+        n_cycles = max(len(idx) - 1, 0)
+        if n_cycles == 0:
+            return {k: np.zeros(0) for k in self.KEYS}
+
+        sr  = self.sample_rate
+        # A cycle is "voiced" if its detected pitch (MIDI) is positive.
+        voiced_cycle = midi_per_cycle > 0
+
+        # Maximum Phonation Time = longest contiguous run of voiced cycles
+        # converted from sample-count to seconds.
+        T = np.diff(idx).astype(np.float64) / sr   # cycle durations in s
+        max_run_sec = 0.0
+        cur = 0.0
+        for i in range(n_cycles):
+            if voiced_cycle[i]:
+                cur += T[i]
+                if cur > max_run_sec:
+                    max_run_sec = cur
+            else:
+                cur = 0.0
+
+        # Voicing ratio: voiced cycles / total
+        voicing = float(voiced_cycle.mean()) if n_cycles else 0.0
+        # DUV: % of cycles that are unvoiced (within the analysed cycle set)
+        duv = 100.0 * (1.0 - voicing)
+
+        logger.info("  MPT: %.2f s   VoicingRatio: %.3f   DUV: %.2f%%",
+                    max_run_sec, voicing, duv)
+
+        # Broadcast: same value for every cycle so it lands in every cell
+        return {
+            "mpt":            np.full(n_cycles, max_run_sec, dtype=np.float64),
+            "voicing_ratio":  np.full(n_cycles, voicing,    dtype=np.float64),
+            "duv":            np.full(n_cycles, duv,        dtype=np.float64),
+        }
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# M1 ADD-ON: Vibrato Jitter — stability of the vibrato cycle period.
+# Computed only on cycles where VibratoCalculator detected a non-zero rate;
+# measures how regular the vibrato is. High value = irregular / wobbly.
+# ───────────────────────────────────────────────────────────────────────────
+class VibratoJitterCalculator(MetricCalculator):
+    """Per-cycle relative variability of vibrato period (%, sliding-window)."""
+
+    def __init__(self, config: VoiceMapConfig, window_cycles: int = 40):
+        super().__init__(config)
+        self.window_cycles = int(window_cycles)
+
+    def calculate(self, vibrato_rate: np.ndarray) -> np.ndarray:
+        n = len(vibrato_rate)
+        if n == 0:
+            return np.zeros(0)
+        W = min(self.window_cycles, max(n // 4, 4))
+        if n < W or W < 4:
+            return np.zeros(n)
+
+        # Sliding window CV of vibrato period (1/rate, ignoring zero rates)
+        out = np.zeros(n)
+        wins = sliding_window_view(vibrato_rate, W)
+        for i, w in enumerate(wins):
+            valid = w > 0
+            if valid.sum() < 4:
+                continue
+            periods = 1.0 / w[valid]
+            mu = periods.mean()
+            sd = periods.std()
+            out[i + W // 2] = 100.0 * sd / max(mu, 1e-9)
+        # Edge padding
+        if (out > 0).any():
+            first_nz = np.argmax(out > 0)
+            last_nz  = n - 1 - np.argmax((out > 0)[::-1])
+            out[:first_nz] = out[first_nz]
+            out[last_nz + 1:] = out[last_nz]
+
+        good = out > 0
+        if good.any():
+            logger.info("  VibratoJitter: mean=%.2f%%  range=[%.2f, %.2f]",
+                        float(out[good].mean()),
+                        float(out[good].min()), float(out[good].max()))
         return out
 
 

@@ -210,6 +210,25 @@ def run_validation(wav_path: str):
         ("ZCR",            0.0,  1.0),
         ("VibratoRate",    0.0,  10.0),
         ("VibratoExtent",  0.0,  500.0),
+        # M1 add-on (待验证) — wide ranges since uncalibrated
+        ("RMS",            0.0,  2.0),
+        ("F0_Hz",         50.0,  1500.0),
+        ("SpectralCentroid",  0.0,  10000.0),
+        ("SpectralBandwidth", 0.0,  10000.0),
+        ("SpectralRolloff85", 0.0,  20000.0),
+        ("SpectralFlatness",  0.0,  1.0),
+        ("AlphaRatio",      -60.0,  60.0),
+        ("HammarbergIndex", -60.0,  80.0),
+        ("B1",              0.0,  600.0),
+        ("B2",              0.0,  600.0),
+        ("B3",              0.0,  600.0),
+        ("FormantDispersion", 0.0,  3000.0),
+        ("SPR",            -50.0,  30.0),
+        ("GNE",             0.0,  1.0),
+        ("MPT",             0.0,  600.0),
+        ("VoicingRatio",    0.0,  1.0),
+        ("DUV",             0.0,  100.0),
+        ("VibratoJitter",   0.0,  100.0),
     ]
     for col, lo, hi in range_checks:
         if col not in df.columns:
