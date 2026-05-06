@@ -21,6 +21,7 @@ from voicemap.gui.theme import (
     PANEL, PANEL_HI, BORDER, TEXT, MUTED, ACCENT,
     FONT_UI, FONT_UI_B,
 )
+from voicemap.i18n import tr
 
 if TYPE_CHECKING:
     from voicemap.gui.app import VoiceMapApp
@@ -35,7 +36,7 @@ class SettingsDialog(tk.Toplevel):
         super().__init__(app)
         self.app = app
         self.transient(app)
-        self.title("设置")
+        self.title(tr("settings.title"))
         self.configure(bg=PANEL)
         self.resizable(False, False)
 
@@ -43,10 +44,10 @@ class SettingsDialog(tk.Toplevel):
         pad.pack(padx=24, pady=20)
 
         # ─ 分析参数 ─
-        tk.Label(pad, text="分析参数", bg=PANEL, fg=ACCENT, font=FONT_UI_B
+        tk.Label(pad, text=tr("settings.section.analysis"), bg=PANEL, fg=ACCENT, font=FONT_UI_B
                  ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
 
-        tk.Label(pad, text="Clarity 阈值", bg=PANEL, fg=TEXT, font=FONT_UI
+        tk.Label(pad, text=tr("settings.clarity"), bg=PANEL, fg=TEXT, font=FONT_UI
                  ).grid(row=1, column=0, sticky="w", pady=3)
         wrap = tk.Frame(pad, bg=PANEL)
         wrap.grid(row=1, column=1, sticky="w", padx=(18, 0), pady=3)
@@ -54,30 +55,30 @@ class SettingsDialog(tk.Toplevel):
                     textvariable=app.clarity_var,
                     format="%.2f", width=8, font=FONT_UI,
                     ).pack(side="left")
-        tk.Label(wrap, text="(0.80 – 1.00)", bg=PANEL, fg=MUTED,
+        tk.Label(wrap, text=tr("settings.clarity_range"), bg=PANEL, fg=MUTED,
                  font=FONT_UI).pack(side="left", padx=(8, 0))
         # 兼容 update_clarity_label 调用；没有单独的数字显示了，做成 no-op
         self.clarity_lbl = None
 
         # ─ 聚类（下次分析生效） ─
-        tk.Label(pad, text="聚类  (下次分析生效)", bg=PANEL, fg=ACCENT, font=FONT_UI_B
+        tk.Label(pad, text=tr("settings.section.cluster"), bg=PANEL, fg=ACCENT, font=FONT_UI_B
                  ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(18, 6))
 
-        tk.Label(pad, text="簇数 k", bg=PANEL, fg=TEXT, font=FONT_UI
+        tk.Label(pad, text=tr("settings.cluster_k"), bg=PANEL, fg=TEXT, font=FONT_UI
                  ).grid(row=3, column=0, sticky="w", pady=3)
         ttk.Spinbox(pad, from_=2, to=10, textvariable=app.cluster_k_var,
                     width=6).grid(row=3, column=1, sticky="w", padx=(18, 0), pady=3)
 
-        tk.Label(pad, text="谐波数 n", bg=PANEL, fg=TEXT, font=FONT_UI
+        tk.Label(pad, text=tr("settings.cluster_n"), bg=PANEL, fg=TEXT, font=FONT_UI
                  ).grid(row=4, column=0, sticky="w", pady=3)
         ttk.Spinbox(pad, from_=3, to=20, textvariable=app.cluster_nharm_var,
                     width=6).grid(row=4, column=1, sticky="w", padx=(18, 0), pady=3)
 
         # ─ 输出 ─
-        tk.Label(pad, text="输出", bg=PANEL, fg=ACCENT, font=FONT_UI_B
+        tk.Label(pad, text=tr("settings.section.output"), bg=PANEL, fg=ACCENT, font=FONT_UI_B
                  ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(18, 6))
 
-        tk.Label(pad, text="目录", bg=PANEL, fg=TEXT, font=FONT_UI
+        tk.Label(pad, text=tr("settings.outdir"), bg=PANEL, fg=TEXT, font=FONT_UI
                  ).grid(row=6, column=0, sticky="w", pady=3)
         out_row = tk.Frame(pad, bg=PANEL)
         out_row.grid(row=6, column=1, sticky="ew", padx=(18, 0), pady=3)
@@ -88,25 +89,25 @@ class SettingsDialog(tk.Toplevel):
                    ).pack(side="left", padx=(6, 0))
 
         # 自动导出 PNG 开关
-        tk.Label(pad, text="自动导出 PNG", bg=PANEL, fg=TEXT, font=FONT_UI
+        tk.Label(pad, text=tr("settings.auto_png"), bg=PANEL, fg=TEXT, font=FONT_UI
                  ).grid(row=7, column=0, sticky="w", pady=3)
         exp_row = tk.Frame(pad, bg=PANEL)
         exp_row.grid(row=7, column=1, sticky="w", padx=(18, 0), pady=3)
         ttk.Checkbutton(exp_row, variable=app.export_plots_var,
-                        text="分析完成后输出到 plots/").pack(anchor="w")
+                        text=tr("settings.auto_png_to")).pack(anchor="w")
         layout_row = tk.Frame(exp_row, bg=PANEL)
         layout_row.pack(anchor="w", pady=(4, 0))
         ttk.Radiobutton(layout_row, variable=app.plot_layout_var,
-                        value="per-metric", text="每 metric 一张图"
+                        value="per-metric", text=tr("settings.layout.per")
                         ).pack(side="left")
         ttk.Radiobutton(layout_row, variable=app.plot_layout_var,
-                        value="combined", text="合并为一张总览"
+                        value="combined", text=tr("settings.layout.comb")
                         ).pack(side="left", padx=(12, 0))
 
         # ─ 关闭 ─
         btn_row = tk.Frame(pad, bg=PANEL)
         btn_row.grid(row=8, column=0, columnspan=2, sticky="e", pady=(22, 0))
-        ttk.Button(btn_row, text="完成", style="Accent.TButton",
+        ttk.Button(btn_row, text=tr("settings.done"), style="Accent.TButton",
                    command=self.destroy).pack()
 
         # 居中到父窗口
@@ -133,7 +134,7 @@ class CompareDialog(tk.Toplevel):
         super().__init__(app)
         self.app = app
         self.transient(app)
-        self.title("对比 2 段录音 · Voice Map diff")
+        self.title(tr("compare.title"))
         self.configure(bg=PANEL)
         self.geometry("1300x560")
 
@@ -158,16 +159,16 @@ class CompareDialog(tk.Toplevel):
         # Metric + render controls
         ctrl = tk.Frame(self, bg=PANEL)
         ctrl.pack(fill="x", padx=12, pady=(4, 8))
-        tk.Label(ctrl, text="Metric:", bg=PANEL, fg=MUTED, font=FONT_UI).pack(side="left")
+        tk.Label(ctrl, text=tr("compare.metric"), bg=PANEL, fg=MUTED, font=FONT_UI).pack(side="left")
         self.metric = tk.StringVar(value="CPP")
         self.metric_combo = ttk.Combobox(ctrl, textvariable=self.metric,
                                           state="readonly", width=18, font=FONT_UI,
                                           values=["CPP"])
         self.metric_combo.pack(side="left", padx=(6, 0))
         self.metric_combo.bind("<<ComboboxSelected>>", lambda _e: self._render())
-        ttk.Button(ctrl, text="刷新绘图", style="Accent.TButton",
+        ttk.Button(ctrl, text=tr("compare.refresh"), style="Accent.TButton",
                    command=self._render).pack(side="left", padx=(12, 0))
-        ttk.Button(ctrl, text="导出 PNG", style="Ghost.TButton",
+        ttk.Button(ctrl, text=tr("compare.export_png"), style="Ghost.TButton",
                    command=self._save_png).pack(side="left", padx=(6, 0))
 
         # Canvas
@@ -177,7 +178,7 @@ class CompareDialog(tk.Toplevel):
         cw.configure(bg=PANEL, highlightthickness=0, bd=0)
         cw.pack(fill="both", expand=True, padx=12, pady=(0, 12))
 
-        self._show_msg("加载 A 和 B 的 VRP CSV")
+        self._show_msg(tr("compare.tip_load"))
 
     def _show_msg(self, msg: str):
         self._fig.clear()
@@ -191,8 +192,8 @@ class CompareDialog(tk.Toplevel):
 
     def _pick_csv(self, slot: str):
         path = filedialog.askopenfilename(
-            parent=self, title=f"选 {slot.upper()} 的 VRP CSV",
-            filetypes=[("CSV", "*.csv")],
+            parent=self, title=tr("compare.tip_pick", slot=slot.upper()),
+            filetypes=[(tr("fd.filter.csv"), "*.csv")],
             initialdir=str(Path(self.app.output_dir_var.get())))
         if not path:
             return
@@ -200,7 +201,7 @@ class CompareDialog(tk.Toplevel):
             import pandas as _pd
             df = _pd.read_csv(path, sep=";")
         except Exception as e:  # noqa: BLE001
-            self._show_msg(f"读取失败：{e}")
+            self._show_msg(tr("compare.tip_read_fail", e=e))
             return
         if slot == "a":
             self.csv_a.set(path); self._df_a = df
@@ -217,7 +218,7 @@ class CompareDialog(tk.Toplevel):
 
     def _render(self):
         if self._df_a is None or self._df_b is None:
-            self._show_msg("还没加载两个 CSV")
+            self._show_msg(tr("compare.tip_load_both"))
             return
         from voicemap.plotter import draw_vrp_comparison
         ok = draw_vrp_comparison(
@@ -225,7 +226,7 @@ class CompareDialog(tk.Toplevel):
             label_a=Path(self.csv_a.get()).stem,
             label_b=Path(self.csv_b.get()).stem)
         if not ok:
-            self._show_msg(f"{self.metric.get()} 在 A/B 中都为空")
+            self._show_msg(tr("compare.tip_empty", metric=self.metric.get()))
             return
         self._canvas.draw_idle()
 
@@ -233,7 +234,7 @@ class CompareDialog(tk.Toplevel):
         if self._df_a is None or self._df_b is None:
             return
         path = filedialog.asksaveasfilename(
-            parent=self, title="保存对比 PNG",
+            parent=self, title=tr("compare.fd.save"),
             defaultextension=".png", filetypes=[("PNG", "*.png")],
             initialfile=f"{Path(self.csv_a.get()).stem}_vs_{Path(self.csv_b.get()).stem}_{self.metric.get()}.png")
         if not path:
@@ -241,9 +242,9 @@ class CompareDialog(tk.Toplevel):
         try:
             self._fig.savefig(path, dpi=130, bbox_inches="tight",
                                facecolor=self._fig.get_facecolor())
-            self.app._append_log("META", f"✓ 对比图已保存：{path}")
+            self.app._append_log("META", tr("compare.log.saved", path=path))
         except Exception as e:  # noqa: BLE001
-            self.app._append_log("ERROR", f"保存失败：{e}")
+            self.app._append_log("ERROR", tr("compare.log.fail", e=e))
 
 
 # ─── 分析进度对话框 ──────────────────────────────────────────────────────────
@@ -252,7 +253,7 @@ class ProgressDialog(tk.Toplevel):
     def __init__(self, parent: tk.Misc, filename: str):
         super().__init__(parent)
         self.transient(parent)
-        self.title("分析进行中")
+        self.title(tr("progress.title"))
         self.configure(bg=PANEL)
         self.resizable(False, False)
         # 模态：点不到主窗口（也包括拖放区）
@@ -266,7 +267,7 @@ class ProgressDialog(tk.Toplevel):
         pad = tk.Frame(self, bg=PANEL)
         pad.pack(padx=28, pady=22)
 
-        tk.Label(pad, text="正在分析 · Voice Range Profile",
+        tk.Label(pad, text=tr("progress.heading"),
                  bg=PANEL, fg=ACCENT, font=("Segoe UI Semibold", 13)
                  ).pack(anchor="w")
         tk.Label(pad, text=filename, bg=PANEL, fg=TEXT,
@@ -288,7 +289,7 @@ class ProgressDialog(tk.Toplevel):
         self._step_lbl = tk.Label(step_row, text="—",
                                    bg=PANEL, fg=ACCENT, font=FONT_UI_B)
         self._step_lbl.pack(side="left")
-        self._status = tk.Label(step_row, text="准备中…",
+        self._status = tk.Label(step_row, text=tr("progress.preparing"),
                                  bg=PANEL, fg=TEXT, font=FONT_UI,
                                  anchor="w", wraplength=320, justify="left")
         self._status.pack(side="left", padx=(10, 0))
@@ -343,7 +344,7 @@ class AboutDialog(tk.Toplevel):
             __author__, __email__, __license__, __copyright__,
         )
         self.transient(app)
-        self.title("关于")
+        self.title(tr("about.title"))
         self.configure(bg=PANEL)
         self.resizable(False, False)
 
@@ -361,8 +362,7 @@ class AboutDialog(tk.Toplevel):
 
         # 描述
         tk.Label(pad,
-                 text="Voice Range Profile (VRP) 多维分析工具\n"
-                      "Stereo WAV → 40+ voice-quality metrics on the (MIDI, SPL) grid",
+                 text=tr("about.description"),
                  bg=PANEL, fg=MUTED, font=FONT_UI, justify="center"
                  ).pack(pady=(0, 16))
 
@@ -370,10 +370,10 @@ class AboutDialog(tk.Toplevel):
         info = tk.Frame(pad, bg=PANEL)
         info.pack(anchor="w", pady=(0, 16))
         rows = [
-            ("作者 / Author", __author__),
-            ("邮箱 / Email", __email__),
-            ("许可 / License", __license__),
-            ("版权 / Copyright", __copyright__),
+            (tr("about.author"), __author__),
+            (tr("about.email"), __email__),
+            (tr("about.license"), __license__),
+            (tr("about.copyright"), __copyright__),
         ]
         for i, (label, value) in enumerate(rows):
             tk.Label(info, text=label, bg=PANEL, fg=MUTED, font=FONT_UI,
@@ -383,7 +383,7 @@ class AboutDialog(tk.Toplevel):
                      anchor="w").grid(row=i, column=1, sticky="w", pady=2)
 
         # 关闭按钮
-        ttk.Button(pad, text="关闭", style="Accent.TButton",
+        ttk.Button(pad, text=tr("about.close"), style="Accent.TButton",
                    command=self.destroy).pack()
 
         # 居中到父窗口

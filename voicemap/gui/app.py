@@ -424,6 +424,50 @@ class VoiceMapApp(_TkBase):
             self._build_menubar()
         except tk.TclError:
             pass
+        # Update persistent widgets created in _build_header / _build_top_bar /
+        # _build_left_panel. Each is wrapped in a guard so a missing widget
+        # (e.g. mid-init reorder) doesn't tank the whole switch.
+        def _safe_text(attr_name: str, key: str, **kw):
+            w = getattr(self, attr_name, None)
+            if w is None:
+                return
+            try:
+                w.configure(text=tr(key, **kw))
+            except tk.TclError:
+                pass
+
+        _safe_text("_header_title",   "app.title")
+        # status_lbl: re-render under the current status_key/kwargs
+        if hasattr(self, "status_lbl") and hasattr(self, "_status_key"):
+            try:
+                self.status_lbl.configure(
+                    text=tr(self._status_key, **(self._status_kwargs or {})))
+            except tk.TclError:
+                pass
+        # drop zone — pick the right key based on whether DnD is active
+        try:
+            if self.drop_label.cget("text"):  # only if not analyzed yet
+                # If a wav was loaded the label shows the filename; don't clobber.
+                txt = self.drop_label.cget("text")
+                if txt in (tr("drop.title"), tr("drop.title_no_dnd")) or \
+                   txt in ("拖入 .wav 文件  /  点击浏览",
+                           "Drop a .wav file  /  click to browse",
+                           "点击浏览（安装 tkinterdnd2 可启用拖拽）",
+                           "Click to browse (install tkinterdnd2 to enable drag-drop)"):
+                    self.drop_label.configure(
+                        text=tr("drop.title" if _DND_OK else "drop.title_no_dnd"))
+        except tk.TclError:
+            pass
+        _safe_text("drop_sub",        "drop.subtitle")
+        _safe_text("_metric_label",   "header.metric")
+        _safe_text("_settings_btn",   "left.settings")
+        _safe_text("_latest_csv_lbl", "left.latest_csv")
+        _safe_text("open_csv_btn",    "left.open_csv")
+        _safe_text("open_plots_btn",  "left.open_outdir")
+        _safe_text("excel_btn",       "left.export_excel")
+        _safe_text("report_btn",      "left.gen_report")
+        _safe_text("_compare_btn",    "left.compare")
+        _safe_text("_log_lbl",        "left.log")
 
     # ── popup factories（每次点开新建一个 ModernPopup） ──────────────────
     def _popup_file(self) -> "ModernPopup":
@@ -566,12 +610,18 @@ class VoiceMapApp(_TkBase):
     def _build_header(self, parent):
         head = tk.Frame(parent, bg=BG)
         head.pack(fill="x", pady=(0, 8))
-        tk.Label(head, text="嗓音声学品质多维分析图谱",
-                 bg=BG, fg=TEXT, font=FONT_TITLE).pack(side="left")
+        # Header title — same as window title; updates via _on_language_changed.
+        self._header_title = tk.Label(head, text=tr("app.title"),
+                                       bg=BG, fg=TEXT, font=FONT_TITLE)
+        self._header_title.pack(side="left")
         self.status_dot = tk.Label(head, text="●", bg=BG, fg=MUTED, font=("Segoe UI", 12))
         self.status_dot.pack(side="right", padx=(0, 4))
-        self.status_lbl = tk.Label(head, text="就绪", bg=BG, fg=MUTED, font=FONT_SUB)
+        self.status_lbl = tk.Label(head, text=tr("status.ready"),
+                                    bg=BG, fg=MUTED, font=FONT_SUB)
         self.status_lbl.pack(side="right")
+        # 默认 status 文本是固定 key；_set_status 时会换成具体 key。
+        self._status_key = "status.ready"
+        self._status_kwargs: dict = {}
 
     def _build_top_bar(self, parent):
         bar = tk.Frame(parent, bg=BG)
@@ -585,11 +635,12 @@ class VoiceMapApp(_TkBase):
 
         inner = tk.Frame(self.drop_zone, bg=PANEL_HI)
         inner.pack(fill="x", padx=18, pady=14)
-        hint = "拖入 .wav 文件  /  点击浏览" if _DND_OK else "点击浏览（安装 tkinterdnd2 可启用拖拽）"
-        self.drop_label = tk.Label(inner, text=hint, bg=PANEL_HI, fg=TEXT, font=FONT_DROP)
+        self.drop_label = tk.Label(inner,
+                                   text=tr("drop.title" if _DND_OK else "drop.title_no_dnd"),
+                                   bg=PANEL_HI, fg=TEXT, font=FONT_DROP)
         self.drop_label.pack(anchor="w")
         self.drop_sub = tk.Label(inner,
-                                 text="立体声 WAV · 通道 1 = 麦克风   通道 2 = EGG",
+                                 text=tr("drop.subtitle"),
                                  bg=PANEL_HI, fg=MUTED, font=FONT_UI)
         self.drop_sub.pack(anchor="w")
 
@@ -601,7 +652,9 @@ class VoiceMapApp(_TkBase):
         # Metric 按钮 + 分类菜单（组合框没有原生节分隔，改用 Menubutton）
         side = tk.Frame(bar, bg=BG)
         side.pack(side="right", padx=(14, 0))
-        tk.Label(side, text="Metric", bg=BG, fg=MUTED, font=FONT_UI).pack(anchor="w")
+        self._metric_label = tk.Label(side, text=tr("header.metric"),
+                                       bg=BG, fg=MUTED, font=FONT_UI)
+        self._metric_label.pack(anchor="w")
         # 当前 metric 的展示标签（不再可点开 popup —— 选 metric 走顶部菜单栏，
         # Praat 风格：每个分类一个顶级 cascade）。保留 widget 名 metric_btn 是
         # 为了让其它地方（_refresh_metric_dropdown / _cycle_metric / 旧代码）
@@ -629,11 +682,15 @@ class VoiceMapApp(_TkBase):
         pad.pack(fill="both", expand=True, padx=14, pady=14)
 
         # 设置入口（Clarity 阈值 / 输出目录 等都在对话框里）
-        ttk.Button(pad, text="⚙  设置", style="Ghost.TButton",
-                   command=self._open_settings).pack(fill="x", pady=(0, 14))
+        self._settings_btn = ttk.Button(pad, text=tr("left.settings"),
+                                         style="Ghost.TButton",
+                                         command=self._open_settings)
+        self._settings_btn.pack(fill="x", pady=(0, 14))
 
         # CSV 结果
-        tk.Label(pad, text="最新 CSV", bg=PANEL, fg=ACCENT, font=FONT_UI_B).pack(anchor="w")
+        self._latest_csv_lbl = tk.Label(pad, text=tr("left.latest_csv"),
+                                         bg=PANEL, fg=ACCENT, font=FONT_UI_B)
+        self._latest_csv_lbl.pack(anchor="w")
         self.csv_lbl = tk.Label(pad, textvariable=self.csv_path_var,
                                 bg=PANEL, fg=MUTED, font=FONT_MONO,
                                 wraplength=280, justify="left", anchor="w")
@@ -641,34 +698,41 @@ class VoiceMapApp(_TkBase):
 
         btn_row = tk.Frame(pad, bg=PANEL)
         btn_row.pack(fill="x", pady=(0, 12))
-        self.open_csv_btn = ttk.Button(btn_row, text="打开 CSV", style="Ghost.TButton",
-                                       command=self._open_csv)
+        self.open_csv_btn = ttk.Button(btn_row, text=tr("left.open_csv"),
+                                        style="Ghost.TButton",
+                                        command=self._open_csv)
         self.open_csv_btn.pack(side="left")
         self.open_csv_btn.state(["disabled"])
-        self.open_plots_btn = ttk.Button(btn_row, text="打开输出目录", style="Ghost.TButton",
-                                         command=self._open_output_dir)
+        self.open_plots_btn = ttk.Button(btn_row, text=tr("left.open_outdir"),
+                                          style="Ghost.TButton",
+                                          command=self._open_output_dir)
         self.open_plots_btn.pack(side="left", padx=(6, 0))
 
         btn_row2 = tk.Frame(pad, bg=PANEL)
         btn_row2.pack(fill="x", pady=(0, 12))
-        self.excel_btn = ttk.Button(btn_row2, text="导出 Excel", style="Ghost.TButton",
+        self.excel_btn = ttk.Button(btn_row2, text=tr("left.export_excel"),
+                                     style="Ghost.TButton",
                                      command=self._export_excel)
         self.excel_btn.pack(side="left")
         self.excel_btn.state(["disabled"])
-        self.report_btn = ttk.Button(btn_row2, text="生成报告", style="Ghost.TButton",
-                                       command=self._export_report)
+        self.report_btn = ttk.Button(btn_row2, text=tr("left.gen_report"),
+                                      style="Ghost.TButton",
+                                      command=self._export_report)
         self.report_btn.pack(side="left", padx=(6, 0))
         self.report_btn.state(["disabled"])
-        ttk.Button(btn_row2, text="对比 2 段录音…", style="Ghost.TButton",
-                   command=self._open_compare_dialog
-                   ).pack(side="left", padx=(6, 0))
+        self._compare_btn = ttk.Button(btn_row2, text=tr("left.compare"),
+                                        style="Ghost.TButton",
+                                        command=self._open_compare_dialog)
+        self._compare_btn.pack(side="left", padx=(6, 0))
 
         # 进度条
         self.progress = ttk.Progressbar(pad, mode="indeterminate")
         self.progress.pack(fill="x", pady=(0, 12))
 
         # 日志
-        tk.Label(pad, text="日志", bg=PANEL, fg=ACCENT, font=FONT_UI_B).pack(anchor="w")
+        self._log_lbl = tk.Label(pad, text=tr("left.log"),
+                                  bg=PANEL, fg=ACCENT, font=FONT_UI_B)
+        self._log_lbl.pack(anchor="w")
         log_wrap = tk.Frame(pad, bg=PANEL)
         log_wrap.pack(fill="both", expand=True, pady=(4, 0))
         self.log_text = tk.Text(log_wrap, bg="#0b1117", fg=TEXT, font=FONT_MONO,
@@ -810,7 +874,7 @@ class VoiceMapApp(_TkBase):
             self.drop_zone.drop_target_register(DND_FILES)
             self.drop_zone.dnd_bind("<<Drop>>", self._on_drop)
         except Exception as e:  # noqa: BLE001
-            self._append_log("WARNING", f"拖放未就绪：{e}")
+            self._append_log("WARNING", tr("log.dnd_failed", e=e))
 
     def _on_drop(self, event):
         try:
@@ -820,11 +884,11 @@ class VoiceMapApp(_TkBase):
 
         wav = next((p for p in paths if str(p).lower().endswith(".wav")), None)
         if not wav:
-            self._append_log("WARNING", "忽略：非 .wav 文件")
+            self._append_log("WARNING", tr("log.ignored_non_wav"))
             return
 
         if self._worker and self._worker.is_alive():
-            self._append_log("WARNING", "分析进行中，已忽略新文件")
+            self._append_log("WARNING", tr("log.analysis_busy"))
             return
 
         self._start_analysis(str(wav))
@@ -864,7 +928,9 @@ class VoiceMapApp(_TkBase):
             self._fig.set_size_inches(need_w, need_h, forward=False)
 
     # ── 占位画面 ──
-    def _show_placeholder(self, msg: str = "拖入 .wav 文件开始"):
+    def _show_placeholder(self, msg: str | None = None):
+        if msg is None:
+            msg = tr("drop.placeholder")
         """
         占位画面跟分析完成后的 voice map 用同一套布局：白底、同样的
         subplots_adjust 边距、MIDI/SPL 轴范围一致。这样从"未分析"
@@ -909,13 +975,13 @@ class VoiceMapApp(_TkBase):
         if self._worker and self._worker.is_alive():
             return
         path = filedialog.askopenfilename(
-            title="选择音频文件",
-            filetypes=[("WAV 文件", "*.wav"), ("所有文件", "*.*")])
+            title=tr("fd.pick_audio"),
+            filetypes=[(tr("fd.filter.wav"), "*.wav"), (tr("fd.filter.all"), "*.*")])
         if path:
             self._start_analysis(path)
 
     def _pick_output_dir(self):
-        path = filedialog.askdirectory(title="选择输出目录",
+        path = filedialog.askdirectory(title=tr("fd.pick_outdir"),
                                        initialdir=self.output_dir_var.get())
         if path:
             self.output_dir_var.set(path)
@@ -926,12 +992,12 @@ class VoiceMapApp(_TkBase):
 
         p = Path(audio_path)
         if not p.exists():
-            self._append_log("ERROR", f"文件不存在：{audio_path}")
+            self._append_log("ERROR", tr("log.no_file", path=audio_path))
             return
 
         out_dir = self.output_dir_var.get().strip()
         if not out_dir:
-            self._append_log("ERROR", "请先指定输出目录")
+            self._append_log("ERROR", tr("log.no_outdir"))
             return
         Path(out_dir).mkdir(parents=True, exist_ok=True)
 
@@ -948,8 +1014,8 @@ class VoiceMapApp(_TkBase):
         self.metric_btn.config(state="disabled")
         self.open_csv_btn.state(["disabled"])
         self.progress.start(12)
-        self._set_status("分析中…", ACCENT)
-        self._show_placeholder("分析中…")
+        self._set_status(tr("status.analyzing"), ACCENT, key="status.analyzing")
+        self._show_placeholder(tr("status.analyzing"))
 
         # 弹出分析进度对话框（模态，关不掉，分析结束自动关）
         try:
@@ -1050,13 +1116,13 @@ class VoiceMapApp(_TkBase):
                 pass
             # M2 plot toolbar (拟合 / 标注 / 保存 / 复制) — 分析完才能用
             self._enable_plot_toolbar()
-            self._set_status(f"完成 · {payload['points']:,} 点", OK)
+            self._set_status(tr("status.done", n=f"{payload['points']:,}"), OK, key="status.done", n=f"{payload['points']:,}")
             self._append_log("META", f"✓ {payload['csv']}")
             self._refresh_metric_dropdown()
         else:
-            self._set_status("失败", ERR)
+            self._set_status(tr("status.failed"), ERR, key="status.failed")
             self._append_log("ERROR", payload["error"])
-            self._show_placeholder("分析失败 — 查看日志")
+            self._show_placeholder(tr("placeholder.failed"))
 
     # ── Metric 切换 ──
     def _refresh_metric_dropdown(self):
@@ -1112,7 +1178,7 @@ class VoiceMapApp(_TkBase):
         if not flat:
             self.metric_btn.config(state="disabled")
             self._set_nav_visible(False)
-            self._show_placeholder("无可用 metric")
+            self._show_placeholder(tr("placeholder.no_metric"))
             return
 
         self.metric_btn.config(state="normal")
@@ -1174,7 +1240,7 @@ class VoiceMapApp(_TkBase):
         if "Clarity" in df.columns:
             df = df[df["Clarity"] >= thr]
             if len(df) == 0:
-                self._show_placeholder(f"Clarity ≥ {thr:.2f} · 无 cell")
+                self._show_placeholder(tr("placeholder.no_cell", thr=thr))
                 return
 
         self._showing_placeholder = False
@@ -1199,7 +1265,7 @@ class VoiceMapApp(_TkBase):
         ax = self._fig.add_subplot(111)
         ok = draw_vrp_on_ax(ax, self._fig, df, col)
         if not ok:
-            self._show_placeholder(f"{col} · 无数据")
+            self._show_placeholder(tr("placeholder.no_data", col=col))
             return
         self._canvas.draw_idle()
 
@@ -1257,13 +1323,13 @@ class VoiceMapApp(_TkBase):
         if self._loaded_centroids_path:
             name = Path(self._loaded_centroids_path).name
             k = self._loaded_centroids.shape[0] if self._loaded_centroids is not None else "?"
-            return f"已加载 {name} (k={k})"
-        return "（未加载，将从头训练）"
+            return tr("centroid.status.loaded", name=name, k=k)
+        return tr("centroid.status.untrained")
 
     def _load_centroids(self):
         path = filedialog.askopenfilename(
-            title="加载 centroid CSV",
-            filetypes=[("CSV", "*.csv"), ("所有", "*.*")])
+            title=tr("fd.pick_centroid"),
+            filetypes=[(tr("fd.filter.csv"), "*.csv"), (tr("fd.filter.all"), "*.*")])
         if not path:
             return
         try:
@@ -1295,29 +1361,29 @@ class VoiceMapApp(_TkBase):
             self.cluster_k_var.set(cent.shape[0])
             if header_n:
                 self.cluster_nharm_var.set(header_n)
-            self._append_log("META", f"✓ centroids 加载：{Path(path).name} k={cent.shape[0]}")
+            self._append_log("META", tr("log.centroid_loaded", name=Path(path).name, k=cent.shape[0]))
             self._refresh_centroid_status()
         except Exception as e:  # noqa: BLE001
-            self._append_log("ERROR", f"centroid 加载失败：{e}")
+            self._append_log("ERROR", tr("log.centroid_load_fail", e=e))
 
     def _train_centroids_from_many(self):
         """Pick multiple wavs → pool EGG features → one K-means → save CSV.
         Produces centroids that yield consistent cluster labels across all
         recordings analysed against them (cross-subject studies)."""
         if self._worker and self._worker.is_alive():
-            self._append_log("WARNING", "分析进行中，训练已忽略")
+            self._append_log("WARNING", tr("log.train_busy"))
             return
         paths = filedialog.askopenfilenames(
-            title="选择多个 .wav 做联合 centroid 训练",
-            filetypes=[("WAV", "*.wav"), ("所有", "*.*")])
+            title=tr("fd.pick_train_wavs"),
+            filetypes=[(tr("fd.filter.wav"), "*.wav"), (tr("fd.filter.all"), "*.*")])
         if not paths:
             return
         paths = [str(Path(p)) for p in paths if str(p).lower().endswith(".wav")]
         if not paths:
-            self._append_log("WARNING", "没有选到 .wav")
+            self._append_log("WARNING", tr("log.no_wav_picked"))
             return
         out_csv = filedialog.asksaveasfilename(
-            title="保存联合 centroid 到 CSV",
+            title=tr("fd.save_centroid"),
             defaultextension=".csv",
             filetypes=[("CSV", "*.csv")],
             initialfile="cEGG_joint.csv")
@@ -1327,7 +1393,7 @@ class VoiceMapApp(_TkBase):
         # Modal progress dialog (reuse ProgressDialog shell)
         dlg = ProgressDialog(self, f"{len(paths)} 个 wav")
         self._progress_dialog = dlg
-        dlg.set_status("准备训练…")
+        dlg.set_status(tr("progress.training"))
 
         k_snap     = int(self.cluster_k_var.get())
         nharm_snap = int(self.cluster_nharm_var.get())
@@ -1368,18 +1434,19 @@ class VoiceMapApp(_TkBase):
             if self.cent_save_btn is not None: self.cent_save_btn.state(["!disabled"])
             self._refresh_centroid_status()
             self._append_log("META",
-                             f"✓ 联合训练完成：{payload['n_wavs']} 个 wav → "
-                             f"{Path(payload['csv']).name}")
-            self._append_log("INFO", "已自动加载新 centroid；下一次拖 wav 分析会用它")
+                             tr("log.train_done",
+                                n=payload['n_wavs'],
+                                file=Path(payload['csv']).name))
+            self._append_log("INFO", tr("log.train_loaded"))
         else:
             self._append_log("ERROR", payload["error"])
 
     def _save_centroids(self):
         if self._last_analyzer is None:
-            self._append_log("WARNING", "还没分析过，没有 centroid 可保存")
+            self._append_log("WARNING", tr("log.no_centroid"))
             return
         path = filedialog.asksaveasfilename(
-            title="保存 centroid CSV",
+            title=tr("fd.save_centroid_one"),
             defaultextension=".csv",
             filetypes=[("CSV", "*.csv")],
             initialfile="cEGG.csv")
@@ -1387,9 +1454,9 @@ class VoiceMapApp(_TkBase):
             return
         try:
             self._last_analyzer.save_centroids(path)
-            self._append_log("META", f"✓ centroids 保存：{Path(path).name}")
+            self._append_log("META", tr("log.centroid_saved", name=Path(path).name))
         except Exception as e:  # noqa: BLE001
-            self._append_log("ERROR", f"centroid 保存失败：{e}")
+            self._append_log("ERROR", tr("log.centroid_save_fail", e=e))
 
     def _refresh_centroid_status(self):
         # 顶栏状态
@@ -1438,9 +1505,22 @@ class VoiceMapApp(_TkBase):
             return
         self._clarity_render_after = self.after(80, lambda c=col: self._render_metric(c))
 
-    def _set_status(self, text: str, color: str = MUTED):
+    def _set_status(self, text: str, color: str = MUTED, *,
+                     key: str | None = None, **kwargs):
+        """Update the top-right status pill.
+
+        ``text`` is the rendered string (already translated by caller).
+        For lang-switch survival, callers should also pass ``key=`` and
+        the kwargs that produced the text — _on_language_changed will
+        re-render via tr(key, **kwargs) when the user switches language.
+        """
         self.status_lbl.configure(text=text, fg=color)
         self.status_dot.configure(fg=color)
+        if key is not None:
+            self._status_key = key
+            self._status_kwargs = kwargs
+        # Persist color too, so language re-render keeps the same hue.
+        self._status_color = color
 
     def _enable_plot_toolbar(self):
         """No-op since A0-3: plot toolbar is removed in favour of the
@@ -1466,24 +1546,24 @@ class VoiceMapApp(_TkBase):
                     bg=PANEL_HI, fg=TEXT,
                     activebackground=ACCENT, activeforeground=BG,
                     font="TkMenuFont", bd=0, relief="flat", activeborderwidth=0)
-        m.add_command(label="  在图上叠加：", state="disabled",
+        m.add_command(label=tr("fit.header"), state="disabled",
                       foreground=ACCENT)
         m.add_separator()
-        m.add_command(label="  音域中心线 (linear)",
+        m.add_command(label=tr("fit.center_linear"),
                       command=lambda: self._apply_fit("center", "linear"))
-        m.add_command(label="  音域中心线 (polynomial deg=3)",
+        m.add_command(label=tr("fit.center_poly"),
                       command=lambda: self._apply_fit("center", "polynomial"))
-        m.add_command(label="  音域中心线 (spline)",
+        m.add_command(label=tr("fit.center_spline"),
                       command=lambda: self._apply_fit("center", "spline"))
-        m.add_command(label="  音域中心线 (lowess)",
+        m.add_command(label=tr("fit.center_lowess"),
                       command=lambda: self._apply_fit("center", "lowess"))
         m.add_separator()
-        m.add_command(label="  当前 metric 趋势 (twin axis, polynomial)",
+        m.add_command(label=tr("fit.trend_poly"),
                       command=lambda: self._apply_fit("trend", "polynomial"))
-        m.add_command(label="  当前 metric 趋势 (twin axis, lowess)",
+        m.add_command(label=tr("fit.trend_lowess"),
                       command=lambda: self._apply_fit("trend", "lowess"))
         m.add_separator()
-        m.add_command(label="  清除叠加",
+        m.add_command(label=tr("fit.clear"),
                       command=self._clear_overlays)
         try:
             # fit_btn 已移除（toolbar 整片删了），改在鼠标当前位置弹出
@@ -1508,7 +1588,7 @@ class VoiceMapApp(_TkBase):
                                         method=method, color="#00d9ff")
         self._overlay_mgr.add(artists)
         self._canvas.draw_idle()
-        self._append_log("META", f"叠加 {kind}/{method}")
+        self._append_log("META", tr("log.overlay_applied", kind=kind, method=method))
 
     def _toggle_annotation_mode(self):
         """Click toggle: next canvas click captures (x, y) and prompts text."""
@@ -1545,7 +1625,7 @@ class VoiceMapApp(_TkBase):
         # Prompt for text
         from tkinter import simpledialog
         text = simpledialog.askstring(
-            "标注", f"在 (MIDI={x_data:.1f}, SPL={y_data:.1f}) 处的标注文本：",
+            tr("annotate.title"), tr("annotate.prompt", x=x_data, y=y_data),
             parent=self)
         if not text:
             return
@@ -1554,7 +1634,7 @@ class VoiceMapApp(_TkBase):
         artists = add_annotation(ax, x_data, y_data, text)
         self._overlay_mgr.add(artists)
         self._canvas.draw_idle()
-        self._append_log("META", f"标注 ({x_data:.1f}, {y_data:.1f}): {text}")
+        self._append_log("META", tr("log.annotated", x=x_data, y=y_data, text=text))
         # One-shot: turn off mode after each annotation so cursor returns to normal
         self._toggle_annotation_mode()
 
@@ -1567,7 +1647,7 @@ class VoiceMapApp(_TkBase):
                     bg=PANEL_HI, fg=TEXT,
                     activebackground=ACCENT, activeforeground=BG,
                     font="TkMenuFont", bd=0, relief="flat", activeborderwidth=0)
-        m.add_command(label="  保存当前画布为：", state="disabled",
+        m.add_command(label=tr("save.header"), state="disabled",
                       foreground=ACCENT)
         m.add_separator()
         for desc, ext in SAVE_FORMATS:
@@ -1586,7 +1666,7 @@ class VoiceMapApp(_TkBase):
         from tkinter import filedialog
         default = f"{Path(self.last_csv).stem if self.last_csv else 'voice_map'}_{col}.{fmt}"
         path = filedialog.asksaveasfilename(
-            title=f"保存为 {desc}",
+            title=tr("fd.save_image", desc=desc),
             defaultextension=f".{fmt}",
             filetypes=[(desc, f"*.{fmt}")],
             initialfile=default,
@@ -1595,9 +1675,9 @@ class VoiceMapApp(_TkBase):
             return
         try:
             save_figure(self._fig, path, fmt=fmt, dpi=300)
-            self._append_log("META", f"✓ 已保存: {path}")
+            self._append_log("META", tr("log.image_saved", path=path))
         except Exception as e:  # noqa: BLE001
-            self._append_log("ERROR", f"保存失败: {e}")
+            self._append_log("ERROR", tr("log.save_fail", e=e))
 
     def _copy_canvas(self):
         from voicemap.plot_overlay import copy_figure_to_clipboard
@@ -1605,10 +1685,10 @@ class VoiceMapApp(_TkBase):
             return
         ok = copy_figure_to_clipboard(self._fig)
         if ok:
-            self._append_log("META", "✓ 已复制到剪贴板")
+            self._append_log("META", tr("log.copied_clipboard"))
         else:
             self._append_log("ERROR",
-                              "复制失败 — 检查 pywin32 (Win) 或 xclip/wl-copy (Linux)")
+                              tr("log.copy_fail"))
 
     # ────────────────────────────────────────────────────────────────────
     def _open_compare_dialog(self):
@@ -1618,11 +1698,11 @@ class VoiceMapApp(_TkBase):
     def _export_report(self):
         """生成中文嗓音分析报告 (.md)：每项指标按临床阈值自动分级。"""
         if self._last_df is None or self.last_csv is None:
-            self._append_log("WARNING", "还没分析过，无法生成报告")
+            self._append_log("WARNING", tr("log.no_data_for_report"))
             return
         default = str(Path(self.last_csv).with_suffix(".report.md"))
         path = filedialog.asksaveasfilename(
-            title="导出嗓音分析报告",
+            title=tr("fd.save_report"),
             defaultextension=".md",
             filetypes=[("Markdown", "*.md"), ("Text", "*.txt")],
             initialfile=Path(default).name,
@@ -1633,18 +1713,18 @@ class VoiceMapApp(_TkBase):
             from voicemap.report import generate_report
             audio_name = self.audio_path.name if self.audio_path else "(unknown)"
             generate_report(self._last_df, path, audio_name=audio_name)
-            self._append_log("META", f"✓ 报告已导出：{path}")
+            self._append_log("META", tr("log.report_saved", path=path))
         except Exception as e:  # noqa: BLE001
-            self._append_log("ERROR", f"报告生成失败：{e}")
+            self._append_log("ERROR", tr("log.report_fail", e=e))
 
     def _export_excel(self):
         """一次分析完成后，可导出 .xlsx：Summary + Grouped + 每 metric 一个 heatmap sheet。"""
         if self._last_df is None or self.last_csv is None:
-            self._append_log("WARNING", "还没分析过，无法导出 Excel")
+            self._append_log("WARNING", tr("log.no_data_for_excel"))
             return
         default = str(Path(self.last_csv).with_suffix(".xlsx"))
         path = filedialog.asksaveasfilename(
-            title="导出 Excel",
+            title=tr("fd.save_excel"),
             defaultextension=".xlsx",
             filetypes=[("Excel", "*.xlsx")],
             initialfile=Path(default).name,
@@ -1654,9 +1734,9 @@ class VoiceMapApp(_TkBase):
         try:
             from voicemap.excel_export import export_vrp_xlsx
             export_vrp_xlsx(self._last_df, path)
-            self._append_log("META", f"✓ Excel 已导出：{path}")
+            self._append_log("META", tr("log.excel_saved", path=path))
         except Exception as e:  # noqa: BLE001
-            self._append_log("ERROR", f"Excel 导出失败：{e}")
+            self._append_log("ERROR", tr("log.excel_fail", e=e))
 
     def _open_csv(self):
         """用系统默认程序直接打开 CSV 文件（Excel / 记事本等）。"""
@@ -1664,7 +1744,7 @@ class VoiceMapApp(_TkBase):
             return
         p = Path(self.last_csv)
         if not p.exists():
-            self._append_log("ERROR", f"CSV 不存在：{p}")
+            self._append_log("ERROR", tr("log.csv_not_found", path=p))
             return
         try:
             if sys.platform.startswith("win"):
@@ -1674,7 +1754,7 @@ class VoiceMapApp(_TkBase):
             else:
                 subprocess.Popen(["xdg-open", str(p)])
         except Exception as e:  # noqa: BLE001
-            self._append_log("ERROR", f"打开 CSV 失败：{e}")
+            self._append_log("ERROR", tr("log.csv_open_fail", e=e))
 
     def _open_output_dir(self):
         """打开输出目录（文件夹）。"""
@@ -1689,7 +1769,7 @@ class VoiceMapApp(_TkBase):
             else:
                 subprocess.Popen(["xdg-open", str(path)])
         except Exception as e:  # noqa: BLE001
-            self._append_log("ERROR", f"打开目录失败：{e}")
+            self._append_log("ERROR", tr("log.opendir_fail", e=e))
 
 
 def main():
