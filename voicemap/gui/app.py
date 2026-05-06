@@ -755,11 +755,12 @@ class VoiceMapApp(_TkBase):
             pad, text=tr("inspector.no_metric"),
             bg=PANEL, fg=MUTED, font=FONT_UI,
             wraplength=320, justify="left", anchor="w")
-        self._inspector_metric_desc.pack(anchor="w", pady=(2, 16))
+        self._inspector_metric_desc.pack(anchor="w", pady=(2, 8))
 
-        # Spacer / future card area
-        spacer = tk.Frame(pad, bg=PANEL, height=10)
-        spacer.pack(fill="x")
+        # Dynamic-card area: clinical threshold rows + current-value pill.
+        # _update_inspector clears + rebuilds these on every metric change.
+        self._inspector_cards = tk.Frame(pad, bg=PANEL)
+        self._inspector_cards.pack(fill="x", pady=(0, 8))
 
         # Compact log at bottom of Inspector. Title + Text widget; uses
         # less vertical space than the old left-panel log.
@@ -1058,6 +1059,11 @@ class VoiceMapApp(_TkBase):
         self.audio_path = p
         self.drop_label.configure(text=p.name, fg=ACCENT)
         self.drop_sub.configure(text=str(p.parent))
+        # Reset analysis-derived state and refresh status bar
+        self._last_df = None
+        self._last_analysis_time = 0.0
+        self._update_statusbar()
+        self._update_inspector()
 
         self.metric_btn.config(state="disabled")
         if self.open_csv_btn is not None: self.open_csv_btn.state(["disabled"])
@@ -1112,6 +1118,8 @@ class VoiceMapApp(_TkBase):
                     # rest are zero). Main thread renders early heatmap.
                     self._msg_q.put(("partial", partial_grouped))
 
+                import time as _time
+                _t0 = _time.perf_counter()
                 data, out_file, grouped = analyzer.analyze_and_output_vrp(
                     audio, return_df=True, plot_mode=plot_mode_snap,
                     progress_cb=prog, partial_cb=partial)
@@ -1120,6 +1128,7 @@ class VoiceMapApp(_TkBase):
                     "csv": out_file,
                     "points": len(data["midi"]),
                     "analyzer": analyzer,
+                    "dt": _time.perf_counter() - _t0,
                 }))
             except Exception:  # noqa: BLE001
                 self._msg_q.put(("done", False, {"error": traceback.format_exc()}))
@@ -1166,11 +1175,16 @@ class VoiceMapApp(_TkBase):
             self._enable_plot_toolbar()
             self._set_status(tr("status.done", n=f"{payload['points']:,}"), OK, key="status.done", n=f"{payload['points']:,}")
             self._append_log("META", f"✓ {payload['csv']}")
+            # Track analysis time so the status bar can show it.
+            self._last_analysis_time = float(payload.get("dt", 0.0))
             self._refresh_metric_dropdown()
+            self._update_statusbar()
+            self._update_inspector()
         else:
             self._set_status(tr("status.failed"), ERR, key="status.failed")
             self._append_log("ERROR", payload["error"])
             self._show_placeholder(tr("placeholder.failed"))
+            self._update_statusbar()
 
     # ── Metric 切换 ──
     def _refresh_metric_dropdown(self):
@@ -1238,6 +1252,119 @@ class VoiceMapApp(_TkBase):
         col = self.metric_var.get()
         if col and self._last_df is not None and col in self._last_df.columns:
             self._render_metric(col)
+        # Always refresh the Inspector so it tracks the metric var even
+        # before any data is loaded (just shows name + description).
+        self._update_inspector()
+
+    def _update_inspector(self):
+        """Refresh the Inspector column to reflect current metric_var.
+
+        Shows: metric name (big) + description + unit + clinical bands
+        (from voicemap.report._THRESHOLDS) + current value pill.
+        Falls back to the placeholder when no metric / no data."""
+        name = self.metric_var.get() if hasattr(self, "metric_var") else ""
+        if not hasattr(self, "_inspector_metric_name"):
+            return    # Inspector not built yet
+        if not name:
+            self._inspector_metric_name.configure(text="—")
+            self._inspector_metric_desc.configure(text=tr("inspector.no_metric"))
+            self._inspector_set_clinical(None, None)
+            return
+
+        # Look up MetricSpec for description + unit
+        try:
+            from voicemap.metrics_registry import get as get_spec
+            spec = get_spec(name)
+        except Exception:
+            spec = None
+        desc = (spec.description if spec else "") or "—"
+        unit = (spec.unit if spec else "") or ""
+        unit_str = f"  ·  {tr('inspector.unit')}: {unit}" if unit else ""
+        self._inspector_metric_name.configure(text=name)
+        self._inspector_metric_desc.configure(text=f"{desc}{unit_str}")
+
+        # Clinical thresholds + current value
+        from voicemap.report import _THRESHOLDS
+        bands = _THRESHOLDS.get(name)
+        cur_value = None
+        cur_severity = None
+        if (self._last_df is not None and name in self._last_df.columns):
+            try:
+                vals = self._last_df[name].values
+                nz = vals[vals != 0]
+                if len(nz):
+                    cur_value = float(nz.mean())
+                    if bands:
+                        for lo, hi, _label, sev in bands:
+                            if lo <= cur_value < hi:
+                                cur_severity = sev
+                                break
+            except Exception:
+                pass
+        self._inspector_set_clinical(bands, cur_value, cur_severity, unit)
+
+    # Severity → color mapping
+    _SEVERITY_COLORS = {
+        "good":     None,      # set in method to OK
+        "normal":   None,
+        "watch":    None,
+        "abnormal": None,
+    }
+
+    def _inspector_set_clinical(self, bands, cur_value, cur_severity=None, unit=""):
+        """Replace the contents of self._inspector_cards with clinical
+        threshold rows + the current-value pill. Wraps creation each
+        call so changing metric refreshes cleanly."""
+        # Lazy-build the holder Frame on first call
+        if not hasattr(self, "_inspector_cards"):
+            return
+        # Clear children
+        for child in self._inspector_cards.winfo_children():
+            try:
+                child.destroy()
+            except tk.TclError:
+                pass
+
+        sev_color = {"good": OK, "normal": TEXT, "watch": WARN, "abnormal": ERR}
+
+        if bands:
+            # Clinical reference card
+            tk.Label(self._inspector_cards, text=tr("inspector.clinical"),
+                     bg=PANEL, fg=ACCENT, font=FONT_UI_B
+                     ).pack(anchor="w", pady=(8, 4))
+            for lo, hi, label, sev in bands:
+                row = tk.Frame(self._inspector_cards, bg=PANEL)
+                row.pack(fill="x", pady=1)
+                # Range string
+                if lo <= -1e8:
+                    rng = f"< {hi:g}"
+                elif hi >= 1e8:
+                    rng = f"≥ {lo:g}"
+                else:
+                    rng = f"{lo:g} – {hi:g}"
+                tk.Label(row, text=rng, bg=PANEL, fg=TEXT,
+                         font=FONT_MONO, width=12, anchor="w"
+                         ).pack(side="left")
+                tk.Label(row, text=label, bg=PANEL,
+                         fg=sev_color.get(sev, TEXT), font=FONT_UI,
+                         anchor="w", justify="left", wraplength=200
+                         ).pack(side="left", fill="x", expand=True)
+
+        # Current value
+        if cur_value is not None:
+            tk.Label(self._inspector_cards, text=tr("inspector.current"),
+                     bg=PANEL, fg=ACCENT, font=FONT_UI_B
+                     ).pack(anchor="w", pady=(12, 4))
+            big = tk.Frame(self._inspector_cards, bg=PANEL)
+            big.pack(anchor="w")
+            value_color = sev_color.get(cur_severity, ACCENT_HI)
+            tk.Label(big, text=f"{cur_value:.2f}",
+                     bg=PANEL, fg=value_color,
+                     font=("Consolas", 22, "bold")
+                     ).pack(side="left")
+            if unit:
+                tk.Label(big, text=f"  {unit}", bg=PANEL, fg=MUTED,
+                         font=FONT_UI).pack(side="left", padx=(4, 0), pady=(8, 0))
 
     def _popup_metric_menu(self):
         """点 metric 按钮 → 弹下拉菜单。
@@ -1552,6 +1679,24 @@ class VoiceMapApp(_TkBase):
         if not col:
             return
         self._clarity_render_after = self.after(80, lambda c=col: self._render_metric(c))
+
+    def _update_statusbar(self):
+        """Reflect current data state in the bottom status bar.
+        Called on file load + analysis completion."""
+        if not hasattr(self, "_statusbar_left"):
+            return
+        path = getattr(self, "audio_path", None)
+        df = getattr(self, "_last_df", None)
+        if path is None:
+            text = tr("statusbar.no_file")
+        else:
+            n = len(df) if df is not None else 0
+            dt = getattr(self, "_last_analysis_time", 0.0)
+            text = tr("statusbar.file_meta", name=path.name, n=n, dt=dt)
+        try:
+            self._statusbar_left.configure(text=text)
+        except tk.TclError:
+            pass
 
     def _set_status(self, text: str, color: str = MUTED, *,
                      key: str | None = None, **kwargs):
