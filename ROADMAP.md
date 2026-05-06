@@ -5,7 +5,7 @@
 ## 软件深度完善 plan（M1-M7 → A1）
 
 - [x] **M1** — Metric 注册表 (`metrics_registry.py`) + 22 个新 metric (CSV 60 → 82 列)
-- [ ] **M2** — 绘图增强：拟合线 / 标注 / 多格式导出 / 复制剪贴板
+- [x] **M2** — 绘图增强：拟合线 / 标注 / 多格式导出 / 复制剪贴板（commit 6ce7f95）
 - [ ] **M3** — 多聚类模型（GMM、Hierarchical、DBSCAN、Spectral、BIRCH）+ 正交分析
 - [ ] **M4** — 色彩主题（Default / Colorblind-safe / Print-friendly / High-contrast）
 - [ ] **M5** — 使用场景预设（普通 / 语音专家 / 医疗 / 歌手 / TTS / 戏曲）+ 中英语言切换
@@ -66,8 +66,8 @@
 - [ ] `CompareDialog` 工作流：拿 2 个不同性别 / 不同唱法的 VRP CSV，逐 metric 看 Δ 合理性
 - [ ] 真的导出一个 `.xlsx` → Excel/WPS 打开 → 40+ sheets 正常渲染，中文列名无乱码
 - [ ] 批处理：放 `audio/{a,b,c}.wav` 目录 → `python main.py --batch audio/` → 3 个 CSV + 汇总日志
-- [ ] `--plot-mode combined` 单独走一次，检查单张总览图的布局、分辨率
-- [ ] Centroid 加载后**不训练只分类**的路径：明确从日志看到 "Classified against N preloaded centroids" 而不是"fitting K-means"
+- [x] `--plot-mode combined` 单独走一次，检查单张总览图的布局、分辨率（commit ce85204 之后再次跑过，2.3 MB 总览 PNG 正常）
+- [x] Centroid 加载后**不训练只分类**的路径：明确从日志看到 "Classified against N preloaded centroids" 而不是"fitting K-means"（commit 待补）
 
 ## Milestone 2 — 方法学提升 / 数据质量
 

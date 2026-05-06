@@ -490,6 +490,18 @@ class VoiceMapAnalyzer:
             })
 
         _step(8)   # "EGG 波形聚类"
+        # Tell the user which path the calculator is taking. centroids_
+        # being non-None means load_centroids() / train_cluster_centroids()
+        # already populated them, so calculate() classifies-only and
+        # skips K-means fitting.
+        _preset = getattr(self.cluster_calculator, "centroids_", None)
+        if _preset is not None and len(_preset) > 0:
+            logger.info("Classified against %d preloaded centroids "
+                        "(k=%d, dim=%d) — K-means fitting skipped",
+                        len(_preset), len(_preset),
+                        _preset.shape[1] if _preset.ndim == 2 else 0)
+        else:
+            logger.info("No preloaded centroids — fitting K-means on this recording")
         cluster_values                       = self.cluster_calculator.calculate(egg_signal, cycle_triggers, dft=_dft)
 
         _step(9)   # "Jitter / Shimmer"
