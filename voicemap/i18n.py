@@ -95,6 +95,19 @@ STRINGS: dict[str, dict[str, str]] = {
         "drop.placeholder":     "拖入 .wav 文件开始",
         "header.metric":        "Metric",
 
+        # ── option-C layout (Tracks / Metric Bar / Inspector / Status Bar) ──
+        "tracks.label":         "录音轨",
+        "metric_bar.label":     "指标",
+        "metric_bar.nav_hint":  "│  上一个 ←   下一个 →",
+        "inspector.title":      "详情",
+        "inspector.no_metric":  "选中文件后查看详情",
+        "inspector.unit":       "单位",
+        "inspector.clinical":   "临床参考范围",
+        "inspector.current":    "本次值",
+        "statusbar.no_file":    "未加载文件",
+        "statusbar.file_meta":  "{name}  ·  {n} 网格  ·  耗时 {dt:.1f}s",
+        "statusbar.copyright":  "© 2026 蔡寰宸  ·  v{ver}",
+
         # ── left panel ──
         "left.settings":        "⚙  设置",
         "left.latest_csv":      "最新 CSV",
@@ -283,6 +296,19 @@ STRINGS: dict[str, dict[str, str]] = {
         "drop.subtitle":        "Stereo WAV · Ch 1 = Microphone   Ch 2 = EGG",
         "drop.placeholder":     "Drop a .wav file to begin",
         "header.metric":        "Metric",
+
+        # ── option-C layout ──
+        "tracks.label":         "Tracks",
+        "metric_bar.label":     "Metric",
+        "metric_bar.nav_hint":  "│  Prev ←   Next →",
+        "inspector.title":      "Details",
+        "inspector.no_metric":  "Select a file to view details",
+        "inspector.unit":       "Unit",
+        "inspector.clinical":   "Clinical reference",
+        "inspector.current":    "Current value",
+        "statusbar.no_file":    "No file loaded",
+        "statusbar.file_meta":  "{name}  ·  {n} cells  ·  {dt:.1f}s",
+        "statusbar.copyright":  "© 2026 Huanchen Cai  ·  v{ver}",
 
         # ── left panel ──
         "left.settings":        "⚙  Settings",

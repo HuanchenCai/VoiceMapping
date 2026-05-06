@@ -294,42 +294,67 @@ class VoiceMapApp(_TkBase):
 
     # ── 布局 ──
     def _build_ui(self):
-        # Header packs directly onto self so the PANEL-coloured title
-        # bar extends edge-to-edge (no padding gaps showing BG colour
-        # as a black stripe between menubar and title).
+        """Option-C layout (per docs/UI_DESIGN.md):
+
+            ┌─────────────────────────────────────────────────────┐
+            │ Menubar  ──── 1px BORDER divider ────                │
+            │ Header (PANEL, full-width, app title)                │
+            ├─────────────────────────────────────────────────────┤
+            │ Tracks Panel (drop zone / file list)                 │
+            ├─────────────────────────────────────────────────────┤
+            │ Metric Bar (label + current metric)                  │
+            ├──────────────────────────────────────┬──────────────┤
+            │  ◀  Canvas (matplotlib heatmap)  ▶  │  Inspector    │
+            │                                      │  360px fixed │
+            ├──────────────────────────────────────┴──────────────┤
+            │ Status Bar (file meta + copyright)                   │
+            └─────────────────────────────────────────────────────┘
+        """
+        # Status bar packs first with side="bottom" so it claims the
+        # last horizontal strip; everything else fills above it.
+        self._build_status_bar(self)
+
+        # Header (full-width PANEL strip). Already integrated with the
+        # menubar above via matching bg.
         self._build_header(self)
+        self._build_tracks_panel(self)
+        self._build_metric_bar(self)
 
-        # Content area. padx=16, pady=(0, 14): no top padding because
-        # the header above is already a full-width strip — putting BG
-        # padding here would surface the 'black stripe' again.
+        # Main split: canvas (left, expand) + inspector (right, 360 fixed)
+        # padx=16 matches the rest of the chrome's left/right margin.
+        # pady at top is 8 px — enough breath after metric bar without
+        # surfacing a BG stripe.
         self._outer = outer = tk.Frame(self, bg=BG)
-        outer.pack(fill="both", expand=True, padx=16, pady=(0, 14))
+        outer.pack(side="top", fill="both", expand=True,
+                   padx=16, pady=(8, 8))
 
-        self._build_top_bar(outer)
+        self.inspector = tk.Frame(outer, bg=PANEL, width=360,
+                                   highlightthickness=1,
+                                   highlightbackground=BORDER,
+                                   highlightcolor=BORDER)
+        self.inspector.pack(side="right", fill="y")
+        self.inspector.pack_propagate(False)
+        self._build_inspector(self.inspector)
 
-        paned = ttk.PanedWindow(outer, orient="horizontal")
-        paned.pack(fill="both", expand=True, pady=(10, 0))
+        canvas_frame = tk.Frame(outer, bg=PANEL,
+                                 highlightthickness=1,
+                                 highlightbackground=BORDER,
+                                 highlightcolor=BORDER)
+        canvas_frame.pack(side="left", fill="both", expand=True,
+                          padx=(0, 8))
+        self._build_canvas_area(canvas_frame)
 
-        # highlightcolor=BORDER (same as highlightbackground): without
-        # explicit setting, Tk uses the system focus color (sv_ttk dark
-        # makes that Win11 blue), so the panel grew a blue ring whenever
-        # the window had focus. Pinning the focus color to BORDER keeps
-        # the 1 px frame consistent regardless of focus state.
-        self.left = tk.Frame(paned, bg=PANEL,
-                              highlightthickness=1,
-                              highlightbackground=BORDER,
-                              highlightcolor=BORDER)
-        self.right = tk.Frame(paned, bg=PANEL,
-                              highlightthickness=1,
-                              highlightbackground=BORDER,
-                              highlightcolor=BORDER)
-        paned.add(self.left, weight=0)
-        paned.add(self.right, weight=1)
-        # sash 初始位置
-        self.after(0, lambda: paned.sashpos(0, 320))
-
-        self._build_left_panel(self.left)
-        self._build_right_panel(self.right)
+        # Removed widgets — left panel + drop zone redesigned. Set to
+        # None so old call sites (.state(...) etc.) can be guarded.
+        self.open_csv_btn   = None
+        self.open_plots_btn = None
+        self.excel_btn      = None
+        self.report_btn     = None
+        self.progress       = None
+        # left/right kept as alias to maintain compatibility with any
+        # external code using them (none currently).
+        self.left = None
+        self.right = canvas_frame
 
     def _build_menubar(self):
         """5-段顶部菜单栏：文件 / 编辑 / 参数 / 视图 / 帮助。
@@ -635,129 +660,125 @@ class VoiceMapApp(_TkBase):
         self._status_key = "status.ready"
         self._status_kwargs: dict = {}
 
-    def _build_top_bar(self, parent):
-        bar = tk.Frame(parent, bg=BG)
-        bar.pack(fill="x")
+    def _build_tracks_panel(self, parent):
+        """Tracks Panel: 录音轨列表区。当前阶段 single-file，未来 M5.5 扩展为
+        多文件管理。无文件时显示拖放/点击浏览的引导；有文件时显示文件元信息。"""
+        bar = tk.Frame(parent, bg=PANEL)
+        bar.pack(side="top", fill="x")
 
-        # 大拖放区
-        self.drop_zone = tk.Frame(bar, bg=PANEL_HI,
-                                  highlightthickness=2, highlightbackground=BORDER,
-                                  highlightcolor=ACCENT, cursor="hand2")
-        self.drop_zone.pack(side="left", fill="x", expand=True)
+        inner = tk.Frame(bar, bg=PANEL)
+        inner.pack(fill="x", padx=16, pady=10)
 
-        inner = tk.Frame(self.drop_zone, bg=PANEL_HI)
-        inner.pack(fill="x", padx=18, pady=14)
-        self.drop_label = tk.Label(inner,
+        # Section label
+        tk.Label(inner, text=tr("tracks.label"), bg=PANEL, fg=ACCENT,
+                 font=FONT_UI_B).pack(anchor="w", pady=(0, 6))
+
+        # Drop zone (compact). Same DnD bindings as before; container is
+        # smaller now since it's part of a panel rather than a full strip.
+        self.drop_zone = tk.Frame(inner, bg=PANEL_HI,
+                                   highlightthickness=2, highlightbackground=BORDER,
+                                   highlightcolor=ACCENT, cursor="hand2")
+        self.drop_zone.pack(fill="x")
+
+        drop_inner = tk.Frame(self.drop_zone, bg=PANEL_HI)
+        drop_inner.pack(fill="x", padx=18, pady=10)
+        self.drop_label = tk.Label(drop_inner,
                                    text=tr("drop.title" if _DND_OK else "drop.title_no_dnd"),
                                    bg=PANEL_HI, fg=TEXT, font=FONT_DROP)
         self.drop_label.pack(anchor="w")
-        self.drop_sub = tk.Label(inner,
+        self.drop_sub = tk.Label(drop_inner,
                                  text=tr("drop.subtitle"),
                                  bg=PANEL_HI, fg=MUTED, font=FONT_UI)
         self.drop_sub.pack(anchor="w")
 
-        for w in (self.drop_zone, inner, self.drop_label, self.drop_sub):
+        for w in (self.drop_zone, drop_inner, self.drop_label, self.drop_sub):
             w.bind("<Button-1>", lambda _e: self._pick_audio())
             w.bind("<Enter>",    lambda _e: self.drop_zone.config(highlightbackground=ACCENT))
             w.bind("<Leave>",    lambda _e: self.drop_zone.config(highlightbackground=BORDER))
 
-        # Metric 按钮 + 分类菜单（组合框没有原生节分隔，改用 Menubutton）
-        side = tk.Frame(bar, bg=BG)
-        side.pack(side="right", padx=(14, 0))
-        self._metric_label = tk.Label(side, text=tr("header.metric"),
-                                       bg=BG, fg=MUTED, font=FONT_UI)
-        self._metric_label.pack(anchor="w")
-        # 当前 metric 的展示标签（不再可点开 popup —— 选 metric 走顶部菜单栏，
-        # Praat 风格：每个分类一个顶级 cascade）。保留 widget 名 metric_btn 是
-        # 为了让其它地方（_refresh_metric_dropdown / _cycle_metric / 旧代码）
-        # 不用大改。它现在就是一个 disabled-look label。
-        # 点开 → tk.Menu.tk_popup，最朴素的下拉。Tk 内置的 popup 机制
-        # 自己处理定位、键盘焦点、点外面消失，不踩 overrideredirect /
-        # 多屏 / withdraw 那一堆坑。同时顶部菜单栏也保留可用，两条路。
-        self.metric_btn = tk.Button(side, textvariable=self.metric_var,
+    def _build_metric_bar(self, parent):
+        """Metric Bar: 显示当前 metric + 切换提示 + 视觉指示。
+        实际切换走顶部菜单栏（参数→分类→item）或键盘 ← →。"""
+        bar = tk.Frame(parent, bg=PANEL)
+        bar.pack(side="top", fill="x")
+
+        inner = tk.Frame(bar, bg=PANEL)
+        inner.pack(fill="x", padx=16, pady=8)
+
+        self._metric_label = tk.Label(inner, text=tr("metric_bar.label"),
+                                       bg=PANEL, fg=ACCENT, font=FONT_UI_B)
+        self._metric_label.pack(side="left", padx=(0, 12))
+
+        # Current-metric pill — flat label-style button. Kept as widget
+        # name `metric_btn` for back-compat with existing code paths
+        # (_refresh_metric_dropdown / _cycle_metric / popup).
+        self.metric_btn = tk.Button(inner, textvariable=self.metric_var,
                                     bg=PANEL_HI, fg=TEXT,
                                     activebackground=BORDER, activeforeground=TEXT,
                                     disabledforeground=MUTED,
-                                    font=FONT_UI, bd=0, relief="flat",
-                                    padx=10, pady=4, width=18,
+                                    font=FONT_UI_B, bd=0, relief="flat",
+                                    padx=14, pady=4, width=20,
                                     cursor="hand2",
                                     command=self._popup_metric_menu)
-        self.metric_btn.pack()
+        self.metric_btn.pack(side="left")
         self.metric_btn.config(state="disabled")
+
+        # Nav hint
+        self._metric_nav_hint = tk.Label(inner, text=tr("metric_bar.nav_hint"),
+                                          bg=PANEL, fg=MUTED, font=FONT_UI)
+        self._metric_nav_hint.pack(side="left", padx=(16, 0))
+
         self._metric_popup = None
         self.metric_menu = None
-        # metric_var 的变化 = popup 选中 / 键盘 ← → 触发 → 自动重绘
         self.metric_var.trace_add("write", self._on_metric_change)
 
-    def _build_left_panel(self, parent):
+    def _build_inspector(self, parent):
+        """Inspector: 右侧 360 px 固定栏，显示当前 metric 的详情、临床范围、
+        本次值。底部嵌一个紧凑的日志区（替代左 panel 的日志）。
+        A0-4 wave 3 先放占位；wave 3b 会接 _THRESHOLDS 自动算 clinical band。"""
         pad = tk.Frame(parent, bg=PANEL)
         pad.pack(fill="both", expand=True, padx=14, pady=14)
 
-        # 设置入口（Clarity 阈值 / 输出目录 等都在对话框里）
-        self._settings_btn = ttk.Button(pad, text=tr("left.settings"),
-                                         style="Ghost.TButton",
-                                         command=self._open_settings)
-        self._settings_btn.pack(fill="x", pady=(0, 14))
+        # Title
+        tk.Label(pad, text=tr("inspector.title"), bg=PANEL, fg=MUTED,
+                 font=FONT_UI_B).pack(anchor="w")
 
-        # CSV 结果
-        self._latest_csv_lbl = tk.Label(pad, text=tr("left.latest_csv"),
-                                         bg=PANEL, fg=ACCENT, font=FONT_UI_B)
-        self._latest_csv_lbl.pack(anchor="w")
-        self.csv_lbl = tk.Label(pad, textvariable=self.csv_path_var,
-                                bg=PANEL, fg=MUTED, font=FONT_MONO,
-                                wraplength=280, justify="left", anchor="w")
-        self.csv_lbl.pack(fill="x", pady=(4, 6))
+        # Current metric — large name + description
+        self._inspector_metric_name = tk.Label(
+            pad, text="—",
+            bg=PANEL, fg=ACCENT,
+            font=("Microsoft YaHei UI", 22, "bold"),
+            anchor="w")
+        self._inspector_metric_name.pack(anchor="w", pady=(8, 0))
 
-        btn_row = tk.Frame(pad, bg=PANEL)
-        btn_row.pack(fill="x", pady=(0, 12))
-        self.open_csv_btn = ttk.Button(btn_row, text=tr("left.open_csv"),
-                                        style="Ghost.TButton",
-                                        command=self._open_csv)
-        self.open_csv_btn.pack(side="left")
-        self.open_csv_btn.state(["disabled"])
-        self.open_plots_btn = ttk.Button(btn_row, text=tr("left.open_outdir"),
-                                          style="Ghost.TButton",
-                                          command=self._open_output_dir)
-        self.open_plots_btn.pack(side="left", padx=(6, 0))
+        self._inspector_metric_desc = tk.Label(
+            pad, text=tr("inspector.no_metric"),
+            bg=PANEL, fg=MUTED, font=FONT_UI,
+            wraplength=320, justify="left", anchor="w")
+        self._inspector_metric_desc.pack(anchor="w", pady=(2, 16))
 
-        btn_row2 = tk.Frame(pad, bg=PANEL)
-        btn_row2.pack(fill="x", pady=(0, 12))
-        self.excel_btn = ttk.Button(btn_row2, text=tr("left.export_excel"),
-                                     style="Ghost.TButton",
-                                     command=self._export_excel)
-        self.excel_btn.pack(side="left")
-        self.excel_btn.state(["disabled"])
-        self.report_btn = ttk.Button(btn_row2, text=tr("left.gen_report"),
-                                      style="Ghost.TButton",
-                                      command=self._export_report)
-        self.report_btn.pack(side="left", padx=(6, 0))
-        self.report_btn.state(["disabled"])
-        self._compare_btn = ttk.Button(btn_row2, text=tr("left.compare"),
-                                        style="Ghost.TButton",
-                                        command=self._open_compare_dialog)
-        self._compare_btn.pack(side="left", padx=(6, 0))
+        # Spacer / future card area
+        spacer = tk.Frame(pad, bg=PANEL, height=10)
+        spacer.pack(fill="x")
 
-        # 进度条
-        self.progress = ttk.Progressbar(pad, mode="indeterminate")
-        self.progress.pack(fill="x", pady=(0, 12))
-
-        # 日志
+        # Compact log at bottom of Inspector. Title + Text widget; uses
+        # less vertical space than the old left-panel log.
         self._log_lbl = tk.Label(pad, text=tr("left.log"),
                                   bg=PANEL, fg=ACCENT, font=FONT_UI_B)
-        self._log_lbl.pack(anchor="w")
+        self._log_lbl.pack(anchor="w", pady=(8, 4))
+
         log_wrap = tk.Frame(pad, bg=PANEL)
-        log_wrap.pack(fill="both", expand=True, pady=(4, 0))
+        log_wrap.pack(fill="both", expand=True)
         self.log_text = tk.Text(log_wrap, bg="#0b1117", fg=TEXT, font=FONT_MONO,
                                 bd=0, highlightthickness=1, highlightbackground=BORDER,
                                 highlightcolor=BORDER,
                                 insertbackground=TEXT, wrap="word",
                                 padx=8, pady=6, state="disabled",
-                                height=10, width=30)
+                                height=8, width=20)
         self.log_text.pack(side="left", fill="both", expand=True)
         sb = ttk.Scrollbar(log_wrap, command=self.log_text.yview)
         sb.pack(side="right", fill="y")
         self.log_text.configure(yscrollcommand=sb.set)
-
         self.log_text.tag_configure("INFO",    foreground=TEXT)
         self.log_text.tag_configure("DEBUG",   foreground=MUTED)
         self.log_text.tag_configure("WARNING", foreground=WARN)
@@ -765,27 +786,42 @@ class VoiceMapApp(_TkBase):
         self.log_text.tag_configure("OK",      foreground=OK)
         self.log_text.tag_configure("META",    foreground=ACCENT)
 
-    def _build_right_panel(self, parent):
-        # 旧的 Centroid 工具栏 + 绘图 toolbar 都拆了 —— 入口已经全部移到顶部
-        # 菜单栏（参数 → 聚类中心 / 编辑 → 标注/复位/复制/保存 / 视图 → 拟合）。
-        # 画布上方留空，等 A0-4 按 docs/UI_DESIGN.md option-C 排"Tracks Panel +
-        # Metric Bar + Inspector"三段。
-        #
-        # 这些 widget 引用置 None，旧代码里的 .state() / .configure() / 位置查询
-        # 都通过 _is_widget_alive 守卫接住。
+    def _build_status_bar(self, parent):
+        """底部 status bar：左 = 当前文件元信息 + 网格数 + 耗时；右 = 版权。"""
+        bar = tk.Frame(parent, bg=PANEL, height=28)
+        bar.pack(side="bottom", fill="x")
+        bar.pack_propagate(False)
+
+        inner = tk.Frame(bar, bg=PANEL)
+        inner.pack(fill="x", padx=16, pady=4)
+
+        self._statusbar_left = tk.Label(inner, text=tr("statusbar.no_file"),
+                                         bg=PANEL, fg=MUTED, font=FONT_UI)
+        self._statusbar_left.pack(side="left")
+
+        from voicemap.__version__ import __version__
+        self._statusbar_right = tk.Label(inner,
+                                          text=tr("statusbar.copyright", ver=__version__),
+                                          bg=PANEL, fg=MUTED, font=FONT_UI)
+        self._statusbar_right.pack(side="right")
+
+    def _build_canvas_area(self, parent):
+        """中央画布 + 左右 nav 箭头。父容器 (canvas_frame) 已经在
+        _build_ui 里设好 PANEL 背景 + 边框。"""
+        # Plot toolbar / centroid bar 都搬到顶部菜单栏了，对应 widget
+        # 引用全置 None；旧代码里 .state() / .configure() / 位置查询
+        # 已加守卫。
         self.cent_save_btn   = None
         self.cent_status_lbl = None
         self.fit_btn         = None
         self.annot_btn       = None
         self.save_btn        = None
 
-        # Overlay state（标注 / 拟合曲线 在内存里继续跟踪，只是没有 toolbar 按钮）
         from voicemap.plot_overlay import OverlayManager
         self._overlay_mgr = OverlayManager()
         self._annot_mode_on = False
-        self._annot_canvas_cid = None    # mpl_connect id for click capture
+        self._annot_canvas_cid = None
 
-        # Middle: nav_left + canvas + nav_right
         middle = tk.Frame(parent, bg=PANEL)
         middle.pack(side="top", fill="both", expand=True)
 
@@ -1024,8 +1060,8 @@ class VoiceMapApp(_TkBase):
         self.drop_sub.configure(text=str(p.parent))
 
         self.metric_btn.config(state="disabled")
-        self.open_csv_btn.state(["disabled"])
-        self.progress.start(12)
+        if self.open_csv_btn is not None: self.open_csv_btn.state(["disabled"])
+        if self.progress is not None: self.progress.start(12)
         self._set_status(tr("status.analyzing"), ACCENT, key="status.analyzing")
         self._show_placeholder(tr("status.analyzing"))
 
@@ -1101,7 +1137,7 @@ class VoiceMapApp(_TkBase):
                           "✓ 第一组指标完成，先出图，剩余指标后台继续…")
 
     def _on_worker_done(self, ok: bool, payload: dict):
-        self.progress.stop()
+        if self.progress is not None: self.progress.stop()
         # 关掉进度对话框
         if self._progress_dialog is not None:
             try:
@@ -1115,10 +1151,10 @@ class VoiceMapApp(_TkBase):
             self.last_csv = payload["csv"]
             self._last_analyzer = payload.get("analyzer")
             self.csv_path_var.set(payload["csv"])
-            self.open_csv_btn.state(["!disabled"])
+            if self.open_csv_btn is not None: self.open_csv_btn.state(["!disabled"])
             try:
-                self.excel_btn.state(["!disabled"])
-                self.report_btn.state(["!disabled"])
+                if self.excel_btn is not None: self.excel_btn.state(["!disabled"])
+                if self.report_btn is not None: self.report_btn.state(["!disabled"])
             except (AttributeError, tk.TclError):
                 pass
             # 有了 analyzer 就能保存 centroid
