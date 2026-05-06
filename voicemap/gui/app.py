@@ -357,7 +357,17 @@ class VoiceMapApp(_TkBase):
     def _on_language_changed(self):
         """Subscriber: redraw window title and rebuild the menubar so the
         new language takes effect without restart. popup factories will
-        auto-pick up the new tr() values on the next open."""
+        auto-pick up the new tr() values on the next open.
+
+        Defensive: also close any open menubar popup before rebuilding.
+        ``_switch_language`` already does this on the click path, but if
+        a third party calls ``set_language()`` directly (e.g. a future
+        keyboard shortcut), we must not leave orphaned popups behind."""
+        if self._menubar is not None:
+            try:
+                self._menubar._close_open_popup()
+            except Exception:
+                pass
         try:
             self.title(tr("app.title"))
         except tk.TclError:
@@ -458,8 +468,9 @@ class VoiceMapApp(_TkBase):
                           foreground=TEXT)
         # The tk.StringVars above are throwaway; we wire the actual
         # language change via direct command bindings instead so we can
-        # call set_language() (which broadcasts) instead of just
-        # mutating the var. Replace the rows' click handlers:
+        # call _switch_language() (which closes the popup chain BEFORE
+        # broadcasting, so the menubar rebuild doesn't orphan our parent
+        # Help popup).
         for entry in p._items:
             if entry["type"] != "radio":
                 continue
@@ -468,8 +479,26 @@ class VoiceMapApp(_TkBase):
             for w in (row,) + tuple(row.winfo_children()):
                 w.unbind("<Button-1>")
                 w.bind("<Button-1>",
-                       lambda _e, v=value: (set_language(v), p.destroy()))
+                       lambda _e, v=value: self._switch_language(v))
         return p
+
+    def _switch_language(self, lang: str) -> None:
+        """Switch language safely from a menu popup.
+
+        The flow is order-sensitive:
+          1. Close the menubar's open popup chain. This is the Help
+             popup that contains the language cascade — if we leave it
+             alive while the menubar rebuilds, its anchor button gets
+             destroyed and the popup floats orphaned next to the window.
+          2. Call set_language(), which broadcasts → _on_language_changed
+             rebuilds the menubar.
+        """
+        if self._menubar is not None:
+            try:
+                self._menubar._close_open_popup()
+            except Exception:
+                pass
+        set_language(lang)
 
     def _available_metric_columns(self) -> set:
         """Set of metric column names that have non-zero data in the
