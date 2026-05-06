@@ -128,6 +128,15 @@ class VoiceMapApp(_TkBase):
         self.option_add("*Menu.foreground",       TEXT)
         self.option_add("*Menu.activeBackground", ACCENT)
         self.option_add("*Menu.activeForeground", BG)
+        # Belt-and-suspenders to suppress Windows' native menu chrome:
+        # set every "border" / "relief" / "highlight" option both via the
+        # option DB and again per-tk.Menu() call. Without these, Win32
+        # paints a thin white frame around the popup that no amount of
+        # bg= overrides can hide.
+        self.option_add("*Menu.borderwidth",        0)
+        self.option_add("*Menu.relief",             "flat")
+        self.option_add("*Menu.activeBorderWidth",  0)
+        self.option_add("*Menu.highlightThickness", 0)
 
         self._init_style()
         self._build_menubar()
@@ -275,64 +284,101 @@ class VoiceMapApp(_TkBase):
         self._build_right_panel(self.right)
 
     def _build_menubar(self):
-        """Praat 风格顶部菜单栏：每个 metric 分类一个顶级菜单。
-        点击 metric 直接 set metric_var → trace 触发重绘。
-        分析未完成或某 metric 全零时，对应项 disable。"""
-        mb = tk.Menu(self, tearoff=0,
-                     bg=PANEL_HI, fg=TEXT,
-                     activebackground=ACCENT, activeforeground=BG,
-                     borderwidth=0, relief="flat", activeborderwidth=0)
+        """5-段顶部菜单栏：文件 / 编辑 / 参数 / 视图 / 帮助。
 
-        # 文件菜单：常用入口（Open / 设置 / Quit）
-        m_file = tk.Menu(mb, tearoff=0,
-                          bg=PANEL_HI, fg=TEXT,
-                          activebackground=ACCENT, activeforeground=BG,
-                          borderwidth=0, relief="flat", activeborderwidth=0)
-        m_file.add_command(label="打开 WAV...", command=self._pick_audio)
-        m_file.add_command(label="打开输出目录", command=self._open_output_dir)
+        - 文件：打开 / 导出 / 设置 / 退出
+        - 编辑：画布操作（标注 / 复位 / 复制 / 保存图片）
+        - 参数：5 个 metric 分类 cascade + 上一/下一切换 + Centroid 子菜单
+        - 视图：拟合曲线
+        - 帮助：关于
+
+        widget 颜色全靠 option_add 在 __init__ 设的 *Menu.* 模板，
+        每个 tk.Menu() 不再重复传 bg / fg / activebackground / borderwidth /
+        relief 这些 —— option DB 已经全包，重复传只是噪声。
+        """
+        def _M(parent):
+            """所有子菜单都长一样：tearoff=0 + 灰禁文字 + 单选指示色。"""
+            return tk.Menu(parent, tearoff=0,
+                           disabledforeground=MUTED, selectcolor=ACCENT)
+
+        mb = _M(self)
+
+        # ── 文件 ──
+        m_file = _M(mb)
+        m_file.add_command(label="打开 WAV...",   command=self._pick_audio)
+        m_file.add_command(label="打开输出目录",  command=self._open_output_dir)
         m_file.add_separator()
-        m_file.add_command(label="设置...", command=self._open_settings)
+        m_file.add_command(label="导出 Excel",     command=self._export_excel)
+        m_file.add_command(label="生成报告",       command=self._export_report)
+        m_file.add_command(label="对比 2 段录音…", command=self._open_compare_dialog)
         m_file.add_separator()
-        m_file.add_command(label="退出", command=self.destroy)
+        m_file.add_command(label="设置...",       command=self._open_settings)
+        m_file.add_separator()
+        m_file.add_command(label="退出",          command=self.destroy)
         mb.add_cascade(label="文件", menu=m_file)
 
-        # 每个 metric 分类一个顶级菜单
-        # metric_section_menus: section_title -> (Menu, [(label, end_index), ...])
-        # _refresh_metric_dropdown 用这个表来控制每项的可用样式。
-        #
+        # ── 编辑（画布操作） ──
+        m_edit = _M(mb)
+        m_edit.add_command(label="标注",       command=self._toggle_annotation_mode)
+        m_edit.add_command(label="复位标注",   command=self._clear_overlays)
+        m_edit.add_separator()
+        m_edit.add_command(label="复制图片",   command=self._copy_canvas)
+        m_edit.add_command(label="保存图片…",  command=self._open_save_menu)
+        mb.add_cascade(label="编辑", menu=m_edit)
+
+        # ── 参数（5 个 metric 分类 + 切换 + Centroid 子菜单） ──
         # **不**用 state="disabled" 来灰化分析前的项 —— Windows native menu
         # 给 disabled 项加 3D 浮雕效果，深色背景下文字带白色幻影
-        # （CLAUDE.md §8 已记的老坑）。改用 foreground=MUTED 让视觉变灰；
-        # 点击没数据的 metric，_on_metric_change 里已有 "col in df.columns"
+        # （CLAUDE.md §8 老坑）。改用 foreground=MUTED 让视觉变灰；
+        # 点击没数据的 metric，_on_metric_change 已有 "col in df.columns"
         # 守卫保证不会乱画。
+        m_metric = _M(mb)
+        m_metric.add_command(label="上一个 metric  ←", command=lambda: self._cycle_metric(-1))
+        m_metric.add_command(label="下一个 metric  →", command=lambda: self._cycle_metric(+1))
+        m_metric.add_separator()
+
         self._metric_section_menus = {}
         for section_title, metrics in _METRIC_SECTIONS:
-            m = tk.Menu(mb, tearoff=0,
-                        bg=PANEL_HI, fg=TEXT,
-                        activebackground=ACCENT, activeforeground=BG,
-                        disabledforeground=MUTED,
-                        selectcolor=ACCENT, borderwidth=0, relief="flat", activeborderwidth=0)
-            entries = []   # [(metric_name, item_index), ...]
+            m = _M(m_metric)
+            entries = []
             for name in metrics:
                 m.add_radiobutton(label=name,
                                    variable=self.metric_var,
                                    value=name,
-                                   foreground=MUTED)   # 灰色起手
+                                   foreground=MUTED)   # 灰色起手；分析后 _refresh 调整
                 entries.append((name, m.index("end")))
-            mb.add_cascade(label=section_title.split(" · ", 1)[-1],
-                           menu=m)
+            # cascade 标签去掉 "声学 · " 前缀的英文部分（保留中文部分）
+            m_metric.add_cascade(
+                label=section_title.split(" · ", 1)[0],
+                menu=m)
             self._metric_section_menus[section_title] = (m, entries)
 
-        # 帮助菜单（A0-2 加 About 对话框入口；后续 A0-4 加用户手册 / 快捷键说明）
-        m_help = tk.Menu(mb, tearoff=0,
-                          bg=PANEL_HI, fg=TEXT,
-                          activebackground=ACCENT, activeforeground=BG,
-                          borderwidth=0, relief="flat", activeborderwidth=0)
+        # Centroid 子菜单
+        m_metric.add_separator()
+        m_centroid = _M(m_metric)
+        m_centroid.add_command(label="加载 centroid CSV...", command=self._load_centroids)
+        m_centroid.add_command(label="保存当前 centroids", command=self._save_centroids)
+        m_centroid.add_command(label="多 wav 联合训练...",  command=self._train_centroids_from_many)
+        m_metric.add_cascade(label="聚类中心 (Centroid)", menu=m_centroid)
+        # 把 m_centroid 持有住，否则 GC 会清掉
+        self._m_centroid = m_centroid
+
+        mb.add_cascade(label="参数", menu=m_metric)
+
+        # ── 视图（拟合曲线） ──
+        m_view = _M(mb)
+        m_view.add_command(label="拟合曲线…", command=self._open_fit_menu)
+        mb.add_cascade(label="视图", menu=m_view)
+
+        # ── 帮助 ──
+        m_help = _M(mb)
         m_help.add_command(label="关于...", command=self._open_about)
         mb.add_cascade(label="帮助", menu=m_help)
 
         self.config(menu=mb)
         self._menubar = mb
+        # 保住其余子菜单引用（cascade 不持有 Python 引用，会被 GC）
+        self._menus = (m_file, m_edit, m_metric, m_view, m_help)
 
     def _open_about(self):
         """显示关于对话框（版本/作者/版权）。"""
