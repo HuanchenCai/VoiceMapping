@@ -121,11 +121,15 @@ VoiceMap/                           ← 项目根改名（A0-5 前做）
 
 - **新 metric calculator** → `voicemap/metrics.py`，跟现有 calculator 同样模式（`__init__` + `calculate()`），同时在 `metrics_registry.py` 注册
 - **新 GUI 对话框** → `voicemap/gui/dialogs.py`
-- **新 GUI 子组件** → `voicemap/gui/widgets.py`
-- **新主题色 / 字体** → `voicemap/gui/theme.py`
+- **新 GUI 子组件** → `voicemap/gui/widgets.py`（旧 MetricPopup / QueueHandler）
+- **新菜单 / popup** → `voicemap/gui/modern_menu.py`（自画 ModernMenubar / ModernPopup）
+- **新主题色 / 字体** → `voicemap/gui/theme.py`（**禁止在 widget 代码里硬编码 #xxxxxx 或 font tuple**）
 - **新 CSV 后处理** → `voicemap/csv_writer.py`
 - **新 plot 类型** → `voicemap/plotter.py`
-- **新一段 UI 文字** → 同时加到 `voicemap/i18n.py` 的 zh + en 两个 dict
+- **新一段 UI 文字** → 同时加到 `voicemap/i18n.py` 的 zh + en 两个 dict（**禁止在 widget 代码里硬编码中文字符串**）
+- **新分析阶段** → `voicemap/analyzer.py`，加进 `calculate_all_metrics` 的 `_step()` 序列
+- **新 metric 临床档位** → `voicemap/report.py` 的 `_THRESHOLDS` dict，每行 `(lo, hi, label, severity)`
+- **多文件相关** → `voicemap/gui/app.py` 的 `TrackEntry` + `_tracks_*` 方法
 
 ❌ **不要**：
 - 把 metric 散到 GUI 文件里
