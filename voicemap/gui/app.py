@@ -59,6 +59,37 @@ except Exception:
     DND_FILES = None  # type: ignore
 
 
+class TrackEntry:
+    """One audio track in the Tracks Panel. Holds its source path,
+    metadata read from the wav header (no full decode), and post-analysis
+    cached state (df / cycles count / wall time)."""
+    __slots__ = ("path", "sr", "duration", "channels",
+                 "df", "cells", "cycles", "dt", "state",
+                 "csv", "analyzer")
+
+    def __init__(self, path: Path):
+        self.path = path
+        self.sr: int = 0
+        self.duration: float = 0.0
+        self.channels: int = 0
+        # Pre-analysis: pull header-only info via soundfile.info — cheap.
+        try:
+            import soundfile as sf
+            info = sf.info(str(path))
+            self.sr = int(info.samplerate)
+            self.duration = float(info.frames) / max(1, info.samplerate)
+            self.channels = int(info.channels)
+        except Exception:
+            pass
+        self.df = None       # pandas.DataFrame after analysis
+        self.cells: int = 0
+        self.cycles: int = 0
+        self.dt: float = 0.0
+        self.state: str = "queued"   # queued / analyzing / analyzed / failed
+        self.csv: str = ""
+        self.analyzer = None
+
+
 
 # ─── 主应用 ──────────────────────────────────────────────────────────────────
 class VoiceMapApp(_TkBase):
@@ -92,6 +123,13 @@ class VoiceMapApp(_TkBase):
         self.audio_path: Path | None = None
         self.last_csv:   str | None  = None
         self._last_df                = None   # pd.DataFrame 或 None（含所有分析时 clarity>=cfg 的 cell）
+        # Multi-file Tracks support — list of TrackEntry; _active_track is
+        # an index into _tracks (-1 if none). audio_path / _last_df above
+        # mirror the active entry's data so the existing single-file
+        # rendering paths keep working.
+        self._tracks: list[TrackEntry] = []
+        self._active_track: int = -1
+        self._track_row_widgets: list[tk.Frame] = []   # one per track row
         self._analysis_clarity       = float(DEFAULT_CONFIG.clarity_threshold)
         self._worker: threading.Thread | None = None
         self._msg_q:  queue.Queue = queue.Queue()
@@ -683,40 +721,232 @@ class VoiceMapApp(_TkBase):
         self._status_kwargs: dict = {}
 
     def _build_tracks_panel(self, parent):
-        """Tracks Panel: 录音轨列表区。当前阶段 single-file，未来 M5.5 扩展为
-        多文件管理。无文件时显示拖放/点击浏览的引导；有文件时显示文件元信息。"""
+        """Multi-file Tracks Panel (option-C spec).
+
+        Renders one row per loaded audio file. Empty state (= no tracks
+        yet) shows the drop zone instead. Each row is clickable to
+        switch the active track; the active row gets a 4 px ACCENT
+        marker on its left edge.
+
+        Layout caps the panel at ~140 px and adds a scrollbar when more
+        files are loaded than fit on screen."""
         bar = tk.Frame(parent, bg=PANEL)
         bar.pack(side="top", fill="x")
 
         inner = tk.Frame(bar, bg=PANEL)
         inner.pack(fill="x", padx=16, pady=10)
 
-        # Section label
         tk.Label(inner, text=tr("tracks.label"), bg=PANEL, fg=ACCENT,
                  font=FONT_UI_B).pack(anchor="w", pady=(0, 6))
 
-        # Drop zone (compact). Same DnD bindings as before; container is
-        # smaller now since it's part of a panel rather than a full strip.
-        self.drop_zone = tk.Frame(inner, bg=PANEL_HI,
-                                   highlightthickness=2, highlightbackground=BORDER,
+        # Container that holds either the empty-state drop zone or
+        # the rows-of-tracks scroll area. We swap children on first
+        # file load so empty/loaded transitions are clean.
+        self._tracks_body = tk.Frame(inner, bg=PANEL)
+        self._tracks_body.pack(fill="x")
+
+        # Empty state — drop zone fills the body initially.
+        self.drop_zone = tk.Frame(self._tracks_body, bg=PANEL_HI,
+                                   highlightthickness=2,
+                                   highlightbackground=BORDER,
                                    highlightcolor=ACCENT, cursor="hand2")
         self.drop_zone.pack(fill="x")
-
         drop_inner = tk.Frame(self.drop_zone, bg=PANEL_HI)
         drop_inner.pack(fill="x", padx=18, pady=10)
-        self.drop_label = tk.Label(drop_inner,
-                                   text=tr("drop.title" if _DND_OK else "drop.title_no_dnd"),
-                                   bg=PANEL_HI, fg=TEXT, font=FONT_DROP)
+        self.drop_label = tk.Label(
+            drop_inner,
+            text=tr("drop.title" if _DND_OK else "drop.title_no_dnd"),
+            bg=PANEL_HI, fg=TEXT, font=FONT_DROP)
         self.drop_label.pack(anchor="w")
-        self.drop_sub = tk.Label(drop_inner,
-                                 text=tr("drop.subtitle"),
-                                 bg=PANEL_HI, fg=MUTED, font=FONT_UI)
+        self.drop_sub = tk.Label(
+            drop_inner,
+            text=tr("drop.subtitle"),
+            bg=PANEL_HI, fg=MUTED, font=FONT_UI)
         self.drop_sub.pack(anchor="w")
-
         for w in (self.drop_zone, drop_inner, self.drop_label, self.drop_sub):
             w.bind("<Button-1>", lambda _e: self._pick_audio())
             w.bind("<Enter>",    lambda _e: self.drop_zone.config(highlightbackground=ACCENT))
             w.bind("<Leave>",    lambda _e: self.drop_zone.config(highlightbackground=BORDER))
+
+        # Loaded-state container — populated on first track add.
+        self._tracks_list_frame: tk.Frame | None = None
+
+    # ── multi-file Tracks Panel: row factory + state transitions ────────
+    def _tracks_render(self):
+        """Render the Tracks Panel from self._tracks. Switches between
+        empty-state drop zone and a scrollable list of track rows."""
+        if not self._tracks:
+            # Show empty state, hide list
+            try:
+                if self._tracks_list_frame is not None:
+                    self._tracks_list_frame.pack_forget()
+                self.drop_zone.pack(fill="x")
+            except tk.TclError:
+                pass
+            return
+
+        # Hide drop zone, show list
+        try:
+            self.drop_zone.pack_forget()
+        except tk.TclError:
+            pass
+
+        # (Re)build the list frame
+        if self._tracks_list_frame is not None:
+            try:
+                self._tracks_list_frame.destroy()
+            except tk.TclError:
+                pass
+        self._tracks_list_frame = tk.Frame(self._tracks_body, bg=PANEL)
+        self._tracks_list_frame.pack(fill="x")
+
+        self._track_row_widgets = []
+        for i, entry in enumerate(self._tracks):
+            row = self._build_track_row(self._tracks_list_frame, entry, i)
+            row.pack(fill="x", pady=1)
+            self._track_row_widgets.append(row)
+
+    def _build_track_row(self, parent, entry: "TrackEntry", idx: int) -> tk.Frame:
+        """Single track row in option-C spec format:
+            ▌ 01 ✓ test_Voice_EGG.wav   44.1k Hz · 8.2s · 12,525 网格   ▓▓░
+        ▌ left strip is ACCENT only on the active row."""
+        is_active = (idx == self._active_track)
+
+        outer = tk.Frame(parent, bg=PANEL_HI if is_active else PANEL,
+                         cursor="hand2")
+        # Active marker bar on the left
+        marker_color = ACCENT if is_active else PANEL
+        marker = tk.Frame(outer, bg=marker_color, width=4)
+        marker.pack(side="left", fill="y")
+
+        body = tk.Frame(outer, bg=outer.cget("bg"))
+        body.pack(side="left", fill="x", expand=True, padx=10, pady=6)
+
+        # Row 1: 编号 · 状态 · 文件名
+        line1 = tk.Frame(body, bg=body.cget("bg"))
+        line1.pack(fill="x", anchor="w")
+        # Track number
+        tk.Label(line1, text=f"{idx + 1:02d}",
+                 bg=body.cget("bg"), fg=MUTED,
+                 font=("Consolas", 10), width=3, anchor="w"
+                 ).pack(side="left")
+        # State icon
+        state_icon, state_color = {
+            "queued":    ("○", MUTED),
+            "analyzing": ("⏵", ACCENT_HI),
+            "analyzed":  ("✓", OK),
+            "failed":    ("✗", ERR),
+        }.get(entry.state, ("○", MUTED))
+        tk.Label(line1, text=state_icon,
+                 bg=body.cget("bg"), fg=state_color,
+                 font=("Microsoft YaHei UI", 11, "bold"),
+                 width=2, anchor="w"
+                 ).pack(side="left", padx=(2, 6))
+        # Filename
+        tk.Label(line1, text=entry.path.name,
+                 bg=body.cget("bg"), fg=TEXT,
+                 font=FONT_UI_B, anchor="w"
+                 ).pack(side="left", fill="x", expand=True)
+
+        # Row 2: 元数据
+        line2 = tk.Frame(body, bg=body.cget("bg"))
+        line2.pack(fill="x", anchor="w")
+        # Indent below the icons so meta aligns with filename
+        tk.Frame(line2, bg=body.cget("bg"), width=44
+                 ).pack(side="left")
+
+        sr_kHz = (entry.sr / 1000.0) if entry.sr else 0.0
+        meta_parts = []
+        if entry.sr:
+            meta_parts.append(f"{sr_kHz:.1f}k Hz")
+        if entry.duration:
+            meta_parts.append(f"{entry.duration:.1f}s")
+        if entry.state == "analyzed" and entry.cells:
+            meta_parts.append(tr("statusbar.file_meta",
+                                  name="", n=entry.cells, dt=entry.dt
+                                  ).split("·", 1)[1].strip()  # rough reuse
+                              if False else f"{entry.cells:,} cells")
+        elif entry.state == "queued":
+            meta_parts.append(tr("tracks.unanalyzed"))
+        elif entry.state == "analyzing":
+            meta_parts.append(tr("status.analyzing"))
+        elif entry.state == "failed":
+            meta_parts.append(tr("status.failed"))
+        meta_text = "  ·  ".join(meta_parts) if meta_parts else "—"
+        tk.Label(line2, text=meta_text,
+                 bg=body.cget("bg"), fg=MUTED,
+                 font=("Microsoft YaHei UI", 9), anchor="w"
+                 ).pack(side="left", fill="x", expand=True)
+
+        # Whole-row click → switch active track
+        def _click(_e=None, i=idx):
+            self._tracks_set_active(i)
+        for w in (outer, body, line1, line2,
+                  *line1.winfo_children(), *line2.winfo_children()):
+            w.bind("<Button-1>", _click)
+
+        return outer
+
+    def _tracks_add(self, path: Path) -> int:
+        """Append a new TrackEntry and re-render. Returns its index."""
+        entry = TrackEntry(path)
+        self._tracks.append(entry)
+        idx = len(self._tracks) - 1
+        # First file → automatically set active. Subsequent files queue.
+        if self._active_track < 0:
+            self._active_track = idx
+        self._tracks_render()
+        return idx
+
+    def _tracks_set_active(self, idx: int) -> None:
+        """Switch the displayed file. Two cases:
+          - target already analyzed → restore its df + re-render heatmap
+          - target queued → kick off analysis on it
+        """
+        if not (0 <= idx < len(self._tracks)):
+            return
+        prev = self._active_track
+        self._active_track = idx
+        entry = self._tracks[idx]
+
+        # Sync 'current view' state into the legacy single-file fields
+        # so all the existing render paths see the right data.
+        self.audio_path = entry.path
+        self._last_df = entry.df
+        self._last_csv = entry.csv if entry.csv else None
+        self.last_csv = entry.csv if entry.csv else None
+        self.csv_path_var.set(entry.csv if entry.csv else "—")
+        self._last_analysis_time = entry.dt
+        if entry.analyzer is not None:
+            self._last_analyzer = entry.analyzer
+
+        # Update visual: marker on new active, off on previous
+        self._tracks_render()
+
+        # Refresh heatmap / Inspector / status bar from the new active.
+        if entry.state == "analyzed" and entry.df is not None:
+            try:
+                self._refresh_metric_dropdown()
+                col = self.metric_var.get()
+                if col and col in entry.df.columns:
+                    self._render_metric(col)
+                self._update_inspector()
+                self._update_statusbar()
+            except Exception:
+                pass
+        elif entry.state == "queued":
+            # Start analysis in background
+            self._start_analysis(entry.path)
+        # 'analyzing' / 'failed' — leave UI in placeholder/error state
+
+    def _track_for_path(self, path: Path) -> TrackEntry | None:
+        for e in self._tracks:
+            try:
+                if e.path == path:
+                    return e
+            except Exception:
+                continue
+        return None
 
     def _build_metric_bar(self, parent):
         """Metric Bar: 显示当前 metric + 切换提示 + 视觉指示。
@@ -757,18 +987,14 @@ class VoiceMapApp(_TkBase):
     def _build_inspector(self, parent):
         """Inspector right column per docs/UI_DESIGN.md option-C spec.
 
-        Top-to-bottom (no log here — log lives in a separate Toplevel
-        opened from View menu, per spec):
-          • Metric name (large)
-          • Description
-          • Unit hint
-          • Clinical reference card
-          • Current value card (hover-driven)
-          • (vertical spacer)
-          • Action buttons (导出 Excel / 生成报告 / 对比录音)
+        Top-to-bottom:
+          • SCROLLABLE: metric name + description + unit + clinical bands
+          • PINNED:     current value card (hover-driven, always visible)
+          • PINNED:     action buttons (导出 Excel / 生成报告 / 对比录音)
 
-        Top half scrolls when content exceeds available height; the
-        action buttons row stays pinned at the bottom of the column.
+        The current-value card is pinned (not in the scroll area) so the
+        user always sees the cell readout without scrolling, even at the
+        minsize window. Clinical bands above can scroll if they overflow.
         """
         # ── Bottom: action buttons (pinned, packed first with side="bottom") ─
         actions = tk.Frame(parent, bg=PANEL)
@@ -788,8 +1014,43 @@ class VoiceMapApp(_TkBase):
         self._inspect_btn_compare.pack(fill="x", pady=2)
 
         # 1 px BORDER divider above the actions row
-        sep = tk.Frame(parent, bg=BORDER, height=1)
-        sep.pack(side="bottom", fill="x", padx=8, pady=(0, 0))
+        sep_actions = tk.Frame(parent, bg=BORDER, height=1)
+        sep_actions.pack(side="bottom", fill="x", padx=8, pady=(0, 0))
+
+        # ── PINNED: Current-value card lives just above actions, NOT in
+        # the scroll area, so it's always visible regardless of window
+        # size or how far the user has scrolled the clinical bands.
+        self._inspector_value_card = tk.Frame(
+            parent, bg=PANEL_HI,
+            highlightthickness=1, highlightbackground=BORDER,
+            highlightcolor=BORDER)
+        self._inspector_value_card.pack(side="bottom", fill="x",
+                                         padx=14, pady=(0, 8))
+        vc_inner = tk.Frame(self._inspector_value_card, bg=PANEL_HI)
+        vc_inner.pack(fill="x", padx=12, pady=10)
+        self._inspector_value_header = tk.Label(
+            vc_inner, text=tr("inspector.current"),
+            bg=PANEL_HI, fg=ACCENT, font=FONT_UI_B)
+        self._inspector_value_header.pack(anchor="w", pady=(0, 4))
+        self._inspector_value_coords = tk.Label(
+            vc_inner, text="—",
+            bg=PANEL_HI, fg=MUTED, font=FONT_UI)
+        self._inspector_value_coords.pack(anchor="w")
+        big = tk.Frame(vc_inner, bg=PANEL_HI)
+        big.pack(anchor="w", pady=(2, 0))
+        self._inspector_value_num = tk.Label(
+            big, text="—",
+            bg=PANEL_HI, fg=ACCENT_HI,
+            font=("Consolas", 22, "bold"))
+        self._inspector_value_num.pack(side="left")
+        self._inspector_value_unit = tk.Label(
+            big, text="",
+            bg=PANEL_HI, fg=MUTED, font=FONT_UI)
+        self._inspector_value_unit.pack(side="left", padx=(4, 0), pady=(8, 0))
+        self._inspector_value_sev = tk.Label(
+            vc_inner, text="",
+            bg=PANEL_HI, fg=MUTED, font=FONT_UI_B)
+        self._inspector_value_sev.pack(anchor="w", pady=(2, 0))
 
         # ── Top: scrollable area for metric details ───────────────────
         upper = tk.Frame(parent, bg=PANEL)
@@ -849,42 +1110,9 @@ class VoiceMapApp(_TkBase):
             anchor="w")
         self._inspector_unit_lbl.pack(anchor="w", pady=(2, 12), fill="x")
 
-        # Clinical reference card (BORDER outline)
+        # Clinical reference card — content rebuilt by _inspector_set_clinical
         self._inspector_cards = tk.Frame(pad, bg=PANEL)
-        self._inspector_cards.pack(fill="x", pady=(0, 12))
-
-        # Current-value card (BORDER outline) — hover-updated
-        self._inspector_value_card = tk.Frame(
-            pad, bg=PANEL_HI,
-            highlightthickness=1, highlightbackground=BORDER,
-            highlightcolor=BORDER)
-        self._inspector_value_card.pack(fill="x", pady=(0, 8))
-        # inner padding via a wrap frame
-        vc_inner = tk.Frame(self._inspector_value_card, bg=PANEL_HI)
-        vc_inner.pack(fill="x", padx=12, pady=10)
-        self._inspector_value_header = tk.Label(
-            vc_inner, text=tr("inspector.current"),
-            bg=PANEL_HI, fg=ACCENT, font=FONT_UI_B)
-        self._inspector_value_header.pack(anchor="w", pady=(0, 4))
-        self._inspector_value_coords = tk.Label(
-            vc_inner, text="—",
-            bg=PANEL_HI, fg=MUTED, font=FONT_UI)
-        self._inspector_value_coords.pack(anchor="w")
-        big = tk.Frame(vc_inner, bg=PANEL_HI)
-        big.pack(anchor="w", pady=(2, 0))
-        self._inspector_value_num = tk.Label(
-            big, text="—",
-            bg=PANEL_HI, fg=ACCENT_HI,
-            font=("Consolas", 22, "bold"))
-        self._inspector_value_num.pack(side="left")
-        self._inspector_value_unit = tk.Label(
-            big, text="",
-            bg=PANEL_HI, fg=MUTED, font=FONT_UI)
-        self._inspector_value_unit.pack(side="left", padx=(4, 0), pady=(8, 0))
-        self._inspector_value_sev = tk.Label(
-            vc_inner, text="",
-            bg=PANEL_HI, fg=MUTED, font=FONT_UI_B)
-        self._inspector_value_sev.pack(anchor="w", pady=(2, 0))
+        self._inspector_cards.pack(fill="x", pady=(0, 8))
 
         # ── Hidden log_text widget kept alive for compatibility ──────
         # _append_log writes to it; LogWindow mirrors it. Keeping it
@@ -1058,16 +1286,14 @@ class VoiceMapApp(_TkBase):
         except Exception:
             paths = [event.data]
 
-        wav = next((p for p in paths if str(p).lower().endswith(".wav")), None)
-        if not wav:
+        wavs = [p for p in paths if str(p).lower().endswith(".wav")]
+        if not wavs:
             self._append_log("WARNING", tr("log.ignored_non_wav"))
             return
-
-        if self._worker and self._worker.is_alive():
-            self._append_log("WARNING", tr("log.analysis_busy"))
-            return
-
-        self._start_analysis(str(wav))
+        # Multi-file: queue all dropped wavs into Tracks Panel. First
+        # one auto-analyses; subsequent ones wait for click.
+        for w in wavs:
+            self._on_audio_dropped(str(w))
 
     def _on_canvas_configure(self, event):
         # 只在"正在显示占位"时重画；渲染 voice map 时不触，避免 flicker
@@ -1150,11 +1376,31 @@ class VoiceMapApp(_TkBase):
     def _pick_audio(self):
         if self._worker and self._worker.is_alive():
             return
-        path = filedialog.askopenfilename(
+        # askopenfilenames (plural) lets the user select 1+ wavs in one go.
+        paths = filedialog.askopenfilenames(
             title=tr("fd.pick_audio"),
-            filetypes=[(tr("fd.filter.wav"), "*.wav"), (tr("fd.filter.all"), "*.*")])
-        if path:
-            self._start_analysis(path)
+            filetypes=[(tr("fd.filter.wav"), "*.wav"),
+                       (tr("fd.filter.all"), "*.*")])
+        if not paths:
+            return
+        for path in paths:
+            self._on_audio_dropped(path)
+
+    def _on_audio_dropped(self, path) -> None:
+        """Add a file to the Tracks Panel. First file becomes active and
+        gets analyzed automatically; later files are appended in 'queued'
+        state and only analyzed when the user clicks them."""
+        p = Path(path)
+        # If already in tracks, just switch to it
+        existing = self._track_for_path(p)
+        if existing is not None:
+            idx = self._tracks.index(existing)
+            self._tracks_set_active(idx)
+            return
+        idx = self._tracks_add(p)
+        # Auto-analyze only when this is the first track loaded
+        if len(self._tracks) == 1:
+            self._tracks_set_active(idx)
 
     def _pick_output_dir(self):
         path = filedialog.askdirectory(title=tr("fd.pick_outdir"),
@@ -1184,8 +1430,20 @@ class VoiceMapApp(_TkBase):
         self._log_count = 0
 
         self.audio_path = p
-        self.drop_label.configure(text=p.name, fg=ACCENT)
-        self.drop_sub.configure(text=str(p.parent))
+        # The drop_zone label updates only matter for the empty-state
+        # text — in multi-file mode the active row already shows the
+        # filename. Try to update them but don't crash when the drop
+        # zone has been hidden.
+        try:
+            self.drop_label.configure(text=p.name, fg=ACCENT)
+            self.drop_sub.configure(text=str(p.parent))
+        except tk.TclError:
+            pass
+        # Mark the matching TrackEntry as analyzing
+        entry = self._track_for_path(p)
+        if entry is not None:
+            entry.state = "analyzing"
+            self._tracks_render()
         # Reset analysis-derived state and refresh status bar
         self._last_df = None
         self._last_analysis_time = 0.0
@@ -1304,6 +1562,20 @@ class VoiceMapApp(_TkBase):
             self._append_log("META", f"✓ {payload['csv']}")
             # Track analysis time so the status bar can show it.
             self._last_analysis_time = float(payload.get("dt", 0.0))
+            # Update the matching TrackEntry with cached results
+            entry = self._track_for_path(self.audio_path)
+            if entry is not None:
+                entry.state = "analyzed"
+                entry.df = payload["df"]
+                entry.csv = payload["csv"]
+                entry.analyzer = payload.get("analyzer")
+                entry.dt = self._last_analysis_time
+                entry.cells = len(payload["df"])
+                try:
+                    entry.cycles = int(payload["df"]["Total"].sum())
+                except Exception:
+                    entry.cycles = 0
+                self._tracks_render()
             self._refresh_metric_dropdown()
             self._update_statusbar()
             self._update_inspector()
@@ -1311,6 +1583,10 @@ class VoiceMapApp(_TkBase):
             self._set_status(tr("status.failed"), ERR, key="status.failed")
             self._append_log("ERROR", payload["error"])
             self._show_placeholder(tr("placeholder.failed"))
+            entry = self._track_for_path(self.audio_path) if self.audio_path else None
+            if entry is not None:
+                entry.state = "failed"
+                self._tracks_render()
             self._update_statusbar()
 
     # ── Metric 切换 ──
