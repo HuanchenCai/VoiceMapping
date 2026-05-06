@@ -370,7 +370,7 @@ def render_option_b():
     panel(ax, 0, 0, 1, 0.04, theme["bg_elev"], edge=theme["border_sub"])
     text(ax, 0.013, 0.02, "就绪  ·  Clarity 阈值 = 0.97  ·  k = 5  ·  n_harm = 10",
          color=theme["text_sec"], fontsize=9, va="center")
-    text(ax, 0.99, 0.02, "© 2026 蔡焕晨  ·  V1.0", color=theme["text_muted"],
+    text(ax, 0.99, 0.02, "© 2026 蔡寰宸  ·  V1.0", color=theme["text_muted"],
          fontsize=9, va="center", ha="right")
 
     # Title
@@ -626,7 +626,7 @@ D_STRINGS = {
         "abnorm":        "异常",
         "result_label":  "本次结果:",
         "result_status": "✓ 良好",
-        "footer_left":   "嗓音声学品质多维分析图谱  V1.0  ·  © 2026 蔡焕晨  ·  huanchen.se@gmail.com",
+        "footer_left":   "嗓音声学品质多维分析图谱  V1.0  ·  © 2026 蔡寰宸  ·  huanchen.se@gmail.com",
         "footer_right":  "导出于  2026-05-06",
         "page_title":    "方案 D — 报告导出模板（中文）",
     },

@@ -9,7 +9,7 @@
 - **英文名 / 代号**：VoiceMap
 - **类型**：Windows 桌面 GUI（tkinter）+ CLI 工具
 - **目的**：声学/EGG 双通道分析，生成 Voice Range Profile + 多维 metric
-- **注册主体**：个人（蔡焕晨）软著申请目标
+- **注册主体**：个人（蔡寰宸）软著申请目标
 
 ❌ **不要**再写 "FonaDyn" 这个旧名，它是 KTH 的另一个 SuperCollider 项目，
 撞名会让软著被驳回。**所有新代码、新文档、新 commit 一律用 VoiceMap**。
@@ -283,7 +283,7 @@ A0 阶段会产出：
 - README.md 的版权声明 + 作者信息
 
 这些**不要**自动加 "Co-Authored-By Claude" 或类似的 AI 署名。
-软著申请人是个人，作者署名只写 **蔡焕晨 / Huanchen Cai**。
+软著申请人是个人，作者署名只写 **蔡寰宸 / Huanchen Cai**。
 邮箱：huanchen.se@gmail.com（用户全局 CLAUDE.md 已记录）。
 
 ---
