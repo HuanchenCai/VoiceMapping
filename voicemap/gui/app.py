@@ -294,12 +294,17 @@ class VoiceMapApp(_TkBase):
 
     # ── 布局 ──
     def _build_ui(self):
-        # Stash on self so _build_menubar (called on every language
-        # switch to rebuild) can pack itself BEFORE this frame.
-        self._outer = outer = tk.Frame(self, bg=BG)
-        outer.pack(fill="both", expand=True, padx=16, pady=14)
+        # Header packs directly onto self so the PANEL-coloured title
+        # bar extends edge-to-edge (no padding gaps showing BG colour
+        # as a black stripe between menubar and title).
+        self._build_header(self)
 
-        self._build_header(outer)
+        # Content area. padx=16, pady=(0, 14): no top padding because
+        # the header above is already a full-width strip — putting BG
+        # padding here would surface the 'black stripe' again.
+        self._outer = outer = tk.Frame(self, bg=BG)
+        outer.pack(fill="both", expand=True, padx=16, pady=(0, 14))
+
         self._build_top_bar(outer)
 
         paned = ttk.PanedWindow(outer, orient="horizontal")
@@ -608,16 +613,23 @@ class VoiceMapApp(_TkBase):
         AboutDialog(self)
 
     def _build_header(self, parent):
-        head = tk.Frame(parent, bg=BG)
-        head.pack(fill="x", pady=(0, 8))
-        # Header title — same as window title; updates via _on_language_changed.
-        self._header_title = tk.Label(head, text=tr("app.title"),
-                                       bg=BG, fg=TEXT, font=FONT_TITLE)
+        # bg=PANEL (same as the menubar) so the title row reads as a
+        # natural continuation of the bar instead of having a BG-coloured
+        # gap show as a 'black stripe'. Internal padding gives the title
+        # breathing room while staying visually attached to the menubar.
+        head = tk.Frame(parent, bg=PANEL)
+        head.pack(fill="x")
+        # padx=16 matches outer.padx so title aligns with content below
+        head_inner = tk.Frame(head, bg=PANEL)
+        head_inner.pack(fill="x", padx=16, pady=(8, 12))
+        self._header_title = tk.Label(head_inner, text=tr("app.title"),
+                                       bg=PANEL, fg=TEXT, font=FONT_TITLE)
         self._header_title.pack(side="left")
-        self.status_dot = tk.Label(head, text="●", bg=BG, fg=MUTED, font=("Segoe UI", 12))
+        self.status_dot = tk.Label(head_inner, text="●", bg=PANEL, fg=MUTED,
+                                    font=("Segoe UI", 12))
         self.status_dot.pack(side="right", padx=(0, 4))
-        self.status_lbl = tk.Label(head, text=tr("status.ready"),
-                                    bg=BG, fg=MUTED, font=FONT_SUB)
+        self.status_lbl = tk.Label(head_inner, text=tr("status.ready"),
+                                    bg=PANEL, fg=MUTED, font=FONT_SUB)
         self.status_lbl.pack(side="right")
         # 默认 status 文本是固定 key；_set_status 时会换成具体 key。
         self._status_key = "status.ready"
