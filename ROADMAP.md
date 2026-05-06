@@ -83,15 +83,27 @@ M3-M7 这些研究/科研增强项**全部推到拿证后**做。
 
 #### A0-5 打包 + 用户文档
 
-- [ ] PyInstaller 配置：`pyinstaller --onefile --windowed --icon=... voicemap/cli.py`
-  - 处理 numba / scikit-learn / tkinterdnd2 / matplotlib 隐式依赖（`--hidden-import` / `--collect-all`）
-  - 输出 `dist/VoiceMap.exe`（标的：< 200 MB）
-- [ ] Inno Setup 脚本 → `VoiceMap_v1.0.0_setup.exe`
-- [ ] **用户手册.md**（双语，10-30 页 PDF）：截图 + 步骤说明
-  - 核心截图 8-10 张：初始界面、拖入 wav、分析中、完成、各 metric 切换、设置、对比、报告、关于
-- [ ] **设计说明书.md**（双语，10-30 页 PDF）：架构图 + 模块说明 + 数据流图
+- [x] **PyInstaller 配置**：`VoiceMap.spec`（one-folder 布局，commit 9254fde）
+  - 收齐 numba / sv-ttk / tkinterdnd2 / matplotlib / soundfile 数据
+  - 显式 hidden imports 列出所有 voicemap.* 子模块（避免延迟导入漏掉）
+  - excludes 砍掉 PyQt / pytest / parselmouth / Jupyter 减体积
+  - **构建命令**：`build_exe.bat` 双击，输出 `dist/VoiceMap/VoiceMap.exe`
+  - **未实际跑过构建**：等本机首次执行时验证；spec 是契约
+- [ ] Inno Setup 脚本 → `VoiceMap_v1.0.0_setup.exe`（依赖 PyInstaller 产物）
+- [x] **`docs/用户手册.md`**（commit ef3002d，~360 行 markdown）
+  - 软件概述 / 系统要求 / 启动方式
+  - 5 区域 UI tour（菜单栏 / 标题 / Tracks / Metric Bar / 主区 / Status Bar / Inspector）
+  - 单文件 + 多文件操作流程
+  - 设置 / 临床阈值速查 / CLI 用法 / 故障排查
+- [x] **`docs/设计说明书.md`**（commit ef3002d，~360 行）
+  - 分层架构 + 依赖图 + 项目目录
+  - 3 个数据流图（单文件 / hover 探测 / 多文件切换）
+  - 11 个模块逐个说明
+  - 6 个关键设计决策
+  - 性能基准 / 验证基准 / PyInstaller 配方 / 致谢
+- [ ] **核心截图 8-10 张**：等 v1.0.0 截屏会话产出，用户手动跑
 
-**验证**：`dist/VoiceMap.exe` 在干净 Windows 上能启动、能跑分析、能切语言。
+**验证**：`dist/VoiceMap.exe` 在干净 Windows 上能启动、能跑分析、能切语言（首次构建后跑）。
 
 #### A0-完成判据
 
