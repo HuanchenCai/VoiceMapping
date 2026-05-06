@@ -128,15 +128,18 @@ class VoiceMapApp(_TkBase):
         self.option_add("*Menu.foreground",       TEXT)
         self.option_add("*Menu.activeBackground", ACCENT)
         self.option_add("*Menu.activeForeground", BG)
-        # Belt-and-suspenders to suppress Windows' native menu chrome:
-        # set every "border" / "relief" / "highlight" option both via the
-        # option DB and again per-tk.Menu() call. Without these, Win32
-        # paints a thin white frame around the popup that no amount of
-        # bg= overrides can hide.
+        # Anti-chrome attempts. None of these reach the OS-drawn 1 px
+        # outline around tk.Menu popups on Windows 11 (DWM uses classic
+        # Win32 USER menu API for Tk, not the Fluent/WinUI compositor
+        # that Explorer / Office menus use). Documented in CLAUDE.md
+        # §8.4.1. Kept here so the option DB is at least consistent.
         self.option_add("*Menu.borderwidth",        0)
         self.option_add("*Menu.relief",             "flat")
         self.option_add("*Menu.activeBorderWidth",  0)
         self.option_add("*Menu.highlightThickness", 0)
+        # Star-star wildcard reaches inner Tk-drawn elements (margins).
+        self.option_add("*Menu*Background",         PANEL_HI)
+        self.option_add("*Menu*Foreground",         TEXT)
 
         self._init_style()
         self._build_menubar()
