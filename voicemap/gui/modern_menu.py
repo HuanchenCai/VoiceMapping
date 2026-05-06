@@ -185,7 +185,13 @@ class ModernPopup(tk.Toplevel):
         self.configure(bg=PANEL_HI, bd=0, highlightthickness=0)
         self._closing = False
         self._outside_binding = None
-        self._app_root: Optional[tk.Misc] = self.winfo_toplevel()
+        # winfo_toplevel() on a Toplevel returns *itself*, which would
+        # bind the outside-click handler to the popup instead of the
+        # main window. Walk up via .master to escape the Toplevel.
+        try:
+            self._app_root: Optional[tk.Misc] = parent.winfo_toplevel()
+        except tk.TclError:
+            self._app_root = None
 
         # Inner frame so we have control over border padding (faked
         # 1 px BORDER colour line all around for separation from window).
@@ -334,8 +340,10 @@ class ModernPopup(tk.Toplevel):
 
     def show_at(self, x: int, y: int, parent_popup: Optional["ModernPopup"] = None) -> None:
         try:
-            self._app_root = (parent_popup._app_root if parent_popup
-                              else self.winfo_toplevel())
+            # Re-derive _app_root: for a sub-cascade, share the root with
+            # the owner popup so a single outside-click handler covers both.
+            if parent_popup is not None:
+                self._app_root = parent_popup._app_root
             self.update_idletasks()
             ww = max(self.winfo_reqwidth(), 200)
             wh = max(self.winfo_reqheight(), 40)
