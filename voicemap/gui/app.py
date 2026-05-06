@@ -41,6 +41,7 @@ from voicemap.gui.theme import (
     OK, WARN, ERR,
     TEXT_SEC, TEXT_MUTED,
     FONT_UI, FONT_UI_B, FONT_TITLE, FONT_SUB, FONT_DROP, FONT_MONO,
+    FONT_CAPTION, FONT_SMALL, FONT_H2, FONT_DISPLAY, FONT_MONO_B,
     _METRIC_SECTIONS, _DEFAULT_METRIC_CHAIN,
 )
 from voicemap.gui.widgets import MetricPopup, QueueHandler
@@ -825,7 +826,7 @@ class VoiceMapApp(_TkBase):
         wave_str = self._track_waveform_blocks(entry)
         wave_lbl = tk.Label(outer, text=wave_str,
                             bg=bg_row, fg=ACCENT_HI,
-                            font=("Consolas", 10))
+                            font=FONT_MONO)
         wave_lbl.pack(side="right", padx=(0, 12))
 
         body = tk.Frame(outer, bg=bg_row)
@@ -836,7 +837,7 @@ class VoiceMapApp(_TkBase):
         line1.pack(fill="x", anchor="w")
         tk.Label(line1, text=f"{idx + 1:02d}",
                  bg=bg_row, fg=MUTED,
-                 font=("Consolas", 10), width=3, anchor="w"
+                 font=FONT_MONO, width=3, anchor="w"
                  ).pack(side="left")
         state_icon, state_color = {
             "queued":    ("○", MUTED),
@@ -846,7 +847,7 @@ class VoiceMapApp(_TkBase):
         }.get(entry.state, ("○", MUTED))
         tk.Label(line1, text=state_icon,
                  bg=bg_row, fg=state_color,
-                 font=("Microsoft YaHei UI", 11, "bold"),
+                 font=FONT_UI_B,
                  width=2, anchor="w"
                  ).pack(side="left", padx=(2, 6))
         tk.Label(line1, text=entry.path.name,
@@ -880,7 +881,7 @@ class VoiceMapApp(_TkBase):
         meta_text = "  ·  ".join(meta_parts) if meta_parts else "—"
         tk.Label(line2, text=meta_text,
                  bg=bg_row, fg=MUTED,
-                 font=("Microsoft YaHei UI", 10), anchor="w"
+                 font=FONT_SMALL, anchor="w"
                  ).pack(side="left", fill="x", expand=True)
 
         # Whole-row click → switch active track
@@ -1086,7 +1087,7 @@ class VoiceMapApp(_TkBase):
         self._inspector_value_num = tk.Label(
             big, text="—",
             bg=PANEL_HI, fg=ACCENT_HI,
-            font=("Consolas", 22, "bold"))
+            font=FONT_MONO_B)
         self._inspector_value_num.pack(side="left")
         self._inspector_value_unit = tk.Label(
             big, text="",
@@ -1138,7 +1139,7 @@ class VoiceMapApp(_TkBase):
         self._inspector_metric_name = tk.Label(
             pad, text="—",
             bg=PANEL, fg=ACCENT,
-            font=("Microsoft YaHei UI", 22, "bold"),
+            font=FONT_DISPLAY,
             anchor="w")
         self._inspector_metric_name.pack(anchor="w")
 
@@ -1151,7 +1152,7 @@ class VoiceMapApp(_TkBase):
         # Unit hint (own row, small muted)
         self._inspector_unit_lbl = tk.Label(
             pad, text="",
-            bg=PANEL, fg=MUTED, font=("Microsoft YaHei UI", 9),
+            bg=PANEL, fg=MUTED, font=FONT_CAPTION,
             anchor="w")
         self._inspector_unit_lbl.pack(anchor="w", pady=(2, 12), fill="x")
 
