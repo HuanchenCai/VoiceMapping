@@ -510,63 +510,20 @@ class VoiceMapApp(_TkBase):
         self.log_text.tag_configure("META",    foreground=ACCENT)
 
     def _build_right_panel(self, parent):
-        # 顶栏：放和当前 voice map 强相关的工具（centroid 加载/保存 + 状态）。
-        # 跟绘图放一起，用户看图时能顺手操作；分析参数才留在 Settings 里。
-        toolbar = tk.Frame(parent, bg=PANEL, height=34)
-        toolbar.pack(side="top", fill="x", padx=8, pady=(6, 0))
-        toolbar.pack_propagate(False)
+        # 旧的 Centroid 工具栏 + 绘图 toolbar 都拆了 —— 入口已经全部移到顶部
+        # 菜单栏（参数 → 聚类中心 / 编辑 → 标注/复位/复制/保存 / 视图 → 拟合）。
+        # 画布上方留空，等 A0-4 按 docs/UI_DESIGN.md option-C 排"Tracks Panel +
+        # Metric Bar + Inspector"三段。
+        #
+        # 这些 widget 引用置 None，旧代码里的 .state() / .configure() / 位置查询
+        # 都通过 _is_widget_alive 守卫接住。
+        self.cent_save_btn   = None
+        self.cent_status_lbl = None
+        self.fit_btn         = None
+        self.annot_btn       = None
+        self.save_btn        = None
 
-        tk.Label(toolbar, text="Centroid", bg=PANEL, fg=MUTED, font=FONT_UI
-                 ).pack(side="left")
-        ttk.Button(toolbar, text="加载", style="Ghost.TButton",
-                   command=self._load_centroids).pack(side="left", padx=(8, 0))
-        self.cent_save_btn = ttk.Button(toolbar, text="保存当前",
-                                        style="Ghost.TButton",
-                                        command=self._save_centroids)
-        self.cent_save_btn.pack(side="left", padx=(6, 0))
-        self.cent_save_btn.state(["disabled"])   # 没分析过时禁用
-        ttk.Button(toolbar, text="多 wav 联合训练…", style="Ghost.TButton",
-                   command=self._train_centroids_from_many
-                   ).pack(side="left", padx=(6, 0))
-        self.cent_status_lbl = tk.Label(toolbar,
-                                         text=self._centroid_status_text(),
-                                         bg=PANEL, fg=MUTED, font=FONT_UI)
-        self.cent_status_lbl.pack(side="left", padx=(12, 0))
-
-        # ── M2 plot toolbar — fit / annotate / save / copy ────────────────
-        plot_tb = tk.Frame(parent, bg=PANEL, height=34)
-        plot_tb.pack(side="top", fill="x", padx=8, pady=(4, 0))
-        plot_tb.pack_propagate(False)
-
-        tk.Label(plot_tb, text="绘图", bg=PANEL, fg=MUTED, font=FONT_UI
-                 ).pack(side="left")
-
-        # Fit dropdown
-        self.fit_btn = ttk.Button(plot_tb, text="拟合 ▾", style="Ghost.TButton",
-                                   command=self._open_fit_menu)
-        self.fit_btn.pack(side="left", padx=(8, 0))
-
-        # Annotation toggle
-        self.annot_btn = ttk.Button(plot_tb, text="标注", style="Ghost.TButton",
-                                     command=self._toggle_annotation_mode)
-        self.annot_btn.pack(side="left", padx=(6, 0))
-
-        # Reset overlays
-        ttk.Button(plot_tb, text="复位", style="Ghost.TButton",
-                   command=self._clear_overlays).pack(side="left", padx=(6, 0))
-
-        # Save / Copy on the right side
-        ttk.Button(plot_tb, text="复制图片", style="Ghost.TButton",
-                   command=self._copy_canvas).pack(side="right")
-        self.save_btn = ttk.Button(plot_tb, text="保存 ▾", style="Ghost.TButton",
-                                    command=self._open_save_menu)
-        self.save_btn.pack(side="right", padx=(0, 6))
-
-        # All these need a populated canvas to make sense; disable until first analysis.
-        for b in (self.fit_btn, self.annot_btn, self.save_btn):
-            b.state(["disabled"])
-
-        # Overlay state
+        # Overlay state（标注 / 拟合曲线 在内存里继续跟踪，只是没有 toolbar 按钮）
         from voicemap.plot_overlay import OverlayManager
         self._overlay_mgr = OverlayManager()
         self._annot_mode_on = False
@@ -908,7 +865,7 @@ class VoiceMapApp(_TkBase):
                 pass
             # 有了 analyzer 就能保存 centroid
             try:
-                self.cent_save_btn.state(["!disabled"])
+                if self.cent_save_btn is not None: self.cent_save_btn.state(["!disabled"])
             except (AttributeError, tk.TclError):
                 pass
             # M2 plot toolbar (拟合 / 标注 / 保存 / 复制) — 分析完才能用
@@ -1228,7 +1185,7 @@ class VoiceMapApp(_TkBase):
             self._loaded_centroids      = payload["analyzer"].cluster_calculator.centroids_
             self._loaded_centroids_path = payload["csv"]
             self._last_analyzer         = payload["analyzer"]
-            self.cent_save_btn.state(["!disabled"])
+            if self.cent_save_btn is not None: self.cent_save_btn.state(["!disabled"])
             self._refresh_centroid_status()
             self._append_log("META",
                              f"✓ 联合训练完成：{payload['n_wavs']} 个 wav → "
@@ -1257,7 +1214,7 @@ class VoiceMapApp(_TkBase):
     def _refresh_centroid_status(self):
         # 顶栏状态
         try:
-            self.cent_status_lbl.configure(text=self._centroid_status_text())
+            (self.cent_status_lbl.configure(text=self._centroid_status_text() if self.cent_status_lbl is not None else None))
         except (AttributeError, tk.TclError):
             pass
 
@@ -1305,14 +1262,12 @@ class VoiceMapApp(_TkBase):
         self.status_lbl.configure(text=text, fg=color)
         self.status_dot.configure(fg=color)
 
-    # ── M2 plot toolbar handlers ────────────────────────────────────────
     def _enable_plot_toolbar(self):
-        """Called after first successful analysis."""
-        try:
-            for b in (self.fit_btn, self.annot_btn, self.save_btn):
-                b.state(["!disabled"])
-        except (AttributeError, tk.TclError):
-            pass
+        """No-op since A0-3: plot toolbar is removed in favour of the
+        menubar entries (编辑 + 视图). Kept as a method so existing
+        callers don't error out; can be deleted entirely after one
+        more pass."""
+        return
 
     def _clear_overlays(self):
         """Remove fits / annotations from the current heatmap, redraw."""
@@ -1351,8 +1306,8 @@ class VoiceMapApp(_TkBase):
         m.add_command(label="  清除叠加",
                       command=self._clear_overlays)
         try:
-            x = self.fit_btn.winfo_rootx()
-            y = self.fit_btn.winfo_rooty() + self.fit_btn.winfo_height()
+            # fit_btn 已移除（toolbar 整片删了），改在鼠标当前位置弹出
+            x, y = self.winfo_pointerxy()
             m.tk_popup(x, y)
         finally:
             m.grab_release()
@@ -1389,12 +1344,12 @@ class VoiceMapApp(_TkBase):
                 pass
             self._annot_canvas_cid = None
             self._annot_mode_on = False
-            self.annot_btn.configure(text="标注")
+            pass  # annot_btn removed; menu reflects state via 编辑→标注 (TODO: checkmark)
             cw.configure(cursor="")
         else:
             # Turn on — next plot click prompts for text
             self._annot_mode_on = True
-            self.annot_btn.configure(text="标注 ◉")
+            pass  # annot_btn removed; annotation mode is tracked via self._annot_mode_on
             cw.configure(cursor="cross")
             self._annot_canvas_cid = self._canvas.mpl_connect(
                 "button_press_event", self._on_canvas_click_for_annotation)
@@ -1439,8 +1394,8 @@ class VoiceMapApp(_TkBase):
             m.add_command(label=f"  {desc} (.{ext})",
                           command=lambda e=ext, d=desc: self._save_canvas(e, d))
         try:
-            x = self.save_btn.winfo_rootx()
-            y = self.save_btn.winfo_rooty() + self.save_btn.winfo_height()
+            # save_btn 已移除，鼠标位置弹出
+            x, y = self.winfo_pointerxy()
             m.tk_popup(x, y)
         finally:
             m.grab_release()

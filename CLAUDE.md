@@ -214,6 +214,24 @@ A0-4 之后强制规则：
 - 这是 tk 本身的局限，没法修
 - 长列表用 cascade 拆分类，每个子菜单短到不需要滚
 
+### 8.4.1 tk.Menu 在 Windows 11 上的"白边"是 OS 画的（不可消除）
+Windows 11 DWM 给所有 popup（菜单 / tooltip / dropdown）强制画一圈 1-2 px
+浅色描边 + 阴影。即便 Tk 端做到极致：
+
+```python
+option_add("*Menu.borderwidth",        0)
+option_add("*Menu.relief",             "flat")
+option_add("*Menu.activeBorderWidth",  0)
+option_add("*Menu.highlightThickness", 0)
+tk.Menu(..., bg=PANEL_HI, borderwidth=0, relief="flat",
+        activeborderwidth=0, highlightthickness=0)
+```
+
+**还是会留 1 px 白边**。Tk 控制不到 OS 那一层。彻底消除只能改用
+`Toplevel + overrideredirect=True` 自画 popup（旧 MetricPopup 路线），
+代价是自己处理多屏定位 / 点外消失 / 焦点抢回。除非有强烈视觉要求，
+**接受这条 OS 边**，软著截图也只会被认为是 Windows 原生菜单的正常样子。
+
 ### 8.5 Numba JIT 冷启动
 - 第一次 import 后第一次调用会编译（数秒延迟）
 - 如果第一次分析特别慢（>30s），看是不是 numba 在编译
