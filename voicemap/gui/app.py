@@ -291,8 +291,19 @@ class VoiceMapApp(_TkBase):
         paned = ttk.PanedWindow(outer, orient="horizontal")
         paned.pack(fill="both", expand=True, pady=(10, 0))
 
-        self.left = tk.Frame(paned, bg=PANEL, highlightthickness=1, highlightbackground=BORDER)
-        self.right = tk.Frame(paned, bg=PANEL, highlightthickness=1, highlightbackground=BORDER)
+        # highlightcolor=BORDER (same as highlightbackground): without
+        # explicit setting, Tk uses the system focus color (sv_ttk dark
+        # makes that Win11 blue), so the panel grew a blue ring whenever
+        # the window had focus. Pinning the focus color to BORDER keeps
+        # the 1 px frame consistent regardless of focus state.
+        self.left = tk.Frame(paned, bg=PANEL,
+                              highlightthickness=1,
+                              highlightbackground=BORDER,
+                              highlightcolor=BORDER)
+        self.right = tk.Frame(paned, bg=PANEL,
+                              highlightthickness=1,
+                              highlightbackground=BORDER,
+                              highlightcolor=BORDER)
         paned.add(self.left, weight=0)
         paned.add(self.right, weight=1)
         # sash 初始位置
@@ -522,6 +533,7 @@ class VoiceMapApp(_TkBase):
         log_wrap.pack(fill="both", expand=True, pady=(4, 0))
         self.log_text = tk.Text(log_wrap, bg="#0b1117", fg=TEXT, font=FONT_MONO,
                                 bd=0, highlightthickness=1, highlightbackground=BORDER,
+                                highlightcolor=BORDER,
                                 insertbackground=TEXT, wrap="word",
                                 padx=8, pady=6, state="disabled",
                                 height=10, width=30)

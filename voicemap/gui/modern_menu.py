@@ -76,6 +76,23 @@ class ModernMenubar(tk.Frame):
         self.pack_propagate(False)
         self._buttons: list[tk.Label] = []
         self._open_popup: Optional[ModernPopup] = None
+        self._open_popup_btn: Optional[tk.Label] = None
+
+    def _close_open_popup(self) -> None:
+        if self._open_popup is None:
+            return
+        try:
+            if self._open_popup.winfo_exists():
+                self._open_popup.destroy()
+        except tk.TclError:
+            pass
+        self._open_popup = None
+        if self._open_popup_btn is not None:
+            try:
+                self._open_popup_btn.configure(bg=PANEL)
+            except tk.TclError:
+                pass
+        self._open_popup_btn = None
 
     def add_menu(self, label: str, popup_factory: Callable[[], "ModernPopup"]) -> tk.Label:
         """Add a top-level menu. ``popup_factory`` builds and returns the
@@ -88,8 +105,27 @@ class ModernMenubar(tk.Frame):
                        cursor="hand2")
         btn.pack(side="left")
 
+        def _open():
+            popup = popup_factory()
+            popup.show_below(btn)
+            # When popup destroys (Esc / outside click / item picked),
+            # clear our state so the next click reopens cleanly.
+            popup.bind("<Destroy>", lambda _e: self._on_popup_destroyed(btn),
+                       add="+")
+            self._open_popup = popup
+            self._open_popup_btn = btn
+            btn.configure(bg=ACCENT, fg=BG)
+
         def _on_enter(_e=None):
-            if self._open_popup is None:
+            # Auto-switch behavior: if a popup is already open and the
+            # cursor moved onto a DIFFERENT menu's button, close the
+            # current popup and open this one. Standard desktop-menu UX.
+            if self._open_popup is not None:
+                if self._open_popup_btn is btn:
+                    return   # hovering own active button — leave alone
+                self._close_open_popup()
+                _open()
+            else:
                 btn.configure(bg=PANEL_HI)
 
         def _on_leave(_e=None):
@@ -97,27 +133,33 @@ class ModernMenubar(tk.Frame):
                 btn.configure(bg=PANEL)
 
         def _on_click(_e=None):
-            # Toggle: clicking the same menu again closes it.
-            if self._open_popup is not None:
-                try:
-                    if self._open_popup.winfo_exists():
-                        self._open_popup.destroy()
-                except tk.TclError:
-                    pass
-                self._open_popup = None
-                btn.configure(bg=PANEL)
+            # Toggle: clicking active menu closes it; clicking a
+            # different menu (same row) closes current + opens new.
+            if self._open_popup is not None and self._open_popup_btn is btn:
+                self._close_open_popup()
                 return
-            popup = popup_factory()
-            popup.bind("<Destroy>", lambda _e, b=btn: b.configure(bg=PANEL))
-            popup.show_below(btn)
-            self._open_popup = popup
-            btn.configure(bg=ACCENT)
+            self._close_open_popup()
+            _open()
 
         btn.bind("<Enter>", _on_enter)
         btn.bind("<Leave>", _on_leave)
         btn.bind("<Button-1>", _on_click)
         self._buttons.append(btn)
         return btn
+
+    def _on_popup_destroyed(self, btn: tk.Label) -> None:
+        """Reset our reference when the popup self-destroys (e.g.
+        outside click, Esc, or item picked).
+
+        Tk fires <Destroy> for every descendant before the toplevel
+        itself; only react when the active popup is gone."""
+        if self._open_popup is not None and not self._open_popup.winfo_exists():
+            self._open_popup = None
+            self._open_popup_btn = None
+            try:
+                btn.configure(bg=PANEL, fg=TEXT)
+            except tk.TclError:
+                pass
 
 
 # ─── ModernPopup ──────────────────────────────────────────────────────────
