@@ -47,6 +47,7 @@ from voicemap.gui.dialogs import (
     SettingsDialog, CompareDialog, ProgressDialog, AboutDialog,
 )
 from voicemap.gui.modern_menu import ModernMenubar, ModernPopup
+from voicemap.i18n import tr, set_language, get_language, subscribe as i18n_subscribe
 
 # 可选的原生拖拽
 try:
@@ -63,8 +64,10 @@ class VoiceMapApp(_TkBase):
     def __init__(self):
         super().__init__()
         dnd_hint = "" if _DND_OK else "（未安装 tkinterdnd2，拖放已降级为点击）"
-        # 默认中文软件名；i18n 上线（A0-4）后会按当前语言切换
-        self.title(f"嗓音声学品质多维分析图谱 {dnd_hint}".strip())
+        self.title(f"{tr('app.title')} {dnd_hint}".strip())
+        # Subscribe to i18n language changes so the title + menubar
+        # rebuild when the user switches language at runtime.
+        i18n_subscribe(self._on_language_changed)
         self.geometry("1200x720")
         self.minsize(1000, 600)
         self.configure(bg=BG)
@@ -282,7 +285,9 @@ class VoiceMapApp(_TkBase):
 
     # ── 布局 ──
     def _build_ui(self):
-        outer = tk.Frame(self, bg=BG)
+        # Stash on self so _build_menubar (called on every language
+        # switch to rebuild) can pack itself BEFORE this frame.
+        self._outer = outer = tk.Frame(self, bg=BG)
         outer.pack(fill="both", expand=True, padx=16, pady=14)
 
         self._build_header(outer)
@@ -317,68 +322,99 @@ class VoiceMapApp(_TkBase):
 
         A0-3 改为自画 ModernMenubar + ModernPopup（``voicemap.gui.modern_menu``）
         以躲开 tk.Menu 在 Win11 上的老 Win32 USER 菜单白边（CLAUDE.md §8.4.1）。
-        每个顶级菜单的 popup 是 lambda 工厂，每次点开重建 —— 这样
-        radiobutton 的当前选中态、各 metric 的 enable/disable 视觉色都按当下
-        ``self.metric_var`` / ``self._metric_sections_avail`` 实时反映。
-        """
-        # 顶部条容器。_build_menubar() 在 _build_ui() 之前调，所以这里
-        # 第一个 pack(side="top") 自然占住顶部；后续 outer Frame 用
-        # fill="both" expand=True 填剩余区域。
-        bar = ModernMenubar(self, bg=PANEL, height=32)
-        bar.pack(side="top", fill="x")
+        A0-4 改为读 ``tr(...)`` —— 切语言时整个 menubar 重建。
 
-        # 注册 5 个顶级菜单。每个 add_menu 只接收 label + 工厂函数；
-        # 工厂在用户点击时同步执行，所以可以 closure-capture self 拿到最新数据。
-        bar.add_menu("文件",  self._popup_file)
-        bar.add_menu("编辑",  self._popup_edit)
-        bar.add_menu("参数",  self._popup_metric)
-        bar.add_menu("视图",  self._popup_view)
-        bar.add_menu("帮助",  self._popup_help)
+        每个顶级菜单的 popup 是 lambda 工厂，每次点开重建，所以 popup
+        item 的 label 在每次弹出时都按当前语言实时取。
+        """
+        # 旧的 menubar 还在就先销毁（语言切换时会走这里第二次）
+        old = getattr(self, "_menubar", None)
+        if old is not None:
+            try:
+                old.destroy()
+            except tk.TclError:
+                pass
+
+        bar = ModernMenubar(self, bg=PANEL, height=32)
+        # On first build _outer doesn't exist yet → just pack at top.
+        # On rebuild (language switch) _outer is already packed → place
+        # the new bar BEFORE it so the bar stays above the content.
+        outer = getattr(self, "_outer", None)
+        if outer is not None and outer.winfo_exists():
+            bar.pack(side="top", fill="x", before=outer)
+        else:
+            bar.pack(side="top", fill="x")
+
+        bar.add_menu(tr("menu.file"),   self._popup_file)
+        bar.add_menu(tr("menu.edit"),   self._popup_edit)
+        bar.add_menu(tr("menu.metric"), self._popup_metric)
+        bar.add_menu(tr("menu.view"),   self._popup_view)
+        bar.add_menu(tr("menu.help"),   self._popup_help)
 
         self._menubar = bar
-        # _refresh_metric_dropdown 不再操作 native tk.Menu —— 改成只更新
-        # self._metric_sections_avail，参数 popup 在弹出时读这个表上色。
         self._metric_section_menus = {}     # 兼容旧接口（不再使用）
+
+    def _on_language_changed(self):
+        """Subscriber: redraw window title and rebuild the menubar so the
+        new language takes effect without restart. popup factories will
+        auto-pick up the new tr() values on the next open."""
+        try:
+            self.title(tr("app.title"))
+        except tk.TclError:
+            pass
+        try:
+            self._build_menubar()
+        except tk.TclError:
+            pass
 
     # ── popup factories（每次点开新建一个 ModernPopup） ──────────────────
     def _popup_file(self) -> "ModernPopup":
         p = ModernPopup(self)
-        p.add_command("打开 WAV...",       command=self._pick_audio,     accelerator="Ctrl+O")
-        p.add_command("打开输出目录",      command=self._open_output_dir)
+        p.add_command(tr("file.open_wav"),    command=self._pick_audio,     accelerator="Ctrl+O")
+        p.add_command(tr("file.open_outdir"), command=self._open_output_dir)
         p.add_separator()
-        p.add_command("导出 Excel",        command=self._export_excel)
-        p.add_command("生成报告",          command=self._export_report)
-        p.add_command("对比 2 段录音…",    command=self._open_compare_dialog)
+        p.add_command(tr("file.export_excel"), command=self._export_excel)
+        p.add_command(tr("file.gen_report"),   command=self._export_report)
+        p.add_command(tr("file.compare"),      command=self._open_compare_dialog)
         p.add_separator()
-        p.add_command("设置...",           command=self._open_settings,  accelerator="Ctrl+,")
+        p.add_command(tr("file.settings"),    command=self._open_settings, accelerator="Ctrl+,")
         p.add_separator()
-        p.add_command("退出",              command=self.destroy)
+        p.add_command(tr("file.quit"),        command=self.destroy)
         return p
 
     def _popup_edit(self) -> "ModernPopup":
         p = ModernPopup(self)
-        annot_label = "标注 ●" if getattr(self, "_annot_mode_on", False) else "标注"
-        p.add_command(annot_label,         command=self._toggle_annotation_mode)
-        p.add_command("复位标注",          command=self._clear_overlays)
+        annot_label = (tr("edit.annotate_active")
+                       if getattr(self, "_annot_mode_on", False)
+                       else tr("edit.annotate"))
+        p.add_command(annot_label,            command=self._toggle_annotation_mode)
+        p.add_command(tr("edit.reset_annotate"), command=self._clear_overlays)
         p.add_separator()
-        p.add_command("复制图片",          command=self._copy_canvas,    accelerator="Ctrl+C")
-        p.add_command("保存图片…",         command=self._open_save_menu, accelerator="Ctrl+S")
+        p.add_command(tr("edit.copy_image"),  command=self._copy_canvas,    accelerator="Ctrl+C")
+        p.add_command(tr("edit.save_image"),  command=self._open_save_menu, accelerator="Ctrl+S")
         return p
 
     def _popup_metric(self) -> "ModernPopup":
         p = ModernPopup(self)
-        p.add_command("上一个 metric  ←", command=lambda: self._cycle_metric(-1))
-        p.add_command("下一个 metric  →", command=lambda: self._cycle_metric(+1))
+        p.add_command(tr("metric.prev"), command=lambda: self._cycle_metric(-1))
+        p.add_command(tr("metric.next"), command=lambda: self._cycle_metric(+1))
         p.add_separator()
         # 5 个分类 cascade — 每个的工厂闭包绑定 section
         avail_set = self._available_metric_columns()
-        for section_title, metrics in _METRIC_SECTIONS:
-            label = section_title.split(" · ", 1)[0]
-            p.add_cascade(label,
+        # Map _METRIC_SECTIONS' Chinese-only labels to i18n keys.
+        # _METRIC_SECTIONS still holds the canonical zh names because
+        # they're also keys into self._metric_section_menus and the
+        # avail_set lookup. Translate just the *display* label here.
+        section_label_keys = ["metric.acoustic", "metric.egg",
+                              "metric.singing", "metric.cluster",
+                              "metric.density"]
+        for (section_title, metrics), key in zip(_METRIC_SECTIONS,
+                                                  section_label_keys):
+            p.add_cascade(tr(key),
                           popup_factory=lambda m=metrics, av=avail_set:
                               self._popup_metric_section(m, av))
         p.add_separator()
-        p.add_cascade("聚类中心 (Centroid)", popup_factory=self._popup_centroid)
+        p.add_cascade(tr("metric.centroid"), popup_factory=self._popup_centroid)
         return p
 
     def _popup_metric_section(self, metrics, avail_set) -> "ModernPopup":
@@ -393,19 +429,46 @@ class VoiceMapApp(_TkBase):
 
     def _popup_centroid(self) -> "ModernPopup":
         p = ModernPopup(self)
-        p.add_command("加载 centroid CSV...", command=self._load_centroids)
-        p.add_command("保存当前 centroids",   command=self._save_centroids)
-        p.add_command("多 wav 联合训练...",   command=self._train_centroids_from_many)
+        p.add_command(tr("metric.centroid.load"),  command=self._load_centroids)
+        p.add_command(tr("metric.centroid.save"),  command=self._save_centroids)
+        p.add_command(tr("metric.centroid.train"), command=self._train_centroids_from_many)
         return p
 
     def _popup_view(self) -> "ModernPopup":
         p = ModernPopup(self)
-        p.add_command("拟合曲线…", command=self._open_fit_menu)
+        p.add_command(tr("view.fit"), command=self._open_fit_menu)
         return p
 
     def _popup_help(self) -> "ModernPopup":
         p = ModernPopup(self)
-        p.add_command("关于...", command=self._open_about)
+        p.add_command(tr("help.about"), command=self._open_about)
+        p.add_separator()
+        p.add_cascade(tr("help.language"), popup_factory=self._popup_language)
+        return p
+
+    def _popup_language(self) -> "ModernPopup":
+        """Cascade for switching language. Marks the current one with a ●."""
+        p = ModernPopup(self)
+        cur = get_language()
+        p.add_radiobutton(tr("lang.zh"),
+                          variable=tk.StringVar(value=cur), value="zh",
+                          foreground=TEXT)
+        p.add_radiobutton(tr("lang.en"),
+                          variable=tk.StringVar(value=cur), value="en",
+                          foreground=TEXT)
+        # The tk.StringVars above are throwaway; we wire the actual
+        # language change via direct command bindings instead so we can
+        # call set_language() (which broadcasts) instead of just
+        # mutating the var. Replace the rows' click handlers:
+        for entry in p._items:
+            if entry["type"] != "radio":
+                continue
+            value = entry["value"]
+            row = entry["row"]
+            for w in (row,) + tuple(row.winfo_children()):
+                w.unbind("<Button-1>")
+                w.bind("<Button-1>",
+                       lambda _e, v=value: (set_language(v), p.destroy()))
         return p
 
     def _available_metric_columns(self) -> set:
