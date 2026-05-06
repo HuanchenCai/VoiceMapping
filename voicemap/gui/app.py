@@ -298,21 +298,27 @@ class VoiceMapApp(_TkBase):
 
         # 每个 metric 分类一个顶级菜单
         # metric_section_menus: section_title -> (Menu, [(label, end_index), ...])
-        # 用来 _refresh_metric_dropdown 时按 section 启用/禁用单个 item。
+        # _refresh_metric_dropdown 用这个表来控制每项的可用样式。
+        #
+        # **不**用 state="disabled" 来灰化分析前的项 —— Windows native menu
+        # 给 disabled 项加 3D 浮雕效果，深色背景下文字带白色幻影
+        # （CLAUDE.md §8 已记的老坑）。改用 foreground=MUTED 让视觉变灰；
+        # 点击没数据的 metric，_on_metric_change 里已有 "col in df.columns"
+        # 守卫保证不会乱画。
         self._metric_section_menus = {}
         for section_title, metrics in _METRIC_SECTIONS:
             m = tk.Menu(mb, tearoff=0,
                         bg=PANEL_HI, fg=TEXT,
                         activebackground=ACCENT, activeforeground=BG,
+                        disabledforeground=MUTED,
                         selectcolor=ACCENT, borderwidth=0)
             entries = []   # [(metric_name, item_index), ...]
             for name in metrics:
                 m.add_radiobutton(label=name,
                                    variable=self.metric_var,
-                                   value=name)
+                                   value=name,
+                                   foreground=MUTED)   # 灰色起手
                 entries.append((name, m.index("end")))
-                # 默认全部 disable，等分析完后 _refresh_metric_dropdown 启用可用的
-                m.entryconfig(m.index("end"), state="disabled")
             mb.add_cascade(label=section_title.split(" · ", 1)[-1],
                            menu=m)
             self._metric_section_menus[section_title] = (m, entries)
@@ -906,7 +912,9 @@ class VoiceMapApp(_TkBase):
         self._metric_sections_avail = sections_avail
         self._metric_flat = flat
 
-        # 同步 menubar：每个 section 内逐项设 normal / disabled
+        # 同步 menubar：每个 section 内逐项视觉变亮 / 变灰。
+        # 用 foreground 而不是 state="disabled" 是为避开 Windows 浮雕
+        # 幻影（见 _build_menubar 注释）。
         if hasattr(self, "_metric_section_menus"):
             for section_title, (menu, entries) in self._metric_section_menus.items():
                 avail_set = set()
@@ -916,7 +924,7 @@ class VoiceMapApp(_TkBase):
                         break
                 for name, idx in entries:
                     menu.entryconfig(
-                        idx, state=("normal" if name in avail_set else "disabled"))
+                        idx, foreground=(TEXT if name in avail_set else MUTED))
 
         if not flat:
             self.metric_btn.config(state="disabled")
