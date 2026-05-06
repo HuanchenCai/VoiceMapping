@@ -161,6 +161,15 @@ class VoiceMapApp(_TkBase):
         self._register_dnd()
         self._bind_global_keys()
 
+        # Close any open menu popup when the main window is moved/resized.
+        # overrideredirect popups use absolute screen coords, so they
+        # don't follow the parent — without this, dragging the window
+        # leaves popups orphaned at their original location until the
+        # user clicks. _last_window_geom suppresses the spurious
+        # <Configure> events Tk fires during initial mapping.
+        self._last_window_geom = ""
+        self.bind("<Configure>", self._on_window_configure, add="+")
+
         # 延迟到 Tk 完成首次几何布局后再画占位。配合下方 canvas 的
         # <Configure> add="+" 绑定，matplotlib 自己的 resize handler 能正常跑，
         # figure 尺寸会自动同步到 widget，占位文字稳稳居中。
@@ -334,6 +343,12 @@ class VoiceMapApp(_TkBase):
                 old.destroy()
             except tk.TclError:
                 pass
+        old_sep = getattr(self, "_menubar_sep", None)
+        if old_sep is not None:
+            try:
+                old_sep.destroy()
+            except tk.TclError:
+                pass
 
         bar = ModernMenubar(self, bg=PANEL, height=32)
         # On first build _outer doesn't exist yet → just pack at top.
@@ -344,6 +359,15 @@ class VoiceMapApp(_TkBase):
             bar.pack(side="top", fill="x", before=outer)
         else:
             bar.pack(side="top", fill="x")
+        # Thin BORDER divider just below the menubar so the eye reads
+        # 'menubar | content' as a clean boundary instead of seeing
+        # the BG-coloured pady gap as a stray dark stripe.
+        sep = tk.Frame(self, bg=BORDER, height=1)
+        if outer is not None and outer.winfo_exists():
+            sep.pack(side="top", fill="x", before=outer)
+        else:
+            sep.pack(side="top", fill="x")
+        self._menubar_sep = sep
 
         bar.add_menu(tr("menu.file"),   self._popup_file)
         bar.add_menu(tr("menu.edit"),   self._popup_edit)
@@ -353,6 +377,30 @@ class VoiceMapApp(_TkBase):
 
         self._menubar = bar
         self._metric_section_menus = {}     # 兼容旧接口（不再使用）
+
+    def _on_window_configure(self, event):
+        """When the user moves/resizes the main window, close any open
+        menubar popup (overrideredirect popups don't follow the parent).
+
+        Filter out the noisy <Configure> events Tk fires during initial
+        widget mapping by comparing the geometry string — only react
+        when geometry actually changed.
+        """
+        # Only react to events on the main window itself, not children
+        if event.widget is not self:
+            return
+        try:
+            geom = self.geometry()
+        except tk.TclError:
+            return
+        if geom == self._last_window_geom:
+            return
+        self._last_window_geom = geom
+        if self._menubar is not None:
+            try:
+                self._menubar._close_open_popup()
+            except Exception:
+                pass
 
     def _on_language_changed(self):
         """Subscriber: redraw window title and rebuild the menubar so the
