@@ -1297,6 +1297,25 @@ class VoiceMapApp(_TkBase):
         self.bind("<Key-Left>",  on_key)
         self.bind("<Key-Right>", on_key)
 
+        # Menu accelerators: the popup labels show these (Ctrl+O / Ctrl+S /
+        # Ctrl+C / Ctrl+,) so the bindings should actually work. Use
+        # bind_all so they fire regardless of focused widget except when
+        # an Entry / Text has focus and would consume the key naturally.
+        def _shortcut_guard(action):
+            def _wrapped(event):
+                cls = event.widget.winfo_class() if event.widget else ""
+                if cls in ("Entry", "Text", "TEntry", "Spinbox", "TSpinbox"):
+                    return
+                action()
+                return "break"
+            return _wrapped
+
+        self.bind_all("<Control-o>", _shortcut_guard(self._pick_audio))
+        self.bind_all("<Control-s>", _shortcut_guard(self._open_save_menu))
+        self.bind_all("<Control-c>", _shortcut_guard(self._copy_canvas))
+        self.bind_all("<Control-comma>", _shortcut_guard(self._open_settings))
+        self.bind_all("<Control-l>", _shortcut_guard(self._open_log_window))
+
         # 鼠标滚轮在画布两侧的 nav 条上 = 切换 metric（与 ◀ ▶ 等价）。
         # **不要**在 metric 按钮上绑定滚轮 —— 按钮的功能是"点开列表"，
         # 滚轮在按钮上不应该改 metric，以免混淆"按钮就是切换器"的预期。
