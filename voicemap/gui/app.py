@@ -553,6 +553,23 @@ class VoiceMapApp(_TkBase):
             self._update_inspector()
         except Exception:
             pass
+        # Status bar (no_file / file_meta strings switch language too)
+        try:
+            self._update_statusbar()
+        except Exception:
+            pass
+        # Status bar right side (copyright string, version-formatted)
+        try:
+            from voicemap.__version__ import __version__
+            self._statusbar_right.configure(
+                text=tr("statusbar.copyright", ver=__version__))
+        except Exception:
+            pass
+        # Tracks Panel rows (label / state strings localised)
+        try:
+            self._tracks_render()
+        except Exception:
+            pass
 
     # ── popup factories（每次点开新建一个 ModernPopup） ──────────────────
     def _popup_file(self) -> "ModernPopup":
