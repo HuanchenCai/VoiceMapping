@@ -281,13 +281,13 @@ class VoiceMapApp(_TkBase):
         mb = tk.Menu(self, tearoff=0,
                      bg=PANEL_HI, fg=TEXT,
                      activebackground=ACCENT, activeforeground=BG,
-                     borderwidth=0)
+                     borderwidth=0, relief="flat", activeborderwidth=0)
 
         # 文件菜单：常用入口（Open / 设置 / Quit）
         m_file = tk.Menu(mb, tearoff=0,
                           bg=PANEL_HI, fg=TEXT,
                           activebackground=ACCENT, activeforeground=BG,
-                          borderwidth=0)
+                          borderwidth=0, relief="flat", activeborderwidth=0)
         m_file.add_command(label="打开 WAV...", command=self._pick_audio)
         m_file.add_command(label="打开输出目录", command=self._open_output_dir)
         m_file.add_separator()
@@ -311,7 +311,7 @@ class VoiceMapApp(_TkBase):
                         bg=PANEL_HI, fg=TEXT,
                         activebackground=ACCENT, activeforeground=BG,
                         disabledforeground=MUTED,
-                        selectcolor=ACCENT, borderwidth=0)
+                        selectcolor=ACCENT, borderwidth=0, relief="flat", activeborderwidth=0)
             entries = []   # [(metric_name, item_index), ...]
             for name in metrics:
                 m.add_radiobutton(label=name,
@@ -327,7 +327,7 @@ class VoiceMapApp(_TkBase):
         m_help = tk.Menu(mb, tearoff=0,
                           bg=PANEL_HI, fg=TEXT,
                           activebackground=ACCENT, activeforeground=BG,
-                          borderwidth=0)
+                          borderwidth=0, relief="flat", activeborderwidth=0)
         m_help.add_command(label="关于...", command=self._open_about)
         mb.add_cascade(label="帮助", menu=m_help)
 
@@ -956,7 +956,7 @@ class VoiceMapApp(_TkBase):
         m = tk.Menu(self, tearoff=0,
                     bg=PANEL_HI, fg=TEXT,
                     activebackground=ACCENT, activeforeground=BG,
-                    selectcolor=ACCENT, borderwidth=0)
+                    selectcolor=ACCENT, borderwidth=0, relief="flat", activeborderwidth=0)
         # 持有 cascade 子菜单的引用 —— Tk 的 add_cascade 不会持有 menu
         # 对象的 Python 引用，函数返回后 sub 被 GC，下拉就空了。
         self._popup_submenus = []
@@ -964,7 +964,7 @@ class VoiceMapApp(_TkBase):
             sub = tk.Menu(m, tearoff=0,
                           bg=PANEL_HI, fg=TEXT,
                           activebackground=ACCENT, activeforeground=BG,
-                          selectcolor=ACCENT, borderwidth=0)
+                          selectcolor=ACCENT, borderwidth=0, relief="flat", activeborderwidth=0)
             for c in cols:
                 sub.add_radiobutton(label=c,
                                      variable=self.metric_var,
@@ -1284,7 +1284,7 @@ class VoiceMapApp(_TkBase):
         m = tk.Menu(self, tearoff=0,
                     bg=PANEL_HI, fg=TEXT,
                     activebackground=ACCENT, activeforeground=BG,
-                    font="TkMenuFont", bd=0)
+                    font="TkMenuFont", bd=0, relief="flat", activeborderwidth=0)
         m.add_command(label="  在图上叠加：", state="disabled",
                       foreground=ACCENT)
         m.add_separator()
@@ -1385,7 +1385,7 @@ class VoiceMapApp(_TkBase):
         m = tk.Menu(self, tearoff=0,
                     bg=PANEL_HI, fg=TEXT,
                     activebackground=ACCENT, activeforeground=BG,
-                    font="TkMenuFont", bd=0)
+                    font="TkMenuFont", bd=0, relief="flat", activeborderwidth=0)
         m.add_command(label="  保存当前画布为：", state="disabled",
                       foreground=ACCENT)
         m.add_separator()
