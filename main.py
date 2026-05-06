@@ -38,8 +38,8 @@ import sys
 import time
 from pathlib import Path
 
-# src/ on import path so we can load the analyzer package
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
+# voicemap/ on import path so we can load the analyzer package
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "voicemap"))
 
 
 # ─── CLI definition ──────────────────────────────────────────────────────────

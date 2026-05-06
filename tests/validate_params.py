@@ -38,7 +38,7 @@ from parselmouth.praat import call as praat_call
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-sys.path.insert(0, os.path.join(ROOT, "src"))
+sys.path.insert(0, os.path.join(ROOT, "voicemap"))
 
 from config import VoiceMapConfig          # noqa: E402
 from analyzer import VoiceMapAnalyzer      # noqa: E402

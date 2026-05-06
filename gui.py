@@ -29,7 +29,7 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 _HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(_HERE / "src"))
+sys.path.insert(0, str(_HERE / "voicemap"))
 
 from config import DEFAULT_CONFIG, VoiceMapConfig  # noqa: E402
 from logger import setup_logger                     # noqa: E402
