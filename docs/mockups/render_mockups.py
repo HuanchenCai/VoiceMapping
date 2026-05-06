@@ -384,8 +384,75 @@ def render_option_b():
     print("wrote", out)
 
 
-# ── option C: Studio ──────────────────────────────────────────────────────
-def render_option_c():
+# ── option C: Studio (locked-in choice; rendered in both zh and en) ───────
+C_STRINGS = {
+    "zh": {
+        "title":         "嗓音声学品质多维分析图谱",
+        "title_short":   "嗓音声学品质多维分析图谱",
+        "tracks_label":  "录音轨",
+        "metric_label":  "指标",
+        "nav_hint":      "│  上一个 ←   下一个 →",
+        "lang_toggle":   "EN",
+        "settings":      "设置",
+        "help":          "帮助",
+        "minimize":      "─",
+        "metric_full":   "倒谱峰显著度",
+        "metric_unit":   "单位 dB",
+        "clinical":      "临床参考范围",
+        "current":       "本次值",
+        "good":          "良好",
+        "normal":        "正常",
+        "watch":         "关注",
+        "abnorm":        "异常",
+        "good_marked":   "✓ 良好",
+        "btn_excel":     "导出 Excel",
+        "btn_report":    "生成报告",
+        "btn_compare":   "对比录音",
+        "tool_fit":      "拟合 ▾",
+        "tool_note":     "标注",
+        "tool_reset":    "复位",
+        "tool_copy":     "复制图片",
+        "tool_save":     "保存 ▾",
+        "status_prefix": "● 文件 01  ·  12,525 网格  ·  k = 5  ·  3,420 个周期  ·  耗时 12.6 秒",
+        "subtitle":      "方案 C 中文版 — 工作站布局（深灰 + amber）",
+        "cells":         "网格",
+    },
+    "en": {
+        "title":         "VoiceMap",
+        "title_short":   "VoiceMap",
+        "tracks_label":  "TRACKS",
+        "metric_label":  "METRIC",
+        "nav_hint":      "│  Prev ←   Next →",
+        "lang_toggle":   "中",
+        "settings":      "Settings",
+        "help":          "Help",
+        "minimize":      "─",
+        "metric_full":   "Cepstral Peak Prominence",
+        "metric_unit":   "Unit: dB",
+        "clinical":      "CLINICAL",
+        "current":       "CURRENT",
+        "good":          "GOOD",
+        "normal":        "NORMAL",
+        "watch":         "WATCH",
+        "abnorm":        "ABNORM",
+        "good_marked":   "✓ GOOD",
+        "btn_excel":     "EXPORT XLSX",
+        "btn_report":    "GEN REPORT",
+        "btn_compare":   "COMPARE",
+        "tool_fit":      "FIT ▾",
+        "tool_note":     "NOTE",
+        "tool_reset":    "RESET",
+        "tool_copy":     "COPY",
+        "tool_save":     "SAVE ▾",
+        "status_prefix": "● File 01  ·  12,525 cells  ·  k = 5  ·  3,420 cycles  ·  12.6s",
+        "subtitle":      "Option C — Studio (dark + amber, English)",
+        "cells":         "cells",
+    },
+}
+
+
+def render_option_c(lang="zh"):
+    s = C_STRINGS[lang]
     theme = {
         "bg_app":      "#0a0a0a",
         "bg_panel":    "#1a1a1a",
@@ -407,18 +474,25 @@ def render_option_c():
 
     # App bar
     panel(ax, 0, 0.93, 1, 0.07, theme["bg_panel"])
-    text(ax, 0.015, 0.965, "VoiceMap", color=theme["accent"],
-         fontsize=14, fontweight="bold", va="center")
-    # transport
-    text(ax, 0.10, 0.965, "⏵ ■ ⏺", color=theme["accent_hi"], fontsize=14, va="center")
-    text(ax, 0.16, 0.965, "test_Voice_EGG.wav", color=theme["text_sec"],
+    title_size = 13 if lang == "zh" else 14
+    text(ax, 0.015, 0.965, s["title"], color=theme["accent"],
+         fontsize=title_size, fontweight="bold", va="center")
+    # Current file (no decorative transport glyphs — keep app-bar clean)
+    title_w = 0.21 if lang == "zh" else 0.13
+    text(ax, title_w, 0.965, "✓", color=theme["success"], fontsize=12, va="center")
+    text(ax, title_w + 0.015, 0.965, "test_Voice_EGG.wav",
+         color=theme["text_sec"], fontsize=11, va="center")
+    # top-right: lang toggle + settings/help/minimize
+    text(ax, 0.86, 0.965, s["lang_toggle"], color=theme["text_sec"],
          fontsize=11, va="center")
-    text(ax, 0.86, 0.965, "中文 ⚙ ? ─", color=theme["text_sec"], fontsize=11, va="center")
+    text(ax, 0.91, 0.965, "⚙", color=theme["text_sec"], fontsize=14, va="center")
+    text(ax, 0.94, 0.965, "?", color=theme["text_sec"], fontsize=12, va="center")
+    text(ax, 0.97, 0.965, "─", color=theme["text_sec"], fontsize=12, va="center")
 
     # Files (top track strip)
     panel(ax, 0, 0.78, 1, 0.15, theme["bg_panel"])
-    text(ax, 0.013, 0.91, "TRACKS / 录音轨", color=theme["accent"],
-         fontsize=9, fontweight="bold", va="center")
+    text(ax, 0.013, 0.91, s["tracks_label"], color=theme["accent"],
+         fontsize=10, fontweight="bold", va="center")
 
     tracks = [("01", "✓", "test_Voice_EGG.wav", "44.1k", "8.2s", "12,525", True),
               ("02", "○", "recording_2.wav",     "44.1k", "5.1s", "—",      False),
@@ -434,7 +508,12 @@ def render_option_c():
         c = theme["success"] if st == "✓" else theme["text_muted"]
         text(ax, 0.040, y, st, color=c, fontsize=11, va="center", fontweight="bold")
         text(ax, 0.060, y, name, color=theme["text_primary"], fontsize=10, va="center")
-        text(ax, 0.30, y, f"{sr} Hz · {dur} · {cells} cells",
+        if cells == "—":
+            extra = "未分析" if lang == "zh" else "not analyzed"
+            track_meta = f"{sr} Hz · {dur} · {extra}"
+        else:
+            track_meta = f"{sr} Hz · {dur} · {cells} {s['cells']}"
+        text(ax, 0.30, y, track_meta,
              color=theme["text_sec"], fontsize=9, va="center")
         # mock waveform stripe
         rng = np.random.default_rng(i + 1)
@@ -445,16 +524,16 @@ def render_option_c():
                 width=1.0, alpha=0.6 if active else 0.3)
         wax.set_xticks([]); wax.set_yticks([])
         wax.set_facecolor(theme["bg_app"])
-        for s in wax.spines.values(): s.set_visible(False)
+        for sp in wax.spines.values(): sp.set_visible(False)
 
     # Metric selector
     panel(ax, 0, 0.73, 1, 0.05, theme["bg_panel"])
-    text(ax, 0.015, 0.755, "METRIC", color=theme["accent"],
+    text(ax, 0.015, 0.755, s["metric_label"], color=theme["accent"],
          fontsize=10, fontweight="bold", va="center")
     panel(ax, 0.07, 0.738, 0.10, 0.034, theme["bg_elev"], edge=theme["border"])
     text(ax, 0.12, 0.755, "CPP ▾", color=theme["text_primary"], fontsize=10,
          va="center", ha="center", fontweight="bold")
-    text(ax, 0.20, 0.755, "│  上一个 ←   下一个 →", color=theme["text_muted"],
+    text(ax, 0.20, 0.755, s["nav_hint"], color=theme["text_muted"],
          fontsize=9, va="center")
 
     # Canvas (heatmap left + inspector right)
@@ -465,36 +544,38 @@ def render_option_c():
     # Inspector
     panel(ax, 0.72, 0.04, 0.28, 0.69, theme["bg_panel"])
     text(ax, 0.74, 0.70, "CPP", color=theme["accent"],
-         fontsize=20, fontweight="bold", va="center")
-    text(ax, 0.74, 0.675, "倒谱峰显著度 / Cepstral Peak Prominence",
+         fontsize=22, fontweight="bold", va="center")
+    text(ax, 0.74, 0.673, s["metric_full"],
          color=theme["text_sec"], fontsize=9, va="center")
-    text(ax, 0.74, 0.65, "单位 dB", color=theme["text_muted"], fontsize=9, va="center")
+    text(ax, 0.74, 0.650, s["metric_unit"],
+         color=theme["text_muted"], fontsize=9, va="center")
 
     panel(ax, 0.74, 0.45, 0.24, 0.18, theme["bg_elev"])
-    text(ax, 0.75, 0.605, "CLINICAL", color=theme["accent"],
+    text(ax, 0.75, 0.605, s["clinical"], color=theme["accent"],
          fontsize=9, fontweight="bold", va="center")
-    rows = [("≥ 14",  "GOOD",   theme["success"]),
-            ("10-14", "NORMAL", theme["text_sec"]),
-            ("6-10",  "WATCH",  theme["warning"]),
-            ("< 6",   "ABNORM", "#ef4444")]
+    rows = [("≥ 14",  s["good"],   theme["success"]),
+            ("10-14", s["normal"], theme["text_sec"]),
+            ("6-10",  s["watch"],  theme["warning"]),
+            ("< 6",   s["abnorm"], "#ef4444")]
     for i, (rng_v, lab, c) in enumerate(rows):
         y = 0.575 - i * 0.026
-        text(ax, 0.75, y, rng_v, color=theme["text_primary"], fontsize=9, va="center",
-             family=["Consolas", "Cascadia Code"])
+        text(ax, 0.75, y, rng_v, color=theme["text_primary"], fontsize=9,
+             va="center", family=["Consolas", "Cascadia Code"])
         text(ax, 0.83, y, lab, color=c, fontsize=9, va="center", fontweight="bold")
 
     panel(ax, 0.74, 0.30, 0.24, 0.13, theme["bg_elev"])
-    text(ax, 0.75, 0.41, "CURRENT", color=theme["accent"],
+    text(ax, 0.75, 0.410, s["current"], color=theme["accent"],
          fontsize=9, fontweight="bold", va="center")
     text(ax, 0.75, 0.375, "16.79", color=theme["accent_hi"],
          fontsize=24, fontweight="bold", va="center",
          family=["Consolas", "Cascadia Code"])
     text(ax, 0.92, 0.385, "dB", color=theme["text_muted"], fontsize=10, va="center")
-    text(ax, 0.75, 0.335, "✓ GOOD", color=theme["success"],
+    text(ax, 0.75, 0.335, s["good_marked"], color=theme["success"],
          fontsize=11, fontweight="bold", va="center")
 
     # Action buttons
-    for i, lab in enumerate(["EXPORT XLSX", "GEN REPORT", "COMPARE"]):
+    actions = [s["btn_excel"], s["btn_report"], s["btn_compare"]]
+    for i, lab in enumerate(actions):
         y = 0.24 - i * 0.05
         panel(ax, 0.74, y, 0.24, 0.038, theme["bg_elev"], edge=theme["accent"])
         text(ax, 0.86, y + 0.019, lab, color=theme["accent"], fontsize=9,
@@ -502,7 +583,8 @@ def render_option_c():
 
     # Toolbar
     panel(ax, 0, 0.04, 0.72, 0.05, theme["bg_panel"])
-    tools = ["FIT ▾", "NOTE", "RESET", "COPY", "SAVE ▾"]
+    tools = [s["tool_fit"], s["tool_note"], s["tool_reset"],
+             s["tool_copy"], s["tool_save"]]
     x = 0.02
     for t in tools:
         panel(ax, x, 0.05, 0.07, 0.034, theme["bg_elev"], edge=theme["border"])
@@ -512,21 +594,67 @@ def render_option_c():
 
     # Status bar
     panel(ax, 0, 0, 1, 0.04, theme["bg_panel"])
-    text(ax, 0.013, 0.02, "⏺  REC 01  ·  12,525 cells  ·  k = 5  ·  3,420 cycles  ·  12.6s",
+    text(ax, 0.013, 0.02, s["status_prefix"],
          color=theme["text_muted"], fontsize=9, va="center")
 
-    text(ax, 0.5, 0.998, "方案 C — Studio (深灰 + amber)",
+    text(ax, 0.5, 0.998, s["subtitle"],
          color=theme["accent"], fontsize=11, fontweight="bold",
          va="top", ha="center")
 
-    out = os.path.join(OUT, "option_C_studio.png")
+    suffix = "_zh" if lang == "zh" else "_en"
+    out = os.path.join(OUT, f"option_C_studio{suffix}.png")
     fig.savefig(out, dpi=110, facecolor=theme["bg_app"], edgecolor="none")
     plt.close(fig)
     print("wrote", out)
 
 
-# ── option D: Academic ────────────────────────────────────────────────────
-def render_option_d():
+# ── option D: Academic — used as the EXPORTED REPORT template (zh/en) ─────
+D_STRINGS = {
+    "zh": {
+        "title_zh":      "嗓音声学品质多维分析图谱",
+        "subtitle":      "VoiceMap V1.0",
+        "section_file":  "音频文件",
+        "section_metric":"分析指标",
+        "metric_full":   "▸ CPP — 倒谱峰显著度",
+        "caption":       "图 1.   CPP 在 MIDI × SPL 网格上的 Voice Range Profile 热图",
+        "section_stats": "统计摘要",
+        "stats_labels":  ["均值", "标准差", "最小值", "最大值", "样本数"],
+        "section_clinical":"临床参考范围",
+        "good":          "良好",
+        "normal":        "正常",
+        "watch":         "关注",
+        "abnorm":        "异常",
+        "result_label":  "本次结果:",
+        "result_status": "✓ 良好",
+        "footer_left":   "嗓音声学品质多维分析图谱  V1.0  ·  © 2026 蔡焕晨  ·  huanchen.se@gmail.com",
+        "footer_right":  "导出于  2026-05-06",
+        "page_title":    "方案 D — 报告导出模板（中文）",
+    },
+    "en": {
+        "title_zh":      "VoiceMap",
+        "subtitle":      "Multi-dimensional Voice Acoustic Quality Analysis · V1.0",
+        "section_file":  "File",
+        "section_metric":"Metric",
+        "metric_full":   "▸ CPP — Cepstral Peak Prominence",
+        "caption":       "Figure 1.   Voice Range Profile heatmap of CPP across MIDI × SPL grid.",
+        "section_stats": "Statistics",
+        "stats_labels":  ["Mean", "Std", "Min", "Max", "n"],
+        "section_clinical":"Clinical reference",
+        "good":          "Good",
+        "normal":        "Normal",
+        "watch":         "Watch",
+        "abnorm":        "Abnorm",
+        "result_label":  "Result:",
+        "result_status": "✓ Good",
+        "footer_left":   "VoiceMap V1.0  ·  © 2026 Huanchen Cai  ·  huanchen.se@gmail.com",
+        "footer_right":  "Generated  2026-05-06",
+        "page_title":    "Option D — Report export template (English)",
+    },
+}
+
+
+def render_option_d(lang="zh"):
+    s = D_STRINGS[lang]
     theme = {
         "bg_app":      "#ffffff",
         "bg_panel":    "#ffffff",
@@ -548,10 +676,10 @@ def render_option_d():
     ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.axis("off")
 
     # Title (no app bar — just text)
-    text(ax, 0.5, 0.95, "VoiceMap V1.0",
+    text(ax, 0.5, 0.95, s["title_zh"],
          color=theme["text_primary"], fontsize=22, fontweight="bold",
          va="center", ha="center", family=["SimSun", "Times New Roman"])
-    text(ax, 0.5, 0.91, "嗓音声学品质多维分析图谱",
+    text(ax, 0.5, 0.91, s["subtitle"],
          color=theme["text_sec"], fontsize=11, va="center", ha="center",
          family=["SimSun", "Times New Roman"])
     # Subtle line
@@ -559,89 +687,94 @@ def render_option_d():
             lw=0.8, transform=ax.transAxes)
 
     # File header
-    text(ax, 0.18, 0.85, "File",
+    text(ax, 0.18, 0.85, s["section_file"],
          color=theme["text_muted"], fontsize=9, fontweight="bold", va="center")
-    text(ax, 0.18, 0.825, "test_Voice_EGG.wav   ·   44,100 Hz   ·   8.2 s   ·   2 channels (Mic + EGG)",
+    text(ax, 0.18, 0.825, "test_Voice_EGG.wav   ·   44,100 Hz   ·   8.2 s   ·   2 ch (Mic + EGG)",
          color=theme["text_primary"], fontsize=10, va="center",
          family=["Consolas", "Cascadia Code"])
 
     # Metric heading
-    text(ax, 0.18, 0.78, "Metric",
+    text(ax, 0.18, 0.78, s["section_metric"],
          color=theme["text_muted"], fontsize=9, fontweight="bold", va="center")
-    text(ax, 0.18, 0.755, "▸ CPP — Cepstral Peak Prominence",
+    text(ax, 0.18, 0.755, s["metric_full"],
          color=theme["text_primary"], fontsize=12, fontweight="bold", va="center")
 
     # Heatmap as a paper figure
     panel(ax, 0.20, 0.30, 0.60, 0.42, "white", edge=theme["border_strong"], lw=1.0)
     heatmap_in(ax, fig, (0.225, 0.325, 0.55, 0.37), theme)
     # Caption underneath
-    text(ax, 0.5, 0.27,
-          "Figure 1.   Voice Range Profile heatmap of CPP across MIDI × SPL grid.",
+    text(ax, 0.5, 0.27, s["caption"],
           color=theme["text_sec"], fontsize=9, va="center", ha="center", style="italic",
           family=["SimSun", "Times New Roman"])
 
     # Statistics
-    text(ax, 0.18, 0.22, "Statistics",
+    text(ax, 0.18, 0.22, s["section_stats"],
          color=theme["text_muted"], fontsize=9, fontweight="bold", va="center")
-    stats = [
-        ("Mean",   "16.79 dB"),
-        ("Std",     "3.21"),
-        ("Min",    " 8.04"),
-        ("Max",    "28.92"),
-        ("n",      "12,525"),
-    ]
+    stats = list(zip(s["stats_labels"],
+                     ["16.79 dB", "3.21", " 8.04", "28.92", "12,525"]))
     x = 0.18
     for label, val in stats:
         text(ax, x, 0.195, label, color=theme["text_muted"], fontsize=9,
-             va="center", family=["Consolas", "Cascadia Code"])
-        text(ax, x, 0.170, val, color=theme["text_primary"], fontsize=12, fontweight="bold",
-             va="center", family=["Consolas", "Cascadia Code"])
+             va="center")
+        text(ax, x, 0.170, val, color=theme["text_primary"], fontsize=12,
+             fontweight="bold", va="center",
+             family=["Consolas", "Cascadia Code"])
         x += 0.13
 
     # Clinical reference
-    text(ax, 0.18, 0.125, "Clinical reference",
+    text(ax, 0.18, 0.125, s["section_clinical"],
          color=theme["text_muted"], fontsize=9, fontweight="bold", va="center")
-    rows_ = [("Good",   "≥ 14",   theme["success"]),
-             ("Normal", "10–14",  theme["text_sec"]),
-             ("Watch",  "6–10",   theme["warning"]),
-             ("Abnorm", "< 6",    theme["error"])]
+    rows_ = [(s["good"],   "≥ 14",   theme["success"]),
+             (s["normal"], "10–14",  theme["text_sec"]),
+             (s["watch"],  "6–10",   theme["warning"]),
+             (s["abnorm"], "< 6",    theme["error"])]
     x = 0.18
     for label, rng_v, c in rows_:
         text(ax, x, 0.100, label,
              color=c, fontsize=10, va="center", fontweight="bold")
-        text(ax, x, 0.078, rng_v, color=theme["text_primary"], fontsize=9, va="center",
-             family=["Consolas", "Cascadia Code"])
+        text(ax, x, 0.078, rng_v, color=theme["text_primary"], fontsize=9,
+             va="center", family=["Consolas", "Cascadia Code"])
         x += 0.09
 
-    text(ax, 0.62, 0.085,
-          "Result:  16.79 dB    ✓  Good",
-          color=theme["success"], fontsize=12, fontweight="bold", va="center",
-          family=["Consolas", "Cascadia Code"])
+    # Result row — split so Chinese label stays in Chinese-capable font and
+    # only the numeric "16.79 dB" sits in monospace.
+    text(ax, 0.62, 0.085, s["result_label"],
+         color=theme["success"], fontsize=12, fontweight="bold", va="center")
+    text(ax, 0.71, 0.085, "16.79 dB",
+         color=theme["success"], fontsize=12, fontweight="bold", va="center",
+         family=["Consolas", "Cascadia Code"])
+    text(ax, 0.81, 0.085, s["result_status"],
+         color=theme["success"], fontsize=12, fontweight="bold", va="center")
 
     # Footer
     ax.plot([0.18, 0.82], [0.04, 0.04], color=theme["border_strong"],
             lw=0.5, transform=ax.transAxes)
-    text(ax, 0.18, 0.025,
-          "VoiceMap V1.0  ·  © 2026 蔡焕晨 (Huanchen Cai)  ·  huanchen.se@gmail.com",
+    text(ax, 0.18, 0.025, s["footer_left"],
           color=theme["text_muted"], fontsize=9, va="center",
           family=["SimSun", "Times New Roman"])
-    text(ax, 0.82, 0.025, "Generated  2026-05-06",
-         color=theme["text_muted"], fontsize=9, va="center", ha="right",
-         family=["Consolas", "Cascadia Code"])
+    # Footer right may contain Chinese (导出于) — don't force monospace.
+    text(ax, 0.82, 0.025, s["footer_right"],
+         color=theme["text_muted"], fontsize=9, va="center", ha="right")
 
-    text(ax, 0.5, 0.998, "方案 D — Academic / Paper-First (纯白 + 黑)",
+    text(ax, 0.5, 0.998, s["page_title"],
          color=theme["accent"], fontsize=11, fontweight="bold",
          va="top", ha="center")
 
-    out = os.path.join(OUT, "option_D_academic.png")
+    suffix = "_zh" if lang == "zh" else "_en"
+    out = os.path.join(OUT, f"option_D_report{suffix}.png")
     fig.savefig(out, dpi=110, facecolor=theme["bg_app"], edgecolor="none")
     plt.close(fig)
     print("wrote", out)
 
 
 if __name__ == "__main__":
+    # Decision: GUI = Option C (Studio, dark + amber).  Render zh + en.
+    # Decision: Report exports use Option D layout. Render zh + en.
+    # Options A and B kept for reference / comparison.
     render_option_a()
     render_option_b()
-    render_option_c()
-    render_option_d()
-    print("\nAll 4 mockups written to:", OUT)
+    render_option_c(lang="zh")
+    render_option_c(lang="en")
+    render_option_d(lang="zh")
+    render_option_d(lang="en")
+    print("\nAll mockups written to:", OUT)

@@ -1,63 +1,82 @@
-# VoiceMap UI Design Specification — 方案 B 锁定版
+# VoiceMap UI 设计规范 — 方案 C 锁定版
 
-> 选定方向：**B. Clinical Workstation**（浅色 + navy/teal，传统专业医疗软件风格）。
-> 视觉调性参照 Tableau Health / Epic / Praat 表格视图。
-> 决策依据：6 轴评分软著适配 10 / 临床场景 10 / 学术发表 9 三个最重要维度满分。
-> 备选 A / C / D 见 `UI_DESIGN_OPTIONS.md`，渲染图见 `docs/mockups/`。
+> **GUI 主界面**：方案 **C — Studio**（深灰 + amber，工作站布局）
+> **导出报告样式**：方案 **D — Academic / Paper-First**（纯白 + 深色）
+> 双语规则：中文版只显示中文，英文版只显示英文，参数符号（CPP / F0 / MIDI 等）保留原写法
+> 软件名 — 中文：嗓音声学品质多维分析图谱；英文：VoiceMap
+> 备选 A / B / D 见 `UI_DESIGN_OPTIONS.md`，渲染图见 `docs/mockups/`
 
 ---
 
 ## 1. 设计 token（A0-2 的 `theme.py` 落地为这个）
 
-### 1.1 颜色
+### 1.1 颜色（GUI 主界面 = 方案 C）
 
 ```python
-# 背景层
-BG_APP        = "#f8fafc"   # 整窗最底
-BG_PANEL      = "#ffffff"   # 主要 panel 卡片
-BG_ELEVATED   = "#f1f5f9"   # 选中行 / hover
-BG_OVERLAY    = "#ffffff"   # popup / dialog（带 shadow）
+# 背景层（深灰阶）
+BG_APP        = "#0a0a0a"   # 整窗最底
+BG_PANEL      = "#1a1a1a"   # 主要 panel 卡片
+BG_ELEVATED   = "#2a2a2a"   # 选中行 / hover
+BG_OVERLAY    = "#1a1a1a"   # popup / dialog（带 shadow）
 
 # 边框
-BORDER_SUB    = "#e2e8f0"   # 默认分隔，hairline
-BORDER        = "#cbd5e1"   # 卡片边、focus
-BORDER_STRONG = "#94a3b8"   # 章节分隔，强调
+BORDER_SUB    = "#2a2a2a"   # 极弱分隔（背景过渡）
+BORDER        = "#3a3a3a"   # 卡片边、focus
+BORDER_STRONG = "#525252"   # 章节分隔、强调
 
 # 文字
-TEXT          = "#0f172a"   # 主文字、标题
-TEXT_SEC      = "#475569"   # 副文字、说明
-TEXT_MUTED    = "#64748b"   # placeholder、disabled、caption
-TEXT_INVERSE  = "#ffffff"   # accent 上的文字
+TEXT          = "#f5f5f5"   # 主文字、标题
+TEXT_SEC      = "#a3a3a3"   # 副文字、说明
+TEXT_MUTED    = "#737373"   # placeholder、disabled、caption
+TEXT_INVERSE  = "#0a0a0a"   # accent 上的文字
 
-# 强调色（信号色）
-ACCENT        = "#0891b2"   # 唯一品牌色，cyan-700
-ACCENT_HOVER  = "#0e7490"
-ACCENT_PRESS  = "#155e75"
-
-# 顶部标题栏深色变体（让 banner 区跟内容区有层次）
-HEADER_BG     = "#0891b2"   # accent 同色作为顶部标题栏
-HEADER_FG     = "#ffffff"
+# 强调色
+ACCENT        = "#f59e0b"   # amber-500，唯一品牌色
+ACCENT_HOVER  = "#fbbf24"   # amber-400
+ACCENT_PRESS  = "#d97706"   # amber-600
 
 # 语义色
-SUCCESS       = "#059669"   # 良好 / PASS
-WARNING       = "#d97706"   # 关注 / WARN
-ERROR         = "#dc2626"   # 异常 / FAIL
-INFO          = "#2563eb"
+SUCCESS       = "#84cc16"   # lime-500，"良好" / "GOOD" / 已分析
+WARNING       = "#f59e0b"   # amber，跟 ACCENT 同色（"关注"）
+ERROR         = "#ef4444"   # red-500
+INFO          = "#3b82f6"
 ```
 
-### 1.2 字体
+### 1.2 颜色（导出报告 = 方案 D）
 
 ```python
-FONT_SANS  = ("Microsoft YaHei UI", 10)              # 默认
-FONT_SANS_B= ("Microsoft YaHei UI", 10, "bold")
-FONT_TITLE = ("Microsoft YaHei UI", 14, "bold")      # 章节标题
-FONT_SMALL = ("Microsoft YaHei UI",  9)              # 副文字
-FONT_DATA  = ("Consolas", 10)                        # 数字 / 表格
-FONT_DATA_B= ("Consolas", 10, "bold")
-FONT_HEADER= ("Microsoft YaHei UI", 11, "bold")      # title bar
+# 给 plotter / report.py 单独使用，独立于 GUI 主题
+REPORT_BG          = "#ffffff"
+REPORT_TEXT        = "#1a1a1a"
+REPORT_TEXT_SEC    = "#525252"
+REPORT_TEXT_MUTED  = "#737373"
+REPORT_BORDER      = "#a3a3a3"
+REPORT_ACCENT      = "#1e3a5f"   # 深藏青（学术风）
+REPORT_GOOD        = "#15803d"
+REPORT_NORMAL      = "#525252"
+REPORT_WATCH       = "#a16207"
+REPORT_ABNORM      = "#991b1b"
 ```
 
-### 1.3 间距 + 圆角
+### 1.3 字体
+
+```python
+FONT_SANS  = ("Microsoft YaHei UI", 10)
+FONT_SANS_B= ("Microsoft YaHei UI", 10, "bold")
+FONT_TITLE = ("Microsoft YaHei UI", 13, "bold")     # app bar 软件名
+FONT_HEAD  = ("Microsoft YaHei UI", 11, "bold")     # 章节标题
+FONT_SMALL = ("Microsoft YaHei UI",  9)
+FONT_DATA  = ("Consolas", 11)                        # 数字、轨道编号
+FONT_DATA_B= ("Consolas", 11, "bold")
+FONT_HUGE  = ("Consolas", 24, "bold")                # CURRENT 大数字
+
+# 报告专用（方案 D）
+REPORT_TITLE_FONT  = ("SimSun", 22, "bold")         # 中文宋体
+REPORT_BODY_FONT   = ("SimSun", 10)
+REPORT_DATA_FONT   = ("Consolas", 10)
+```
+
+### 1.4 间距 + 圆角
 
 ```python
 # 8px 栅格
@@ -68,295 +87,290 @@ SPACE_L  = 16
 SPACE_XL = 24
 SPACE_XXL= 32
 
-# 圆角（B 走传统 layout，圆角偏小）
-RADIUS_SM = 2    # input
+# 圆角（C 的录音棚风格圆角偏小）
+RADIUS_SM = 0    # 默认直角（studio 风）
 RADIUS_MD = 4    # button、card
 RADIUS_LG = 6    # panel
 ```
 
----
+### 1.5 关键尺寸
 
-## 2. 布局（result state）
-
+```python
+APP_BAR_H        = 50      # 顶部软件名 + 当前文件 + 右上工具
+TRACKS_PANEL_H   = 110     # 录音轨列表（最多放 3-4 个，更多滚动）
+METRIC_BAR_H     = 36      # 指标选择条
+CANVAS_MIN_W     = 600
+INSPECTOR_W      = 360     # 右侧 CPP 详情栏（固定）
+TOOLBAR_H        = 36
+STATUS_BAR_H     = 30
+WIN_MIN_W        = 1200
+WIN_MIN_H        = 720
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│ Title Bar  HEADER_BG (cyan-700)  · 高 36px                            │
-│  VoiceMap V1.0 — 嗓音声学品质多维分析图谱                            │
-├──────────────────────────────────────────────────────────────────────┤
-│ Menubar  BG_PANEL · 高 28px                                           │
-│  文件(F)  编辑(E)  视图(V)  分析(A)  工具(T)  帮助(H)                │
-├──────┬───────────────────────────────────────────────────────────────┤
-│      │ File metadata strip  BG_PANEL · 高 56px (2 行)                │
-│ Side │  文件: test.wav │ 44.1kHz │ 8.2s │ 2 ch                     │
-│ bar  │  状态: ✓ 已分析 │ 周期 3,420 │ 12.6s │ Clarity 0.97 │ k=5 │
-│      ├──────────────────────┬────────────────────────────────────────┤
-│ 220px│ Metric Table         │ Heatmap Card                           │
-│      │ 30%                   │ 65%                                    │
-│ 文件 │ ┌─────────────────┐ │ ┌─────────────────────────┐            │
-│ 列表 │ │ Metric  数值 范围 状态│ │      VRP Heatmap        │            │
-│      │ │ ─────────────── │ │ │                         │            │
-│ ✓ … │ │ Clarity 0.997 ✓│ │ │  (matplotlib canvas)    │            │
-│ ○ … │ │ CPP    16.79  ✓ │ │ │                         │            │
-│ ○ … │ │ ...             │ │ │                         │            │
-│      │ │                  │ │ │                         │            │
-│      │ └─────────────────┘ │ └─────────────────────────┘            │
-│      ├──────────────────────┴────────────────────────────────────────┤
-│      │ Toolbar  BG_PANEL · 高 36px                                    │
-│      │  拟合▾  标注  复位  复制图片  保存▾  │ 导出 Excel  生成报告  对比 │
-│      ├───────────────────────────────────────────────────────────────┤
-│      │ Reference Card · 高 140px                                      │
-│      │  当前指标 · CPP — Cepstral Peak Prominence                    │
-│      │  倒谱峰显著度 · 单位 dB                                         │
-│      │  临床参考范围                                                   │
-│      │  ≥14 良好  10-14 正常  6-10 关注  <6 异常                     │
-│      │  本次值: 16.79 dB ✓ 良好    n=12,525  范围内 96.9%            │
-├──────┴───────────────────────────────────────────────────────────────┤
-│ Status Bar  BG_ELEVATED · 高 26px                                     │
-│  就绪 · Clarity 阈值=0.97 · k=5 · n_harm=10        © 2026 蔡焕晨 V1.0 │
-└──────────────────────────────────────────────────────────────────────┘
-```
-
-### 2.1 列宽 / 高度
-
-- **Title bar**：36px
-- **Menubar**：28px
-- **Sidebar**：220px 固定，右侧 1px hairline border
-- **File metadata strip**：56px（2 行，第一行 title + meta，第二行 status + 分析 meta）
-- **Metric table**：Sidebar 右侧 30% 宽，顶部到 toolbar
-- **Heatmap card**：剩余宽度（约 65%），顶部到 toolbar
-- **Toolbar**：36px
-- **Reference card**：140px（4 块横排：单位 + 临床参考 + 本次值 + 统计）
-- **Status bar**：26px
-
-### 2.2 三屏共通元素
-
-- **Title bar 永远在最顶**（不随窗口滚动），cyan-700 底 + 白字 + 软件中文全称
-- **Status bar 永远在最底**，左侧当前操作 / 参数，右侧版权信息
-- **Sidebar 永远在最左**（A0 阶段先做单文件占位，M5.5 启用多文件）
 
 ---
 
-## 3. 关键状态变体
+## 2. GUI 布局（result state — 方案 C）
 
-### 3.1 Empty state（首次启动）
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│ App Bar  BG_PANEL · 50px                                                │
+│  嗓音声学品质多维分析图谱       ✓ test_Voice_EGG.wav      EN ⚙ ? ─    │
+├────────────────────────────────────────────────────────────────────────┤
+│ Tracks Panel  BG_PANEL · 110px                                          │
+│  录音轨                                                                  │
+│  ▌01 ✓ test_Voice_EGG.wav     44.1k Hz · 8.2s · 12,525 网格   ▓▓▓▓▓░  │
+│   02 ○ recording_2.wav         44.1k Hz · 5.1s · 未分析        ▓░░░░░  │
+│   03 ○ recording_3.wav         44.1k Hz · 6.7s · 未分析        ▓░░░░░  │
+├────────────────────────────────────────────────────────────────────────┤
+│ Metric Bar  BG_PANEL · 36px                                             │
+│  指标   [ CPP ▾ ]   │  上一个 ←  下一个 →                              │
+├────────────────────────────────────────────────────┬───────────────────┤
+│                                                     │ Inspector         │
+│         Heatmap Card   (white)                      │ BG_PANEL · 360px  │
+│                                                     │                   │
+│         CPP [dB]                                    │  CPP              │
+│                                                     │  倒谱峰显著度       │
+│         (matplotlib heatmap)                        │  单位 dB          │
+│                                                     │                   │
+│                                                     │  ┌─────────────┐ │
+│                                                     │  │ 临床参考范围 │ │
+│                                                     │  │ ≥14   良好 │ │
+│                                                     │  │ 10-14 正常 │ │
+│                                                     │  │ 6-10  关注 │ │
+│                                                     │  │ <6    异常 │ │
+│                                                     │  └─────────────┘ │
+│                                                     │                   │
+│                                                     │  ┌─────────────┐ │
+│                                                     │  │ 本次值       │ │
+│                                                     │  │ 16.79   dB  │ │
+│                                                     │  │ ✓ 良好      │ │
+│                                                     │  └─────────────┘ │
+│                                                     │                   │
+│                                                     │  [ 导出 Excel  ] │
+│                                                     │  [ 生成报告    ] │
+│                                                     │  [ 对比录音    ] │
+├────────────────────────────────────────────────────┴───────────────────┤
+│ Toolbar  BG_PANEL · 36px                                                │
+│  [拟合▾]  [标注]  [复位]  [复制图片]  [保存▾]                          │
+├────────────────────────────────────────────────────────────────────────┤
+│ Status Bar  BG_PANEL · 30px                                             │
+│  ● 文件 01 · 12,525 网格 · k=5 · 3,420 个周期 · 耗时 12.6 秒           │
+└────────────────────────────────────────────────────────────────────────┘
+```
 
-主区域不放 metric table，整片是大占位区：
-- 中央居中"♪"图标（accent 60% 透明）
-- 提示文字"拖入 .wav 文件开始 / Drag a .wav file to begin"
-- 副说明"立体声  Ch1=麦克风  Ch2=EGG"
-- 一个 primary button "打开文件" 在文字下方
+### 2.1 三屏共通
 
-Sidebar 还在，但内容是"还没有文件 / No files yet"灰色提示。
+- **App Bar 顶部固定**：左 = 软件中文/英文全称，中 = 当前文件名 + 状态符号，右 = 语言切换 + 设置 + 帮助 + 最小化
+- **Tracks Panel 第二行**：录音轨列表（替代传统 file sidebar）。左侧轨道编号 + 状态符号 + 文件名 + 元数据，右侧 mini-waveform 装饰条
+- **Metric Bar 第三行**：指标下拉 + 键盘提示
+- **主区分割**：左 Canvas（heatmap card），右 Inspector（固定 360px，包含临床范围卡 + 当前值卡 + 操作按钮）
+- **Toolbar 倒数第二行**：仅作图相关工具（拟合 / 标注 / 复位 / 复制 / 保存）
+- **Status Bar 永远在最底**：当前文件 + 网格数 + k + 周期 + 耗时
 
-### 3.2 Analyzing state
+### 2.2 Empty state 变体
 
-主区域被进度卡片占用：
-- 中央 progress bar（accent 色）
-- 上方文字 "正在分析 EGG 周期..."
-- 下方阶段进度 "阶段 5/12  · 已用 4.3s · 预计 12s"
-- Title bar 状态 pill 变 ⏵（脉动 accent）
-- Status bar 实时滚 cycles 数
+无文件时：
+- Tracks Panel 显示 "录音轨" 标题 + 空白区域中央 "拖入 .wav 文件开始 / Drag a .wav file to begin"
+- Metric Bar 全部 disabled（灰）
+- Canvas 显示之前实现的占位画面（白底 + MIDI/SPL 坐标系 + ♪ 提示）
+- Inspector 显示 "选中文件后查看详情 / Select a file to view details"
+- 操作按钮全 disabled
 
-两阶段分析：phase A 完成后中央替换成第一张热图（partial_cb 已实现），右侧 metric table 边填边亮。
+### 2.3 Analyzing state 变体
 
-### 3.3 Compare state
+- Tracks Panel 当前轨左侧 ▌从 amber 变成脉动 amber（accent_hover ↔ accent）
+- Status Bar 实时滚 cycles 数 + 耗时
+- Inspector 整列变进度卡片：阶段 N/12 + 进度条 + 当前阶段名
+- 两阶段：phase A 完成 → 立刻填第一张热图，inspector 切回正常布局并继续显示后续指标 "正在计算"
 
-整窗布局换：
-- Sidebar 上半文件 A，下半文件 B（拖另一个 wav 进 sidebar 即激活 compare）
-- Heatmap card 拆成 3 列：A | B | A−B
-- Reference card 换成"差异统计"（A 平均 / B 平均 / Δ / 重叠率）
+### 2.4 Compare state 变体
+
+- Tracks Panel 同时高亮 2 个轨道（A / B）
+- Heatmap Card 拆 3 列：A | B | A−B（matplotlib subplot 1×3）
+- Inspector 改为差异统计卡片（A 平均 / B 平均 / Δ / 重叠率）
 
 ---
 
-## 4. 组件规范
+## 3. 双语规则（关键）
 
-### 4.1 Button 四档
+### 3.1 中文模式
+
+- **App Bar 软件名**："嗓音声学品质多维分析图谱"（不显示 "VoiceMap"）
+- **所有 UI 文字 100% 中文**
+- **唯一例外是参数符号**：CPP / CPPS / F0 / MIDI / SPL / Hz / dB / OQ / CIQ / SPQ 等保留原写法
+- **临床档位**：良好 / 正常 / 关注 / 异常
+- **Tracks 单位**："44.1k Hz · 8.2s · 12,525 网格" / "未分析"
+- **键盘提示**："上一个 ←  下一个 →"
+
+### 3.2 英文模式
+
+- **App Bar 软件名**："VoiceMap"
+- **所有 UI 文字 100% 英文**
+- **临床档位**：GOOD / NORMAL / WATCH / ABNORM
+- **Tracks 单位**："44.1k Hz · 8.2s · 12,525 cells" / "not analyzed"
+- **键盘提示**："Prev ←  Next →"
+
+### 3.3 实现要点
+
+- `voicemap/i18n.py` 持有 STRINGS dict：`{"zh": {...}, "en": {...}}`
+- API：`tr("key")` 返回当前语言下的字符串
+- 切换：菜单栏 / 顶栏右侧"中" ↔ "EN" 一键切换
+- 持久化：当前语言写到 `~/.voicemap/config.json`，下次启动恢复
+- 切换动作：trigger 全局重建 — `app.event_generate("<<LangChanged>>")`，所有 widget 监听该事件并重读自己的字符串
+
+### 3.4 不双语化的内容
+
+- 文件名（test_Voice_EGG.wav）
+- 数值（16.79、12,525）
+- 单位符号（Hz、dB、kHz、s）
+- 参数符号（CPP、CPPS、F0、MIDI、SPL）
+- 时间戳（2026-05-06）
+- 邮箱（huanchen.se@gmail.com）
+- 版本号（V1.0）
+- log 文件内容（开发者可见，全英文）
+
+---
+
+## 4. 导出报告样式（方案 D）
+
+报告由 `voicemap/report.py` 生成 .md，再用 PyInstaller 时打包 weasyprint / reportlab / 或纯 matplotlib 渲染为 PDF。
+
+### 4.1 视觉规范
+
+- 纯白底，黑字
+- 居中标题：中文 "嗓音声学品质多维分析图谱"（宋体 22pt bold），副标题 "VoiceMap V1.0"
+- 章节按论文 figure 风格：`▸ CPP — 倒谱峰显著度` 章节标题
+- 数字用 Consolas 等宽（包括统计 "Mean / Std / Min / Max / n"）
+- 临床参考范围横排 4 档（良好 / 正常 / 关注 / 异常）
+- 页脚：左 "嗓音声学品质多维分析图谱  V1.0  ·  © 2026 蔡焕晨  ·  邮箱"，右 "导出于 2026-05-06"
+
+### 4.2 报告结构（按指标 chapter）
 
 ```
-Primary    bg=ACCENT  fg=TEXT_INVERSE                  font-bold
+[标题]               居中，宋体 22pt
+[副标题]             居中，灰，VoiceMap V1.0
+─────分隔线─────
+[音频文件]           标签 + 元数据
+[分析指标]           ▸ CPP — 倒谱峰显著度
+[Figure 1]           VRP 热图
+[图说]              图 1.   CPP 在 MIDI × SPL 网格上的 ...
+[统计摘要]           均值 / 标准差 / 最小值 / 最大值 / 样本数（5 列）
+[临床参考范围]       良好 / 正常 / 关注 / 异常（4 列）+ 本次结果 + 状态标
+─────分隔线─────
+[页脚]              软件名 · 版权 · 邮箱 | 导出于 日期
+```
+
+### 4.3 文件格式
+
+- **.md** （主交付）：human-readable 中文 markdown
+- **.pdf** （A0-5 阶段做）：印刷友好，A4 单页或多页
+- **报告里的图**全部走方案 D 配色（不是 GUI 的暗色），保证学术发表 / 印刷双友好
+
+---
+
+## 5. 组件规范
+
+### 5.1 Button 四档
+
+```
+Primary    bg=ACCENT  fg=TEXT_INVERSE  font=FONT_SANS_B
            border=none  radius=4  padding=(8,16)
            hover: bg=ACCENT_HOVER
            主操作。每屏 ≤ 1 个
 
-Secondary  bg=BG_PANEL  fg=TEXT
-           border=1px BORDER  radius=4  padding=(6,12)
-           hover: bg=BG_ELEVATED
-           次操作。toolbar / dialog 默认按钮
+Secondary  bg=BG_ELEVATED  fg=TEXT
+           border=1px ACCENT  radius=4  padding=(6,12)
+           hover: bg=BG_ELEVATED + glow
+           Inspector 里的"导出 Excel / 生成报告 / 对比"用此
 
-Ghost      bg=transparent  fg=TEXT_SEC
-           radius=4  padding=(4,8)
+Ghost      bg=BG_ELEVATED  fg=TEXT
+           border=1px BORDER  radius=4  padding=(4,8)
+           hover: bg=BORDER
+           Toolbar 按钮（拟合 / 标注 / 复位 / 复制 / 保存）
+
+Icon       32x32  bg=transparent  fg=TEXT_SEC
            hover: bg=BG_ELEVATED  fg=TEXT
-           三级 / 工具栏按钮
-
-Icon       32x32  bg=transparent
-           radius=4
-           hover: bg=BG_ELEVATED
-           sidebar / toolbar 图标按钮
+           App Bar 右上的 ⚙ ? ─ 三个图标
 ```
 
-### 4.2 Pill / Badge
+### 5.2 Track Item
 
 ```
-Status pill：
-  ✓ 良好     bg=#dcfce7  fg=SUCCESS  radius=10  padding=(2,8)
-  · 正常     bg=#f1f5f9  fg=TEXT_SEC
-  ! 关注     bg=#fef3c7  fg=WARNING
-  ✗ 异常     bg=#fee2e2  fg=ERROR
+高度 32px，bg = BG_PANEL（默认）/ BG_ELEVATED（选中）
+选中时左侧 4px ACCENT 竖条
+左到右：编号(02) · 状态(○/✓/⏵) · 文件名 · 元数据 · mini-waveform
+
+字段          字体        颜色             宽度
+编号          FONT_DATA   TEXT_MUTED       40px
+状态          symbol      SUCCESS / MUTED  20px
+文件名        FONT_SANS   TEXT             弹性
+元数据        FONT_SMALL  TEXT_SEC         260px
+waveform      —          ACCENT/MUTED     280px (右浮)
+
+hover：整行 bg=BG_ELEVATED，cursor=hand
+单击：切换为当前轨（trigger 重绘 heatmap + Inspector）
+右键：上下文菜单（M5.5 阶段做）
 ```
 
-### 4.3 Metric table 行
+### 5.3 Metric Dropdown（保留 cascade 子菜单）
+
+依然走 commit e824dc7 的实现：tk.Menu cascade，分类（声学 / EGG / 唱歌 / 聚类 / 密度），每类 add_radiobutton 绑 metric_var。配色按本规范的暗色主题。
+
+### 5.4 Inspector Cards
+
+三张卡片纵向堆叠在 Inspector 列：
+
+**卡 1 — 当前指标**（无 panel，纯文字）
+- CPP（24pt bold ACCENT）
+- 中文/英文全名（10pt TEXT_SEC）
+- 单位（9pt TEXT_MUTED）
+
+**卡 2 — 临床参考范围**
+- 标题 "临床参考范围"（9pt bold ACCENT）
+- 4 行：值范围（Consolas）+ 档位 label（彩色 bold）
+
+**卡 3 — 本次值**
+- 标题 "本次值"（9pt bold ACCENT）
+- 大数字 16.79（Consolas 24pt bold ACCENT_HOVER）+ 单位 dB（10pt MUTED）
+- 状态标 ✓ 良好 / ✗ 异常（11pt bold 语义色）
+
+### 5.5 Status Pills
 
 ```
-┌──────────────────────────────────────────────┐
-│ CPP [dB]                  16.79   良好    ✓  │  ← bg=BG_PANEL
-├──────────────────────────────────────────────┤
-│ CPPS [dB]                 16.79   良好    ✓  │  ← bg=BG_ELEVATED 隔行
-├──────────────────────────────────────────────┤
-
-字段              字体           对齐   占比
-metric 名          FONT_SANS      左    50%
-数值              FONT_DATA      右    20%
-范围 label         FONT_SANS      右    15%
-mark              FONT_DATA_B   右    15%
-
-行高 26px，hover 整行 bg=BG_ELEVATED + 左侧 3px ACCENT 竖条
-单击 → 切右侧 heatmap 到该 metric
+✓ 良好     fg=SUCCESS  font=FONT_SANS_B
+· 正常     fg=TEXT_SEC font=FONT_SANS
+! 关注     fg=WARNING  font=FONT_SANS_B
+✗ 异常     fg=ERROR    font=FONT_SANS_B
 ```
 
-### 4.4 File list 行
-
-```
-┌──────────────────────────────────────────────┐
-│ ▌ ✓ test_Voice_EGG.wav                       │  ← 选中：左 3px accent + bg=BG_ELEVATED
-│   44.1 kHz · 8.2s · 12,525 cells             │
-├──────────────────────────────────────────────┤
-│   ○ recording_2.wav                          │  ← 透明 bg
-│   44.1 kHz · 5.1s                            │
-└──────────────────────────────────────────────┘
-```
+不画 pill 边框（暗色背景下），靠颜色 + 符号识别。
 
 ---
 
-## 5. 交互规范
+## 6. 渐进交付（A0 落地路径）
 
-### 5.1 全局快捷键
-
-```
-Ctrl + O      打开文件
-Ctrl + S      保存当前 metric 为 PNG
-Ctrl + E      导出 Excel
-Ctrl + R      生成报告
-Ctrl + ,      打开设置
-←  →           上一个 / 下一个 metric
-1-5            快速切到对应分类的第一个 metric
-F1            帮助
-Esc           关闭 dialog
-```
-
-### 5.2 焦点态
-
-- focus ring：1.5px ACCENT outline + 4px ACCENT 5% bg halo
-- 没有 default 黑色 dotted line
-
-### 5.3 反馈
-
-- toast：右下角 BG_OVERLAY + ACCENT 边，1.5s 自动消失
-- error：红色 toast，3s，可手动关
-- 不要 modal MessageBox（除非需要决策）
-
-### 5.4 拖放
-
-- 拖到窗口任意位置：占位区高亮（ACCENT 边 + 5% halo）
-- 释放：占位区瞬间替换为"分析中"卡片
+| A0 步骤 | 这份设计中落实哪几条 |
+|---------|----------------------|
+| A0-1    | rename + 目录搬，UI 不动 |
+| A0-2    | 拆 gui.py 时引入 `theme.py`，色板 + 字体 + 间距 token 全部按本规范定义；初步切换主题（暗色）但 layout 仍是旧的 |
+| A0-3    | About 对话框做样板：amber accent + dark panel + 卡片化布局 |
+| A0-4    | i18n.py 上线，全部 UI 字符串清出来。同时把 layout 切到本规范的 Tracks Panel + Metric Bar + Inspector 三段式 |
+| A0-5    | report.py 切到方案 D 配色 + layout（之前是 Markdown 普通输出）；PyInstaller 打包；用户手册截图基于 layout 完成态拍摄 |
 
 ---
 
-## 6. tkinter 实现 cheat sheet
+## 7. 验收标准
 
-### 6.1 主窗口 + Title bar
-
-```python
-root = TkinterDnD.Tk()
-root.configure(bg=BG_APP)
-
-# Title bar（自定义彩色 banner）
-title_bar = tk.Frame(root, bg=HEADER_BG, height=36)
-title_bar.pack(side="top", fill="x")
-tk.Label(title_bar, text="VoiceMap V1.0 — 嗓音声学品质多维分析图谱",
-         bg=HEADER_BG, fg=HEADER_FG,
-         font=FONT_HEADER).pack(side="left", padx=12, pady=6)
-
-# Menubar 走 root.config(menu=...) 已经做了
-```
-
-### 6.2 卡片（圆角 + 边）
-
-```python
-def card(parent, **pack_kwargs):
-    """A panel with subtle border + radius (radius simulated via internal padding)."""
-    outer = tk.Frame(parent, bg=BORDER_SUB)
-    inner = tk.Frame(outer, bg=BG_PANEL)
-    inner.pack(padx=1, pady=1, fill="both", expand=True)
-    outer.pack(**pack_kwargs)
-    return inner
-```
-
-### 6.3 Metric table
-
-不用 ttk.Treeview（太多视觉无法控制）。用 Canvas + 手画行：
-
-```python
-canvas = tk.Canvas(parent, bg=BG_PANEL, highlightthickness=0)
-sb = ttk.Scrollbar(parent, command=canvas.yview)
-canvas.configure(yscrollcommand=sb.set)
-
-# 每行用 frame 包住 4 个 label，第一列左对齐，后三列右对齐
-def add_row(metric, value, label, mark, color, even):
-    bg = BG_ELEVATED if even else BG_PANEL
-    row = tk.Frame(scroll_frame, bg=bg, height=26)
-    tk.Label(row, text=metric, ...).pack(side="left")
-    ...
-```
-
-### 6.4 Status pill
-
-```python
-def pill(parent, text, kind="normal"):
-    bg, fg = {
-        "good":   ("#dcfce7", SUCCESS),
-        "normal": ("#f1f5f9", TEXT_SEC),
-        "watch":  ("#fef3c7", WARNING),
-        "abnorm": ("#fee2e2", ERROR),
-    }[kind]
-    return tk.Label(parent, text=text, bg=bg, fg=fg,
-                     font=FONT_SMALL, padx=8, pady=2,
-                     borderwidth=0)
-```
-
----
-
-## 7. 落地路径（按 A0 子步骤）
-
-| A0 步骤 | 这份设计中落实哪几条                                         |
-|---------|--------------------------------------------------------------|
-| A0-1    | 仅 rename + 目录搬，UI 不动                                   |
-| A0-2    | 引入 `voicemap/gui/theme.py`，把上述 token 集中。**所有现有硬编码 `#xxx` 一次性改成 `theme.X`**。同时把 god 类拆分 |
-| A0-3    | 新增 About dialog 用新设计语言（cyan banner + sidebar + content + button row） |
-| A0-4    | 加 i18n 时把所有 hardcode 字符串清出。**这一步顺带把 metric table 用上述 4.3 规范重做**（之前 metric 没表格视图） |
-| A0-5    | 截图前最后视觉打磨：title bar / status bar 上线、整体微调      |
-
----
-
-## 8. A0 完成后验收
-
-- [ ] 4 张关键截图各一份（empty / analyzing / result / compare），中英各一份 = 8 张
-- [ ] 8px 间距栅格全程贯彻，没有 `pady=3` 散数
-- [ ] 没有 `relief=ridge / groove / sunken`（Win95 视觉）
-- [ ] 所有 button 有 hover 反馈，焦点用 ACCENT ring
-- [ ] 主界面没有日志区（移到独立窗口或折叠面板）
-- [ ] Metric table + heatmap 同时可见（不是切换视图）
-- [ ] Reference card 显示当前 metric 的临床范围和本次值
-- [ ] Status bar 永远显示参数
-- [ ] Title bar 永远显示软件中文全称
-- [ ] 全 UI 无 "FonaDyn" 字面量
-- [ ] 中英切换 < 200ms，所有 widget 即时刷新
+- [ ] App Bar 50px，软件名 + 文件 + 右侧工具，配色 BG_PANEL
+- [ ] Tracks Panel 显示当前文件 + 选中状态左侧 4px amber 竖条
+- [ ] Metric Bar 36px，下拉 + 键盘提示
+- [ ] Inspector 360px 固定，三张卡片堆叠
+- [ ] Toolbar 36px，5 个 Ghost 按钮
+- [ ] Status Bar 30px，永远显示当前数据元信息
+- [ ] 中文模式：所有 UI 字符串无英文（参数符号除外）
+- [ ] 英文模式：所有 UI 字符串无中文
+- [ ] 切换语言 < 200ms 完成（widget textvariable + 事件广播）
+- [ ] 报告 .md 走方案 D 排版，热图配色非暗色
+- [ ] 中英文切换持久化到 ~/.voicemap/config.json
+- [ ] App Bar 永远显示软件全称（非缩写）
+- [ ] Color tokens 全部从 theme.py 取，禁止硬编码 #xxxxxx
