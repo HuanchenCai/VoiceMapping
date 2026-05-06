@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 VoiceMap Voice Range Profile Analyzer
 Complete implementation of VoiceMap algorithms for VRP analysis

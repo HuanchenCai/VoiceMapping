@@ -1,0 +1,95 @@
+# Build / package configuration for VoiceMap.
+#
+# Single source of truth for: dependencies, entry points, project metadata.
+# requirements.txt is kept around for tooling that doesn't read pyproject
+# yet (Conda, some IDEs), regenerated from this file:
+#   pip install pip-tools && pip-compile -o requirements.txt pyproject.toml
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "voicemap"
+description = "Voice Range Profile (VRP) analyzer — 嗓音声学品质多维分析图谱"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {file = "LICENSE"}
+authors = [
+    { name = "蔡寰宸 (Huanchen Cai)", email = "huanchen.se@gmail.com" },
+]
+keywords = ["voice", "VRP", "EGG", "phonation", "speech", "analysis", "FonaDyn"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: Healthcare Industry",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio :: Analysis",
+    "Topic :: Scientific/Engineering",
+]
+# Version is the single source of truth in voicemap/__version__.py.
+# `dynamic = ["version"]` tells setuptools to read it from there.
+dynamic = ["version"]
+
+dependencies = [
+    "numpy>=1.21",
+    "scipy>=1.7",
+    "pandas>=1.3",
+    "soundfile>=0.10.3",
+    "matplotlib>=3.5",
+    "scikit-learn>=1.1",       # KMeans for EGG / cPhon clusters
+    "openpyxl>=3.0",            # .xlsx export
+]
+
+[project.optional-dependencies]
+# `pip install voicemap[full]` for the GUI + perf extras.
+gui = [
+    "tkinterdnd2>=0.4.2",       # native drag-drop
+]
+perf = [
+    "numba>=0.59",              # JIT cycle detection / sample entropy
+    "statsmodels>=0.13",        # LOWESS smoothing in plot_overlay
+]
+windows = [
+    "pywin32>=300",             # clipboard image copy (PNG → CF_DIB)
+]
+dev = [
+    "praat-parselmouth>=0.4",   # tests/validate_params.py cross-check
+    "pytest>=7",
+]
+full = [
+    "voicemap[gui,perf,windows]",
+]
+
+[project.scripts]
+voicemap = "voicemap.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/HuanchenCai/VoiceMapping"
+Repository = "https://github.com/HuanchenCai/VoiceMapping"
+
+# ── setuptools configuration ────────────────────────────────────────────
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["voicemap*"]
+exclude = ["tests*", "docs*", "audio*", "result*"]
+
+[tool.setuptools.dynamic]
+version = {attr = "voicemap.__version__.__version__"}
+
+# ── tooling defaults ────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "validate_*.py"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

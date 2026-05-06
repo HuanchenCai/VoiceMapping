@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 VoiceMap Configuration Module
 Centralized configuration for all VoiceMap analysis parameters

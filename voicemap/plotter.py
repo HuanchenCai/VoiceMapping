@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 VoiceMap VRP Plotter
 Saves a PNG map for every non-empty metric column in the grouped VRP CSV.

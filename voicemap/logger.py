@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 VoiceMap Logging Module
 Centralized logging configuration for VoiceMap analysis

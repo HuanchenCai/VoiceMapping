@@ -51,12 +51,16 @@ M3-M7 这些研究/科研增强项**全部推到拿证后**做。
 
 #### A0-3 工程化 + 软著元数据
 
-- [ ] 新增 `pyproject.toml`（替代 `requirements.txt`，定义 entry point、版本、deps）
-- [ ] 新增 `LICENSE`（MIT，软著申请材料里要附）
-- [ ] 新增"关于" 对话框（菜单 帮助 → 关于）：软件名 / 版本号 / 作者 蔡寰宸 / 邮箱 / 版权声明
-- [ ] 每个 .py 顶部加标准 header（`# -*- coding: utf-8 -*-` + 模块说明 + 版权 + 作者）
+- [x] 新增 `pyproject.toml`（声明依赖 / entry point `voicemap = voicemap.cli:main` / 动态版本读自 `voicemap/__version__.py`）；`requirements.txt` 留作 conda/IDE 兼容
+- [x] 新增 `LICENSE`（MIT + 上游 KTH FonaDyn 致谢段）
+- [x] "关于" 对话框（A0-2 已加，菜单 帮助 → 关于...）—— A0-4 视觉打磨
+- [x] 每个 .py 顶部加 `# -*- coding: utf-8 -*-`（13 个文件补齐，8 个已有）
+- [x] **GUI 调色板切到 option C**（`voicemap/gui/theme.py`）：BG 深灰 / ACCENT amber，对应 `docs/UI_DESIGN.md` 设计稿。旧常量名 `BG` / `PANEL` / `ACCENT` 等保留以免改 widget 代码；新增 spec-verbatim 别名 `BG_APP` / `BG_PANEL` / `BG_ELEVATED` / `TEXT_SEC` / `ACCENT_HOVER` 等供新代码使用
 
-**验证**：同 A0-1，加 `pip install -e .` 能装上。
+**验证**：
+- `validate_params.py`：48 PASS / 4 WARN / 0 FAIL ✓
+- `pip install -e .`：成功，`import voicemap; voicemap.__version__` 可读 ✓
+- GUI 启动 + palette 切换可见：amber 强调色 + 深灰底
 
 #### A0-4 中英双语 + i18n 框架（关键）
 

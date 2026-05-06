@@ -5,24 +5,42 @@ Centralised here so every other ``voicemap.gui.*`` module imports its
 visual constants from one place. Changing a color here propagates
 everywhere; **never hard-code a #xxxxxx in widget code**.
 
-TODO: A0-3 / A0-4 swap this palette to the option-C amber theme spec'd
-in ``docs/UI_DESIGN.md``. The current values preserve the dark-cyan
-look that was in place before A0-2 to keep the structural refactor
-visually identical to the previous gui.py.
+A0-3 swap: palette is now option C (Studio, dark slate + amber) per
+``docs/UI_DESIGN.md`` §1. Pre-A0-3 it was option A (dark cyan). The
+old constant *names* are preserved (BG / PANEL / ACCENT / …) so
+existing widget code using them keeps working — only the *values*
+changed. New code may also use the more descriptive aliases (BG_APP /
+BG_PANEL / BG_ELEVATED / TEXT_SEC / TEXT_MUTED / ACCENT_HOVER) which
+match the spec verbatim.
 """
 
-# ── Colors ──────────────────────────────────────────────────────────────
-BG        = "#0f1419"   # window base
-PANEL     = "#162029"   # primary panel cards
-PANEL_HI  = "#1e2a36"   # selected row / hover
-BORDER    = "#243141"   # default subtle separator
-TEXT      = "#e6edf3"   # primary text, headings
-MUTED     = "#7d8590"   # secondary text, placeholders
-ACCENT    = "#00d9ff"   # brand color (cyan)
-ACCENT_HI = "#4de6ff"   # accent hover / pressed
-OK        = "#3fb950"   # success / "good"
-WARN      = "#d29922"   # warning / "watch"
-ERR       = "#f85149"   # error / "abnormal"
+# ── Colors (option C — Studio, dark + amber) ────────────────────────────
+BG        = "#0a0a0a"   # window base (BG_APP)
+PANEL     = "#1a1a1a"   # primary panel cards (BG_PANEL)
+PANEL_HI  = "#2a2a2a"   # selected row / hover (BG_ELEVATED)
+BORDER    = "#3a3a3a"   # default subtle separator
+TEXT      = "#f5f5f5"   # primary text, headings
+MUTED     = "#a3a3a3"   # secondary text (TEXT_SEC); TEXT_MUTED below for placeholders
+ACCENT    = "#f59e0b"   # brand color (amber-500)
+ACCENT_HI = "#fbbf24"   # accent hover / pressed (amber-400)
+OK        = "#84cc16"   # success / "good" (lime-500)
+WARN      = "#f59e0b"   # warning / "watch" — shares amber w/ ACCENT (per spec)
+ERR       = "#ef4444"   # error / "abnormal" (red-500)
+
+# Spec-verbatim aliases for new code; old names above stay for back-compat.
+BG_APP        = BG
+BG_PANEL      = PANEL
+BG_ELEVATED   = PANEL_HI
+BORDER_STRONG = "#525252"
+TEXT_SEC      = MUTED
+TEXT_MUTED    = "#737373"     # disabled / placeholder
+TEXT_INVERSE  = "#0a0a0a"     # text on accent
+ACCENT_HOVER  = ACCENT_HI
+ACCENT_PRESS  = "#d97706"     # amber-600
+SUCCESS       = OK
+WARNING       = WARN
+ERROR         = ERR
+INFO          = "#3b82f6"
 
 # ── Fonts ───────────────────────────────────────────────────────────────
 # Microsoft YaHei UI is Windows-native, has dedicated glyphs for both

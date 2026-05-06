@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Render the 4 UI design options as 1200x720 PNG mockups.
 Real fonts, real-ish heatmap, real spacing — the user can see what each

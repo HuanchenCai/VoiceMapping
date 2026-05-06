@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Plot overlay primitives (M2 — drawing enhancements).
 

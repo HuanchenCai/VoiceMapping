@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 VoiceMap Metrics Module — Optimized
 All hot paths use vectorised NumPy; no Python-level loops over samples or windows.
