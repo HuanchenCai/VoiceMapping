@@ -757,10 +757,43 @@ class VoiceMapApp(_TkBase):
             wraplength=320, justify="left", anchor="w")
         self._inspector_metric_desc.pack(anchor="w", pady=(2, 8))
 
-        # Dynamic-card area: clinical threshold rows + current-value pill.
-        # _update_inspector clears + rebuilds these on every metric change.
+        # Static-on-metric-change card area: clinical threshold rows.
+        # _update_inspector clears + rebuilds these only on metric switch.
         self._inspector_cards = tk.Frame(pad, bg=PANEL)
         self._inspector_cards.pack(fill="x", pady=(0, 8))
+
+        # Dynamic-on-mouse-hover card: current value at the cell the
+        # cursor is over. Built once here, updated cheaply via
+        # _update_inspector_value() — no widget destroy/create per
+        # mouse-motion event.
+        self._inspector_value_card = tk.Frame(pad, bg=PANEL)
+        self._inspector_value_card.pack(fill="x", pady=(8, 0))
+        self._inspector_value_header = tk.Label(
+            self._inspector_value_card, text=tr("inspector.current"),
+            bg=PANEL, fg=ACCENT, font=FONT_UI_B)
+        self._inspector_value_header.pack(anchor="w", pady=(0, 4))
+        # Coords pill: shows "MIDI ?? · SPL ?? dB" so user knows where
+        # the value comes from.
+        self._inspector_value_coords = tk.Label(
+            self._inspector_value_card, text="—",
+            bg=PANEL, fg=MUTED, font=FONT_UI)
+        self._inspector_value_coords.pack(anchor="w")
+        # Big value + unit + severity tag in a horizontal row.
+        big = tk.Frame(self._inspector_value_card, bg=PANEL)
+        big.pack(anchor="w", pady=(2, 0))
+        self._inspector_value_num = tk.Label(
+            big, text="—",
+            bg=PANEL, fg=ACCENT_HI,
+            font=("Consolas", 22, "bold"))
+        self._inspector_value_num.pack(side="left")
+        self._inspector_value_unit = tk.Label(
+            big, text="",
+            bg=PANEL, fg=MUTED, font=FONT_UI)
+        self._inspector_value_unit.pack(side="left", padx=(4, 0), pady=(8, 0))
+        self._inspector_value_sev = tk.Label(
+            self._inspector_value_card, text="",
+            bg=PANEL, fg=MUTED, font=FONT_UI_B)
+        self._inspector_value_sev.pack(anchor="w", pady=(2, 0))
 
         # Compact log at bottom of Inspector. Title + Text widget; uses
         # less vertical space than the old left-panel log.
@@ -843,6 +876,12 @@ class VoiceMapApp(_TkBase):
         # 关键：add="+" 追加，不能覆盖 matplotlib 自己的 resize handler，
         # 否则 figure 不会跟着 widget 缩放，第一次绘制就错位。
         cw.bind("<Configure>", self._on_canvas_configure, add="+")
+        # Mouse hover over the heatmap → live update Inspector's
+        # current-value pill with the cell at (MIDI, SPL).
+        self._canvas.mpl_connect("motion_notify_event",
+                                  self._on_canvas_motion)
+        self._canvas.mpl_connect("axes_leave_event",
+                                  lambda _e: self._update_inspector_value(None, None))
 
         # 大号纯字体箭头，放在导航带正中；hover 有强对比
         self.prev_btn = tk.Label(self.nav_left, text="◀",
@@ -1248,6 +1287,26 @@ class VoiceMapApp(_TkBase):
         default = next((m for m in _DEFAULT_METRIC_CHAIN if m in flat), flat[0])
         self.metric_var.set(default)   # trace → _on_metric_change → _render
 
+    def _on_canvas_motion(self, event):
+        """matplotlib motion handler — live-update Inspector's
+        current-value pill with the cell under the cursor.
+
+        Skip when:
+          - mouse is outside the data axes
+          - placeholder is showing (no data)
+          - in annotation mode (don't fight the annotation cursor)
+        """
+        if event.inaxes is None:
+            return
+        if getattr(self, "_showing_placeholder", True):
+            return
+        if getattr(self, "_annot_mode_on", False):
+            return
+        x, y = event.xdata, event.ydata
+        if x is None or y is None:
+            return
+        self._update_inspector_value(x, y)
+
     def _on_metric_change(self, *_):
         col = self.metric_var.get()
         if col and self._last_df is not None and col in self._last_df.columns:
@@ -1258,20 +1317,21 @@ class VoiceMapApp(_TkBase):
 
     def _update_inspector(self):
         """Refresh the Inspector column to reflect current metric_var.
-
-        Shows: metric name (big) + description + unit + clinical bands
-        (from voicemap.report._THRESHOLDS) + current value pill.
-        Falls back to the placeholder when no metric / no data."""
+        Shows static parts: metric name + description + clinical bands.
+        Current value pill is updated separately by mouse hover via
+        ``_update_inspector_value``. Mean over the whole heatmap is
+        meaningless on a 2D voice map, so we don't compute it here.
+        """
         name = self.metric_var.get() if hasattr(self, "metric_var") else ""
         if not hasattr(self, "_inspector_metric_name"):
             return    # Inspector not built yet
         if not name:
             self._inspector_metric_name.configure(text="—")
             self._inspector_metric_desc.configure(text=tr("inspector.no_metric"))
-            self._inspector_set_clinical(None, None)
+            self._inspector_set_clinical(None)
+            self._update_inspector_value(None, None)
             return
 
-        # Look up MetricSpec for description + unit
         try:
             from voicemap.metrics_registry import get as get_spec
             spec = get_spec(name)
@@ -1283,25 +1343,11 @@ class VoiceMapApp(_TkBase):
         self._inspector_metric_name.configure(text=name)
         self._inspector_metric_desc.configure(text=f"{desc}{unit_str}")
 
-        # Clinical thresholds + current value
         from voicemap.report import _THRESHOLDS
         bands = _THRESHOLDS.get(name)
-        cur_value = None
-        cur_severity = None
-        if (self._last_df is not None and name in self._last_df.columns):
-            try:
-                vals = self._last_df[name].values
-                nz = vals[vals != 0]
-                if len(nz):
-                    cur_value = float(nz.mean())
-                    if bands:
-                        for lo, hi, _label, sev in bands:
-                            if lo <= cur_value < hi:
-                                cur_severity = sev
-                                break
-            except Exception:
-                pass
-        self._inspector_set_clinical(bands, cur_value, cur_severity, unit)
+        self._inspector_set_clinical(bands)
+        # Reset hover pill on metric change
+        self._update_inspector_value(None, None)
 
     # Severity → color mapping
     _SEVERITY_COLORS = {
@@ -1311,14 +1357,11 @@ class VoiceMapApp(_TkBase):
         "abnormal": None,
     }
 
-    def _inspector_set_clinical(self, bands, cur_value, cur_severity=None, unit=""):
-        """Replace the contents of self._inspector_cards with clinical
-        threshold rows + the current-value pill. Wraps creation each
-        call so changing metric refreshes cleanly."""
-        # Lazy-build the holder Frame on first call
+    def _inspector_set_clinical(self, bands):
+        """Replace clinical-band rows in self._inspector_cards.
+        Static; only re-runs on metric change."""
         if not hasattr(self, "_inspector_cards"):
             return
-        # Clear children
         for child in self._inspector_cards.winfo_children():
             try:
                 child.destroy()
@@ -1327,44 +1370,99 @@ class VoiceMapApp(_TkBase):
 
         sev_color = {"good": OK, "normal": TEXT, "watch": WARN, "abnormal": ERR}
 
-        if bands:
-            # Clinical reference card
-            tk.Label(self._inspector_cards, text=tr("inspector.clinical"),
-                     bg=PANEL, fg=ACCENT, font=FONT_UI_B
-                     ).pack(anchor="w", pady=(8, 4))
-            for lo, hi, label, sev in bands:
-                row = tk.Frame(self._inspector_cards, bg=PANEL)
-                row.pack(fill="x", pady=1)
-                # Range string
-                if lo <= -1e8:
-                    rng = f"< {hi:g}"
-                elif hi >= 1e8:
-                    rng = f"≥ {lo:g}"
-                else:
-                    rng = f"{lo:g} – {hi:g}"
-                tk.Label(row, text=rng, bg=PANEL, fg=TEXT,
-                         font=FONT_MONO, width=12, anchor="w"
-                         ).pack(side="left")
-                tk.Label(row, text=label, bg=PANEL,
-                         fg=sev_color.get(sev, TEXT), font=FONT_UI,
-                         anchor="w", justify="left", wraplength=200
-                         ).pack(side="left", fill="x", expand=True)
-
-        # Current value
-        if cur_value is not None:
-            tk.Label(self._inspector_cards, text=tr("inspector.current"),
-                     bg=PANEL, fg=ACCENT, font=FONT_UI_B
-                     ).pack(anchor="w", pady=(12, 4))
-            big = tk.Frame(self._inspector_cards, bg=PANEL)
-            big.pack(anchor="w")
-            value_color = sev_color.get(cur_severity, ACCENT_HI)
-            tk.Label(big, text=f"{cur_value:.2f}",
-                     bg=PANEL, fg=value_color,
-                     font=("Consolas", 22, "bold")
+        if not bands:
+            return
+        tk.Label(self._inspector_cards, text=tr("inspector.clinical"),
+                 bg=PANEL, fg=ACCENT, font=FONT_UI_B
+                 ).pack(anchor="w", pady=(8, 4))
+        for lo, hi, label, sev in bands:
+            row = tk.Frame(self._inspector_cards, bg=PANEL)
+            row.pack(fill="x", pady=1)
+            if lo <= -1e8:
+                rng = f"< {hi:g}"
+            elif hi >= 1e8:
+                rng = f"≥ {lo:g}"
+            else:
+                rng = f"{lo:g} – {hi:g}"
+            tk.Label(row, text=rng, bg=PANEL, fg=TEXT,
+                     font=FONT_MONO, width=12, anchor="w"
                      ).pack(side="left")
-            if unit:
-                tk.Label(big, text=f"  {unit}", bg=PANEL, fg=MUTED,
-                         font=FONT_UI).pack(side="left", padx=(4, 0), pady=(8, 0))
+            tk.Label(row, text=label, bg=PANEL,
+                     fg=sev_color.get(sev, TEXT), font=FONT_UI,
+                     anchor="w", justify="left", wraplength=200
+                     ).pack(side="left", fill="x", expand=True)
+
+    def _update_inspector_value(self, midi: float | None, spl: float | None):
+        """Cheap update of the current-value pill from the cell at
+        (midi, spl). Called from the matplotlib motion handler at high
+        rate, so it just .configure()s existing widgets — no destroy
+        / recreate. Pass (None, None) to clear."""
+        if not hasattr(self, "_inspector_value_num"):
+            return
+
+        sev_color = {"good": OK, "normal": TEXT, "watch": WARN, "abnormal": ERR}
+        sev_label = {"good": "✓", "normal": "·", "watch": "!", "abnormal": "✗"}
+
+        # Clear path
+        if midi is None or spl is None:
+            self._inspector_value_coords.configure(text="—")
+            self._inspector_value_num.configure(text="—", fg=ACCENT_HI)
+            self._inspector_value_unit.configure(text="")
+            self._inspector_value_sev.configure(text="")
+            return
+
+        name = self.metric_var.get()
+        if not name or self._last_df is None or name not in self._last_df.columns:
+            self._inspector_value_coords.configure(text="—")
+            self._inspector_value_num.configure(text="—", fg=ACCENT_HI)
+            self._inspector_value_sev.configure(text="")
+            return
+
+        # Find nearest cell in _last_df (rows are unique (MIDI, dB) pairs).
+        try:
+            df = self._last_df
+            mi = int(round(midi))
+            si = int(round(spl))
+            row = df[(df["MIDI"] == mi) & (df["dB"] == si)]
+            if row.empty:
+                self._inspector_value_coords.configure(
+                    text=f"MIDI {mi} · SPL {si} dB · — ")
+                self._inspector_value_num.configure(text="—", fg=ACCENT_HI)
+                self._inspector_value_sev.configure(text="")
+                return
+            value = float(row[name].iloc[0])
+        except Exception:
+            return
+
+        # Severity lookup
+        try:
+            from voicemap.report import _THRESHOLDS
+            bands = _THRESHOLDS.get(name)
+        except Exception:
+            bands = None
+        sev = None
+        if bands:
+            for lo, hi, _label, s in bands:
+                if lo <= value < hi:
+                    sev = s
+                    break
+        try:
+            from voicemap.metrics_registry import get as get_spec
+            spec = get_spec(name)
+            unit = (spec.unit if spec else "") or ""
+        except Exception:
+            unit = ""
+
+        color = sev_color.get(sev, ACCENT_HI)
+        self._inspector_value_coords.configure(
+            text=f"MIDI {mi}  ·  SPL {si} dB")
+        self._inspector_value_num.configure(text=f"{value:.2f}", fg=color)
+        self._inspector_value_unit.configure(text=unit)
+        if sev is not None:
+            self._inspector_value_sev.configure(
+                text=f"{sev_label[sev]}  {sev}", fg=color)
+        else:
+            self._inspector_value_sev.configure(text="")
 
     def _popup_metric_menu(self):
         """点 metric 按钮 → 弹下拉菜单。
