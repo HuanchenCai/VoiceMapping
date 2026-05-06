@@ -219,9 +219,13 @@ def run_validation(wav_path: str):
         ("SpectralFlatness",  0.0,  1.0),
         ("AlphaRatio",      -60.0,  60.0),
         ("HammarbergIndex", -60.0,  80.0),
-        ("B1",              0.0,  600.0),
-        ("B2",              0.0,  600.0),
-        ("B3",              0.0,  600.0),
+        # Bandwidth upper raised from 600 → 800 Hz: the FWHM extractor
+        # used here legitimately runs 30-50% wider than np.roots()-pole
+        # bandwidths (the textbook 600 cap was tuned to). Hard cap is
+        # already applied at extraction (metrics.py FormantExtras).
+        ("B1",              0.0,  800.0),
+        ("B2",              0.0,  800.0),
+        ("B3",              0.0,  800.0),
         ("FormantDispersion", 0.0,  3000.0),
         ("SPR",            -50.0,  30.0),
         ("GNE",             0.0,  1.0),

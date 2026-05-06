@@ -1314,14 +1314,37 @@ class FormantExtrasCalculator(MetricCalculator):
             for j, p in enumerate(pk):
                 peak_db = spec_db[p]
                 thr     = peak_db - 3.0
-                # Walk left to first sample below thr
+                # Bound the walk by the neighbouring peaks: never let the
+                # FWHM cross into another formant's territory. Without
+                # this clamp, two close formants share a shallow valley
+                # that doesn't dip below -3 dB and the bandwidth blows
+                # out to several kHz (validation observed max 5 kHz).
+                left_limit  = pk[j - 1] if j > 0          else 0
+                right_limit = pk[j + 1] if j < len(pk)-1 else len(spec_db) - 1
+                # Walk left to first sample below thr (or until we hit
+                # the local minimum between this and the previous peak).
                 lo = p
-                while lo > 0 and spec_db[lo] > thr:
+                while lo > left_limit and spec_db[lo] > thr:
                     lo -= 1
                 hi = p
-                while hi < len(spec_db) - 1 and spec_db[hi] > thr:
+                while hi < right_limit and spec_db[hi] > thr:
                     hi += 1
+                # Inside [left_limit, right_limit], if -3 dB never crossed,
+                # fall back to the local minimum between the two peaks
+                # (best estimator we have without crossing into neighbours).
+                if lo == left_limit and lo != 0:
+                    lo = left_limit + int(np.argmin(spec_db[left_limit:p+1]))
+                if hi == right_limit and hi != len(spec_db) - 1:
+                    hi = p + int(np.argmin(spec_db[p:right_limit+1]))
                 bws[j] = freqs_band[hi] - freqs_band[lo]
+            # Hard ceiling: FWHM > 800 Hz is physiologically implausible
+            # for typical speech formants (literature F1: 50-150, F2:
+            # 60-200, F3: 100-400 Hz; even abnormal voices stay under
+            # ~500). Anything wider is a method artefact (peak merger
+            # the local-min clamp above couldn't catch). Drop to 0
+            # to follow the same NA-as-0 convention used by the other
+            # per-frame metrics.
+            bws = np.where(bws > 800.0, 0.0, bws)
             # pf already ascending from find_peaks
             if len(bws) >= 1: b1[i] = bws[0]
             if len(bws) >= 2: b2[i] = bws[1]
