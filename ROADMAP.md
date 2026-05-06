@@ -62,19 +62,24 @@ M3-M7 这些研究/科研增强项**全部推到拿证后**做。
 - `pip install -e .`：成功，`import voicemap; voicemap.__version__` 可读 ✓
 - GUI 启动 + palette 切换可见：amber 强调色 + 深灰底
 
-#### A0-4 中英双语 + i18n 框架（关键）
+#### A0-4 中英双语 + i18n 框架 + option-C 布局重排
 
-- [ ] 新增 `voicemap/i18n.py`：极简 dict-based 翻译表（不用 gettext，避免 .mo 编译麻烦）
-  - 结构：`STRINGS = {"zh": {...}, "en": {...}}`
-  - API：`tr("key")` 根据当前语言返回字符串
-- [ ] 新增 `LanguageVar` 全局 StringVar，绑定到所有 UI 文字
-- [ ] 菜单：`帮助/Help → 语言/Language → 中文/English` 切换
-- [ ] 切换后立即生效（widget textvariable + 重建菜单），不需重启
-- [ ] 持久化：当前语言写到 `~/.voicemap/config.json`，下次启动恢复
-- [ ] 全 UI 字符串扫描入表（顶栏菜单、按钮、状态、log 关键提示、错误对话框、报告标题）
-- [ ] **专业术语保留括号英文**："聚类中心 (Centroid)"、"清晰度 (Clarity)"、"指标 (Metric)"
+- [x] **`voicemap/i18n.py`** dict-based 翻译表（160+ 键 zh/en 对称），`tr(key, **kw)` API + `set_language` + `subscribe` + `~/.voicemap/config.json` 持久化
+- [x] **顶部菜单 帮助/Help → 语言/Language → 中文/English** 一键切换
+- [x] **运行时即时切换**：menubar 整体重建、popup 工厂在每次点开时重读 `tr()`、persistent widgets 通过 `_safe_text` 助手批量更新
+- [x] **全 UI 字符串入表**：顶部菜单、Tracks 标题、Metric Bar、Inspector（详情/单位/临床/当前值/三个 action 按钮）、Status Bar、4 个 Dialog（Settings/Compare/Progress/About）、25+ 条 log 消息、filedialog 标题
+- [x] **option-C 布局重排**（commits 42bd9da → 3c5360b）：
+  - 菜单栏 → 1px 分隔线 → Header (PANEL 同色，无黑纹) → Tracks Panel → Metric Bar → 主区(Canvas + Inspector 360px) → Status Bar
+  - **Inspector**：metric 大字 + 描述 + 单位（独立行）+ 临床范围卡（滚动）+ Current value 卡（pinned，永久可见）+ 3 个 action 按钮（pinned）
+  - **Hover 探测**：鼠标在画布任意 cell → Inspector 当前值实时更新（含 MIDI/SPL/数值/严重度色）
+  - **多文件 Tracks Panel**：TrackEntry dataclass + 行格式（编号 + 状态符号 + 文件名 + 元数据 + Unicode block 波形）+ 点击切换 active + 已分析自动缓存
+  - **日志移出**：从 Inspector 拆出，View → 日志面板独立 Toplevel
+  - **窗口最小尺寸**：1280×800 默认 / 1200×720 minsize
+  - **字体 token 化**：FONT_CAPTION/SMALL/UI/UI_B/SUB/DROP/H2/TITLE/DISPLAY/MONO/MONO_B 9 级，硬编码字体全清
+- [x] **专业术语保留括号英文**："聚类中心 (Centroid)" 等
 
-**验证**：启动后切英 → 全 UI 立即英文；切回中 → 立即中文；重启后保留上次选择。
+**验证**：启动后切英 → 全 UI 立即英文；切回中 → 立即中文；重启后保留上次选择 ✓
+`validate_params.py`：48 PASS / 4 WARN / 0 FAIL
 
 #### A0-5 打包 + 用户文档
 
