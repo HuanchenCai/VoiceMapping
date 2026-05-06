@@ -89,7 +89,7 @@ M3-M7 这些研究/科研增强项**全部推到拿证后**做。
   - excludes 砍掉 PyQt / pytest / parselmouth / Jupyter 减体积
   - **构建命令**：`build_exe.bat` 双击，输出 `dist/VoiceMap/VoiceMap.exe`
   - **未实际跑过构建**：等本机首次执行时验证；spec 是契约
-- [ ] Inno Setup 脚本 → `VoiceMap_v1.0.0_setup.exe`（依赖 PyInstaller 产物）
+- [x] Inno Setup 脚本 → `VoiceMap_v1.0.0_setup.exe`（commit 4ee54f3）
 - [x] **`docs/用户手册.md`**（commit ef3002d，~360 行 markdown）
   - 软件概述 / 系统要求 / 启动方式
   - 5 区域 UI tour（菜单栏 / 标题 / Tracks / Metric Bar / 主区 / Status Bar / Inspector）
@@ -105,14 +105,27 @@ M3-M7 这些研究/科研增强项**全部推到拿证后**做。
 
 **验证**：`dist/VoiceMap.exe` 在干净 Windows 上能启动、能跑分析、能切语言（首次构建后跑）。
 
-#### A0-完成判据
+#### A0-完成判据 / 当前状态
 
-- 所有 5 步打勾
-- `validate_params.py`：48 PASS / 0 FAIL
-- 中英文 UI 截图各一组
-- 一个能跑的 `VoiceMap.exe`
-- 用户手册 + 设计说明书定稿
-- git tag `v1.0.0`
+| 判据 | 状态 |
+|------|------|
+| A0-1 架构重排 + rename | ✅ commit 10e921e |
+| A0-2 god 类拆分 | ✅ commit 56172ad |
+| A0-3 工程化 + 软著元数据 | ✅ commit 4f1188e + 后续 |
+| A0-4 中英双语 + option-C 布局 | ✅ commit ec11ddb（5 个 wave 累计） |
+| A0-5 打包 + 用户文档 | 🟡 文档定稿 / spec 写好；exe 实际构建 + 截图待跑 |
+| `validate_params.py` 全绿 | ✅ 48 PASS / 4 WARN / 0 FAIL（贯穿） |
+| 中英文 UI 截图各一组 | 🟡 待人工跑 GUI 截屏 |
+| 一个能跑的 `VoiceMap.exe` | 🟡 双击 `build_exe.bat` 即可 |
+| 用户手册 + 设计说明书定稿 | ✅ commit ef3002d |
+| git tag `v1.0.0` | 🟡 上述都验证后打 |
+
+剩下三件需要人工 session：
+1. 跑一次 `build_exe.bat` 验证 PyInstaller spec
+2. 跑一次 `ISCC.exe installer.iss` 验证 Inno Setup
+3. 截 8-10 张 v1.0.0 截图（中英文各一组）
+
+完成后即可打 `v1.0.0` tag 然后进 A1（软著申请材料包）。
 
 ---
 
