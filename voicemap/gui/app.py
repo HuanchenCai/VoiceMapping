@@ -68,8 +68,11 @@ class VoiceMapApp(_TkBase):
         # Subscribe to i18n language changes so the title + menubar
         # rebuild when the user switches language at runtime.
         i18n_subscribe(self._on_language_changed)
-        self.geometry("1200x720")
-        self.minsize(1000, 600)
+        # Default 1280×800 gives the option-C layout enough room for both
+        # canvas and Inspector. Min 1200×720 is the floor; below that the
+        # Inspector starts to overflow (mitigated by the inner scrollbar).
+        self.geometry("1280x800")
+        self.minsize(1200, 720)
         self.configure(bg=BG)
 
         self.output_dir_var = tk.StringVar(value=str(_HERE / DEFAULT_CONFIG.output_dir))
@@ -733,17 +736,59 @@ class VoiceMapApp(_TkBase):
         self.metric_var.trace_add("write", self._on_metric_change)
 
     def _build_inspector(self, parent):
-        """Inspector: 右侧 360 px 固定栏，显示当前 metric 的详情、临床范围、
-        本次值。底部嵌一个紧凑的日志区（替代左 panel 的日志）。
-        A0-4 wave 3 先放占位；wave 3b 会接 _THRESHOLDS 自动算 clinical band。"""
-        pad = tk.Frame(parent, bg=PANEL)
-        pad.pack(fill="both", expand=True, padx=14, pady=14)
+        """Inspector right column. Top half scrolls (metric name +
+        description + clinical bands + current value pill); bottom half
+        is a fixed-height log panel with its own internal scrollbar.
+        A divider 1 px line separates the two halves visually."""
+        # ── Top half: scrollable area (sized via expand) ─────────────
+        upper = tk.Frame(parent, bg=PANEL)
+        upper.pack(side="top", fill="both", expand=True)
 
-        # Title
+        # tk.Canvas is the only built-in scrollable container in
+        # tkinter. We park a real Frame inside it and update the
+        # scrollregion whenever the inner Frame's size changes.
+        scroll_canvas = tk.Canvas(upper, bg=PANEL, highlightthickness=0,
+                                   borderwidth=0)
+        scroll_canvas.pack(side="left", fill="both", expand=True,
+                           padx=(14, 0), pady=14)
+        sb_inspector = ttk.Scrollbar(upper, orient="vertical",
+                                      command=scroll_canvas.yview)
+        sb_inspector.pack(side="right", fill="y", pady=14)
+        scroll_canvas.configure(yscrollcommand=sb_inspector.set)
+        self._inspector_scroll = scroll_canvas
+
+        pad = tk.Frame(scroll_canvas, bg=PANEL)
+        pad_window = scroll_canvas.create_window(
+            (0, 0), window=pad, anchor="nw")
+        # Make the inner pad take the full canvas width (so wrap labels
+        # know how wide they can grow).
+        def _resize_pad(_event):
+            scroll_canvas.itemconfigure(
+                pad_window, width=scroll_canvas.winfo_width())
+        scroll_canvas.bind("<Configure>", _resize_pad)
+        pad.bind("<Configure>",
+                 lambda _e: scroll_canvas.configure(
+                     scrollregion=scroll_canvas.bbox("all")))
+        # Mouse wheel inside the Inspector → scroll the canvas
+        def _on_wheel(event):
+            if hasattr(event, "delta") and event.delta:
+                scroll_canvas.yview_scroll(-int(event.delta / 120), "units")
+            elif getattr(event, "num", 0) == 4:
+                scroll_canvas.yview_scroll(-1, "units")
+            elif getattr(event, "num", 0) == 5:
+                scroll_canvas.yview_scroll(1, "units")
+            return "break"
+        # Bind on the canvas + the inner frame so wheel works regardless
+        # of which child the cursor is over.
+        for w in (scroll_canvas, pad):
+            w.bind("<MouseWheel>", _on_wheel)
+            w.bind("<Button-4>",   _on_wheel)
+            w.bind("<Button-5>",   _on_wheel)
+
+        # ── Inspector content (lives inside scrollable pad) ───────────
         tk.Label(pad, text=tr("inspector.title"), bg=PANEL, fg=MUTED,
                  font=FONT_UI_B).pack(anchor="w")
 
-        # Current metric — large name + description
         self._inspector_metric_name = tk.Label(
             pad, text="—",
             bg=PANEL, fg=ACCENT,
@@ -754,31 +799,24 @@ class VoiceMapApp(_TkBase):
         self._inspector_metric_desc = tk.Label(
             pad, text=tr("inspector.no_metric"),
             bg=PANEL, fg=MUTED, font=FONT_UI,
-            wraplength=320, justify="left", anchor="w")
-        self._inspector_metric_desc.pack(anchor="w", pady=(2, 8))
+            wraplength=300, justify="left", anchor="w")
+        self._inspector_metric_desc.pack(anchor="w", pady=(2, 8), fill="x")
 
-        # Static-on-metric-change card area: clinical threshold rows.
-        # _update_inspector clears + rebuilds these only on metric switch.
+        # Clinical bands (rebuilt on metric switch)
         self._inspector_cards = tk.Frame(pad, bg=PANEL)
         self._inspector_cards.pack(fill="x", pady=(0, 8))
 
-        # Dynamic-on-mouse-hover card: current value at the cell the
-        # cursor is over. Built once here, updated cheaply via
-        # _update_inspector_value() — no widget destroy/create per
-        # mouse-motion event.
+        # Current-value pill (built once, updated per hover)
         self._inspector_value_card = tk.Frame(pad, bg=PANEL)
         self._inspector_value_card.pack(fill="x", pady=(8, 0))
         self._inspector_value_header = tk.Label(
             self._inspector_value_card, text=tr("inspector.current"),
             bg=PANEL, fg=ACCENT, font=FONT_UI_B)
         self._inspector_value_header.pack(anchor="w", pady=(0, 4))
-        # Coords pill: shows "MIDI ?? · SPL ?? dB" so user knows where
-        # the value comes from.
         self._inspector_value_coords = tk.Label(
             self._inspector_value_card, text="—",
             bg=PANEL, fg=MUTED, font=FONT_UI)
         self._inspector_value_coords.pack(anchor="w")
-        # Big value + unit + severity tag in a horizontal row.
         big = tk.Frame(self._inspector_value_card, bg=PANEL)
         big.pack(anchor="w", pady=(2, 0))
         self._inspector_value_num = tk.Label(
@@ -793,22 +831,27 @@ class VoiceMapApp(_TkBase):
         self._inspector_value_sev = tk.Label(
             self._inspector_value_card, text="",
             bg=PANEL, fg=MUTED, font=FONT_UI_B)
-        self._inspector_value_sev.pack(anchor="w", pady=(2, 0))
+        self._inspector_value_sev.pack(anchor="w", pady=(2, 8))
 
-        # Compact log at bottom of Inspector. Title + Text widget; uses
-        # less vertical space than the old left-panel log.
-        self._log_lbl = tk.Label(pad, text=tr("left.log"),
+        # ── Divider line between scrollable upper half + fixed log ──
+        sep = tk.Frame(parent, bg=BORDER, height=1)
+        sep.pack(side="top", fill="x", padx=8)
+
+        # ── Bottom half: fixed-height log ────────────────────────────
+        log_outer = tk.Frame(parent, bg=PANEL, height=180)
+        log_outer.pack(side="bottom", fill="x", padx=14, pady=(8, 14))
+        log_outer.pack_propagate(False)
+        self._log_lbl = tk.Label(log_outer, text=tr("left.log"),
                                   bg=PANEL, fg=ACCENT, font=FONT_UI_B)
-        self._log_lbl.pack(anchor="w", pady=(8, 4))
-
-        log_wrap = tk.Frame(pad, bg=PANEL)
+        self._log_lbl.pack(anchor="w", pady=(0, 4))
+        log_wrap = tk.Frame(log_outer, bg=PANEL)
         log_wrap.pack(fill="both", expand=True)
         self.log_text = tk.Text(log_wrap, bg="#0b1117", fg=TEXT, font=FONT_MONO,
                                 bd=0, highlightthickness=1, highlightbackground=BORDER,
                                 highlightcolor=BORDER,
                                 insertbackground=TEXT, wrap="word",
                                 padx=8, pady=6, state="disabled",
-                                height=8, width=20)
+                                height=6, width=20)
         self.log_text.pack(side="left", fill="both", expand=True)
         sb = ttk.Scrollbar(log_wrap, command=self.log_text.yview)
         sb.pack(side="right", fill="y")
