@@ -1261,32 +1261,41 @@ class FonaDynApp(_TkBase):
     # ── 占位画面 ──
     def _show_placeholder(self, msg: str = "拖入 .wav 文件开始"):
         """
-        用 figure 级坐标渲染，不依赖 axes 状态。绘制前同步 figure 尺寸到
-        widget 物理尺寸，保证所有 figure 坐标（0-1）对应到真实画面中心。
+        占位画面跟分析完成后的 voice map 用同一套布局：白底、同样的
+        subplots_adjust 边距、MIDI/SPL 轴范围一致。这样从"未分析"
+        切到"已分析"画面尺寸/坐标系不会跳，用户体验上是平滑过渡。
         """
-        from matplotlib.patches import FancyBboxPatch
         self._showing_placeholder = True
         self._sync_fig_to_widget()
         self._fig.clear()
-        self._fig.patch.set_facecolor(PANEL)
-
-        # 圆角虚线框（figure 坐标）
-        self._fig.patches.append(FancyBboxPatch(
-            (0.18, 0.22), 0.64, 0.56,
-            boxstyle="round,pad=0.01,rounding_size=0.03",
-            linewidth=1.2, linestyle=(0, (6, 4)),
-            edgecolor=BORDER, facecolor="none",
-            transform=self._fig.transFigure))
-
-        # 图标 + 标题 + 副标题（figure 坐标，不经 axes）
-        self._fig.text(0.5, 0.62, "♪", ha="center", va="center",
-                       color=ACCENT, fontsize=54, weight="bold", alpha=0.85)
-        self._fig.text(0.5, 0.45, msg, ha="center", va="center",
-                       color=TEXT, fontsize=17, weight="bold")
-        self._fig.text(0.5, 0.35,
-                       "Stereo WAV  ·  Ch 1 = Microphone  ·  Ch 2 = EGG",
-                       ha="center", va="center",
-                       color=MUTED, fontsize=10)
+        # 与 _render_metric 一致的白底 + 边距
+        self._fig.patch.set_facecolor("white")
+        self._fig.subplots_adjust(left=0.13, right=0.90, top=0.90, bottom=0.16)
+        ax = self._fig.add_subplot(111)
+        ax.set_facecolor("white")
+        ax.set_xlim(DEFAULT_CONFIG.n_min_midi, DEFAULT_CONFIG.n_max_midi)
+        ax.set_ylim(DEFAULT_CONFIG.n_min_spl, DEFAULT_CONFIG.n_max_spl)
+        ax.set_xlabel("MIDI")
+        ax.set_ylabel("SPL (dB)")
+        # 浅灰网格，让画面有"准备好接收数据"的感觉
+        ax.grid(True, which="both", color="#e0e0e0", linewidth=0.7, zorder=1)
+        ax.set_axisbelow(True)
+        for spine in ax.spines.values():
+            spine.set_color("#cccccc")
+            spine.set_linewidth(0.8)
+        ax.tick_params(colors="#888888", labelsize=9)
+        # 居中提示文字（axes 坐标）
+        ax.text(0.5, 0.55, "♪", transform=ax.transAxes,
+                ha="center", va="center",
+                color=ACCENT, fontsize=44, weight="bold", alpha=0.55)
+        ax.text(0.5, 0.40, msg, transform=ax.transAxes,
+                ha="center", va="center",
+                color="#444444", fontsize=15, weight="bold")
+        ax.text(0.5, 0.32,
+                "Stereo WAV  ·  Ch 1 = Microphone  ·  Ch 2 = EGG",
+                transform=ax.transAxes,
+                ha="center", va="center",
+                color="#888888", fontsize=9)
 
         self._canvas.draw_idle()
 
