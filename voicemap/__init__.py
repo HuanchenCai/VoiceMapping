@@ -1,30 +1,34 @@
-#!/usr/bin/env python3
-"""
-VoiceMap Python Package
-Voice Range Profile Analysis Tool
+# -*- coding: utf-8 -*-
+"""VoiceMap — 嗓音声学品质多维分析图谱 / Voice Range Profile Analyzer.
+
+The package re-exports only the high-level facade. Calculator classes
+and helper functions are intentionally NOT re-exported — import them
+from their submodules (``voicemap.metrics``, ``voicemap.plotter`` …)
+to keep this surface small and stable.
 """
 
-__version__ = "1.0.0"
-__author__ = "VoiceMap Python Implementation"
-__email__ = "contact@voicemap.org"
-
-from .analyzer import VoiceMapAnalyzer
-from .config import VoiceMapConfig, DEFAULT_CONFIG
-from .metrics import (
-    SPLCalculator, ClarityCalculator, CPPCalculator, SpecBalCalculator,
-    CrestCalculator, QcontactCalculator, EntropyCalculator, HRFCalculator
+from voicemap.__version__ import (
+    __version__,
+    __title_zh__,
+    __title_en__,
+    __author__,
+    __email__,
+    __license__,
+    __copyright__,
 )
 
+from voicemap.config import VoiceMapConfig, DEFAULT_CONFIG
+from voicemap.analyzer import VoiceMapAnalyzer
+
 __all__ = [
+    "__version__",
+    "__title_zh__",
+    "__title_en__",
+    "__author__",
+    "__email__",
+    "__license__",
+    "__copyright__",
     "VoiceMapAnalyzer",
-    "VoiceMapConfig", 
+    "VoiceMapConfig",
     "DEFAULT_CONFIG",
-    "SPLCalculator",
-    "ClarityCalculator", 
-    "CPPCalculator",
-    "SpecBalCalculator",
-    "CrestCalculator",
-    "QcontactCalculator",
-    "EntropyCalculator",
-    "HRFCalculator"
 ]

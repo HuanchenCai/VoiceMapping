@@ -1,8 +1,11 @@
-# Voice Mapping
+# VoiceMap
 
-Python Voice Range Profile (VRP) analyzer — a ground-up port of the FonaDyn
-SuperCollider tools with a modern tkinter GUI, full CLI parity, and 40+
-voice-quality metrics aggregated onto the (MIDI, SPL) grid.
+中文名：嗓音声学品质多维分析图谱
+
+Python Voice Range Profile (VRP) analyzer — a ground-up reimplementation of
+the FonaDyn SuperCollider analysis algorithms (KTH) wrapped in a modern
+tkinter GUI, with full CLI parity and 40+ voice-quality metrics aggregated
+onto the (MIDI, SPL) grid.
 
 Stereo WAV in → per-cell CSV out. Every cell is a (pitch, loudness) bin;
 each column is one voice-science descriptor computed per glottal cycle

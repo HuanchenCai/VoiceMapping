@@ -11,7 +11,7 @@ from scipy.fft import rfft, irfft, ifft as _ifft
 from typing import Tuple, Dict, Optional
 import logging
 
-from config import VoiceMapConfig
+from voicemap.config import VoiceMapConfig
 
 logger = logging.getLogger(__name__)
 

@@ -15,10 +15,10 @@ from datetime import datetime
 from typing import Dict, Optional, Tuple
 import logging
 
-from config import VoiceMapConfig, DEFAULT_CONFIG
-from logger import setup_logger, get_logger
-from plotter import plot_vrp_dataframe, plot_vrp_combined
-from metrics import (
+from voicemap.config import VoiceMapConfig, DEFAULT_CONFIG
+from voicemap.logger import setup_logger, get_logger
+from voicemap.plotter import plot_vrp_dataframe, plot_vrp_combined
+from voicemap.metrics import (
     SPLCalculator, ClarityCalculator, CPPCalculator, SpecBalCalculator,
     CrestCalculator, QcontactCalculator, EntropyCalculator, HRFCalculator,
     ClusterCalculator, PhonClusterCalculator,
@@ -181,8 +181,11 @@ class VoiceMapAnalyzer:
     # ------------------------------------------------------------------
     # Centroid I/O (EGG-shape clusters).
     # Format: semicolon-delimited CSV. Header row:
-    #   "# FonaDyn cluster centroids  k=<k>  n_harm=<n>  dim=<3n>"
+    #   "# VoiceMap cluster centroids  k=<k>  n_harm=<n>  dim=<3n>"
     # Then one row per centroid: cluster_id;feat_0;feat_1;...;feat_{dim-1}
+    # NOTE: load_centroids() is permissive on the comment line (only parses
+    # n_harm=N), so legacy files with "# FonaDyn cluster centroids" header
+    # still load fine.
     # ------------------------------------------------------------------
     def save_centroids(self, path: str) -> None:
         cent = self.cluster_calculator.centroids_
@@ -192,7 +195,7 @@ class VoiceMapAnalyzer:
         dim = cent.shape[1]
         k = cent.shape[0]
         with open(path, "w", encoding="utf-8") as f:
-            f.write(f"# FonaDyn cluster centroids  k={k}  n_harm={n_harm}  dim={dim}\n")
+            f.write(f"# VoiceMap cluster centroids  k={k}  n_harm={n_harm}  dim={dim}\n")
             f.write("cluster;" + ";".join(f"f{i}" for i in range(dim)) + "\n")
             for i in range(k):
                 row = [str(i + 1)] + [f"{v:.6g}" for v in cent[i]]
@@ -246,7 +249,7 @@ class VoiceMapAnalyzer:
         Returns the trained (k, 3·n_harm) centroid matrix.
         """
         from sklearn.cluster import KMeans
-        from metrics import _compute_cycle_dft
+        from voicemap.metrics import _compute_cycle_dft
 
         wavs = list(wav_paths)
         if not wavs:
@@ -454,7 +457,7 @@ class VoiceMapAnalyzer:
         _idx   = np.where(cycle_triggers > 0.5)[0]
         _dft   = None
         if len(_idx) >= 2:
-            from metrics import _compute_cycle_dft
+            from voicemap.metrics import _compute_cycle_dft
             _dft = _compute_cycle_dft(egg_signal, _idx, _dft_n)
 
         _step(5)   # "SPL / Clarity / CPP"

@@ -18,14 +18,19 @@ M3-M7 这些研究/科研增强项**全部推到拿证后**做。
 
 #### A0-1 架构重排 + 全局 rename
 
-- [ ] 项目目录 `FonaDyn.py/` → `VoiceMap/`
-- [ ] 包目录 `src/` → `voicemap/`
-- [ ] 入口拆分：`gui.py` / `main.py` 移到 `voicemap/` 内，根目录 `main.py` 缩成 entry point shim
-- [ ] 23 处 `FonaDyn` 字面量全部改 `VoiceMap`（包括类名 `FonaDynApp` → `VoiceMapApp`、log prefix、窗口标题、CSV header、目录名）
-- [ ] 新增 `voicemap/__version__.py`（版本单一来源）
-- [ ] 整理 `voicemap/__init__.py`（要么全部 export 要么干脆不 re-export）
+- [ ] 项目目录 `FonaDyn.py/` → `VoiceMap/`（**OS 层 rename，需要用户在关闭所有终端后手动改名**）
+- [x] 包目录 `src/` → `voicemap/`（commit db8aceb）
+- [x] 入口拆分：`gui.py` → `voicemap/gui.py`、`main.py` → `voicemap/cli.py`、根目录新增薄壳 `main.py`
+- [x] FonaDyn 字面量全部改 VoiceMap（软件名占用全部清理；剩余 FonaDyn 全是上游 KTH 项目引用，保留）
+- [x] 类名 `FonaDynApp` → `VoiceMapApp`
+- [x] CSV header `# FonaDyn cluster centroids` → `# VoiceMap cluster centroids`（loader 兼容旧格式）
+- [x] 窗口标题 `Voice Mapping` → `嗓音声学品质多维分析图谱`
+- [x] 新增 `voicemap/__version__.py`（版本/作者/版权单一来源）
+- [x] 整理 `voicemap/__init__.py`（只 re-export 高层 facade：`VoiceMapAnalyzer` / `VoiceMapConfig` / `__version__` 等元数据；不再 re-export 单个 calculator）
+- [x] 内部 sibling import (`from config import`) 全改成绝对包路径 (`from voicemap.config import`)
+- [x] `tests/validate_params.py` 适配新结构
 
-**验证**：`validate_params.py` 仍 48 PASS / 0 FAIL；`main.py --gui` 能起；`main.py audio/test_Voice_EGG.wav` CLI 能跑。
+**验证**：`validate_params.py` 仍 48 PASS / 0 FAIL ✓；`main.py --gui` 能起 ✓；`main.py audio/test_Voice_EGG.wav` CLI 能跑 ✓。
 
 #### A0-2 god 类拆分
 

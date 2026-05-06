@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""FonaDyn — 极简两栏 GUI：拖入 .wav → 自动分析 → 右侧嵌入 voice map，下拉切换 metric。"""
+"""VoiceMap — 极简两栏 GUI：拖入 .wav → 自动分析 → 右侧嵌入 voice map，下拉切换 metric。"""
 
 import os
 import sys
@@ -29,11 +29,10 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 _HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(_HERE / "voicemap"))
 
-from config import DEFAULT_CONFIG, VoiceMapConfig  # noqa: E402
-from logger import setup_logger                     # noqa: E402
-from plotter import draw_vrp_on_ax, METRIC_CFG, _SKIP_ZERO_METRICS  # noqa: E402
+from voicemap.config import DEFAULT_CONFIG, VoiceMapConfig
+from voicemap.logger import setup_logger
+from voicemap.plotter import draw_vrp_on_ax, METRIC_CFG, _SKIP_ZERO_METRICS
 
 # 可选的原生拖拽
 try:
@@ -115,7 +114,7 @@ class MetricPopup(tk.Toplevel):
       - Esc / focus-out to dismiss
     """
 
-    def __init__(self, app: "FonaDynApp", sections, current=None, on_select=None):
+    def __init__(self, app: "VoiceMapApp", sections, current=None, on_select=None):
         super().__init__(app)
         self.app = app
         self.on_select = on_select or (lambda _k: None)
@@ -344,7 +343,7 @@ class SettingsDialog(tk.Toplevel):
     """所有分析/输出相关的可配置项都在这里。现在只有 Clarity 阈值和输出目录，
     随着新 metric（clustering / jitter / formants 等）加进来会继续扩展。"""
 
-    def __init__(self, app: "FonaDynApp"):
+    def __init__(self, app: "VoiceMapApp"):
         super().__init__(app)
         self.app = app
         self.transient(app)
@@ -442,7 +441,7 @@ class SettingsDialog(tk.Toplevel):
 class CompareDialog(tk.Toplevel):
     """Load two VRP CSVs, pick a metric, see A | B | A-B."""
 
-    def __init__(self, app: "FonaDynApp"):
+    def __init__(self, app: "VoiceMapApp"):
         super().__init__(app)
         self.app = app
         self.transient(app)
@@ -532,7 +531,7 @@ class CompareDialog(tk.Toplevel):
         if self._df_a is None or self._df_b is None:
             self._show_msg("还没加载两个 CSV")
             return
-        from plotter import draw_vrp_comparison
+        from voicemap.plotter import draw_vrp_comparison
         ok = draw_vrp_comparison(
             self._df_a, self._df_b, self.metric.get(), self._fig,
             label_a=Path(self.csv_a.get()).stem,
@@ -655,11 +654,12 @@ class QueueHandler(logging.Handler):
 
 
 # ─── 主应用 ──────────────────────────────────────────────────────────────────
-class FonaDynApp(_TkBase):
+class VoiceMapApp(_TkBase):
     def __init__(self):
         super().__init__()
         dnd_hint = "" if _DND_OK else "（未安装 tkinterdnd2，拖放已降级为点击）"
-        self.title(f"Voice Mapping {dnd_hint}".strip())
+        # 默认中文软件名；i18n 上线（A0-4）后会按当前语言切换
+        self.title(f"嗓音声学品质多维分析图谱 {dnd_hint}".strip())
         self.geometry("1200x720")
         self.minsize(1000, 600)
         self.configure(bg=BG)
@@ -919,7 +919,7 @@ class FonaDynApp(_TkBase):
     def _build_header(self, parent):
         head = tk.Frame(parent, bg=BG)
         head.pack(fill="x", pady=(0, 8))
-        tk.Label(head, text="Voice Mapping",
+        tk.Label(head, text="嗓音声学品质多维分析图谱",
                  bg=BG, fg=TEXT, font=FONT_TITLE).pack(side="left")
         self.status_dot = tk.Label(head, text="●", bg=BG, fg=MUTED, font=("Segoe UI", 12))
         self.status_dot.pack(side="right", padx=(0, 4))
@@ -1099,7 +1099,7 @@ class FonaDynApp(_TkBase):
             b.state(["disabled"])
 
         # Overlay state
-        from plot_overlay import OverlayManager
+        from voicemap.plot_overlay import OverlayManager
         self._overlay_mgr = OverlayManager()
         self._annot_mode_on = False
         self._annot_canvas_cid = None    # mpl_connect id for click capture
@@ -1375,7 +1375,7 @@ class FonaDynApp(_TkBase):
 
         def work():
             try:
-                from analyzer import VoiceMapAnalyzer
+                from voicemap.analyzer import VoiceMapAnalyzer
                 analyzer = VoiceMapAnalyzer(cfg)
                 # Apply user-chosen cluster params
                 analyzer.cluster_calculator.n_clusters  = k_snap
@@ -1727,8 +1727,8 @@ class FonaDynApp(_TkBase):
 
         def work():
             try:
-                from analyzer import VoiceMapAnalyzer
-                from config import VoiceMapConfig
+                from voicemap.analyzer import VoiceMapAnalyzer
+                from voicemap.config import VoiceMapConfig
                 cfg = VoiceMapConfig(
                     clarity_threshold=float(self.clarity_var.get()),
                     output_dir=self.output_dir_var.get())
@@ -1890,7 +1890,7 @@ class FonaDynApp(_TkBase):
     def _apply_fit(self, kind: str, method: str):
         if self._last_df is None or self._showing_placeholder:
             return
-        from plot_overlay import fit_voice_center, fit_metric_trend
+        from voicemap.plot_overlay import fit_voice_center, fit_metric_trend
         ax = self._fig.axes[0] if self._fig.axes else None
         if ax is None:
             return
@@ -1944,7 +1944,7 @@ class FonaDynApp(_TkBase):
             parent=self)
         if not text:
             return
-        from plot_overlay import add_annotation
+        from voicemap.plot_overlay import add_annotation
         ax = event.inaxes
         artists = add_annotation(ax, x_data, y_data, text)
         self._overlay_mgr.add(artists)
@@ -1957,7 +1957,7 @@ class FonaDynApp(_TkBase):
         """Popup of formats; click → file dialog with that format."""
         if self._last_df is None:
             return
-        from plot_overlay import SAVE_FORMATS
+        from voicemap.plot_overlay import SAVE_FORMATS
         m = tk.Menu(self, tearoff=0,
                     bg=PANEL_HI, fg=TEXT,
                     activebackground=ACCENT, activeforeground=BG,
@@ -1977,7 +1977,7 @@ class FonaDynApp(_TkBase):
 
     def _save_canvas(self, fmt: str, desc: str = ""):
         col = self.metric_var.get() or "voice_map"
-        from plot_overlay import save_figure
+        from voicemap.plot_overlay import save_figure
         from tkinter import filedialog
         default = f"{Path(self.last_csv).stem if self.last_csv else 'voice_map'}_{col}.{fmt}"
         path = filedialog.asksaveasfilename(
@@ -1995,7 +1995,7 @@ class FonaDynApp(_TkBase):
             self._append_log("ERROR", f"保存失败: {e}")
 
     def _copy_canvas(self):
-        from plot_overlay import copy_figure_to_clipboard
+        from voicemap.plot_overlay import copy_figure_to_clipboard
         if self._last_df is None or self._showing_placeholder:
             return
         ok = copy_figure_to_clipboard(self._fig)
@@ -2025,7 +2025,7 @@ class FonaDynApp(_TkBase):
         if not path:
             return
         try:
-            from report import generate_report
+            from voicemap.report import generate_report
             audio_name = self.audio_path.name if self.audio_path else "(unknown)"
             generate_report(self._last_df, path, audio_name=audio_name)
             self._append_log("META", f"✓ 报告已导出：{path}")
@@ -2047,7 +2047,7 @@ class FonaDynApp(_TkBase):
         if not path:
             return
         try:
-            from excel_export import export_vrp_xlsx
+            from voicemap.excel_export import export_vrp_xlsx
             export_vrp_xlsx(self._last_df, path)
             self._append_log("META", f"✓ Excel 已导出：{path}")
         except Exception as e:  # noqa: BLE001
@@ -2088,7 +2088,7 @@ class FonaDynApp(_TkBase):
 
 
 def main():
-    app = FonaDynApp()
+    app = VoiceMapApp()
     app.mainloop()
 
 

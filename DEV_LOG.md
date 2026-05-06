@@ -182,7 +182,7 @@ Commit: `f34fa1f` (validate script extension)
 - **F2 / F3 偏差 20-25%** — LPC spectrum peak-picking vs Praat Burg + root-finding 的方法差。F1 在加了 `f1_floor=250 Hz` 后已 <10%。
 - **cPhon 一簇经常为空** — sklearn KMeans 在 9 维 z-score 空间偶尔产空簇；已加三层救援（包括 post-filter 抢 1 个点填入），保证每簇至少 1 个 cell。
 - **PNG 导出慢** — 22 个 metric 每个 savefig dpi=150 约 0.4s，全量导出 +8s。GUI 默认关闭，开启需要在 Settings 勾。
-- **SC centroid CSV 格式可能不兼容** — 我们写的 CSV 有 `# FonaDyn cluster centroids k=… n_harm=… dim=…` 头 + `cluster;f0;f1;…` 行；SuperCollider 原版的 `cEGG.csv` 字段顺序和分隔符可能不同，导入 SC 到 Python 或反向时需核对。
+- **SC centroid CSV 格式可能不兼容** — 我们写的 CSV 有 `# VoiceMap cluster centroids k=… n_harm=… dim=…` 头（commit 之前是 `# FonaDyn cluster centroids …`，loader 同时兼容两种）+ `cluster;f0;f1;…` 行；SuperCollider 原版的 `cEGG.csv` 字段顺序和分隔符可能不同，导入 SC 到 Python 或反向时需核对。
 
 ### 📝 doc / refactor
 

@@ -47,39 +47,72 @@ python tests/validate_params.py audio/test_Voice_EGG.wav
 
 ---
 
-## 3. 项目结构（A0 重构后的目标）
+## 3. 项目结构
+
+### 3.1 当前（A0-1 完成后实际状态）
 
 ```
-VoiceMap/
-├── pyproject.toml                  ← 单一构建配置（不要再加 requirements.txt 之外的）
-├── main.py                         ← 薄壳：from voicemap.cli import main; main()
-├── voicemap/                       ← 主包
-│   ├── __init__.py                 ← 不要在这里 re-export 子模块的具体类，避免遗漏
-│   ├── __version__.py              ← 唯一的版本号来源
-│   ├── config.py                   ← 所有配置常量
+FonaDyn.py/                         ← 注：OS 目录名仍是旧名，重命名待 A0-5 前手动做
+├── main.py                         ← 薄壳，9 行：sys.path + from voicemap.cli import main
+├── requirements.txt                ← A0-3 会被 pyproject.toml 替代
+├── voicemap/                       ← 主包（commit db8aceb 从 src/ 改名）
+│   ├── __init__.py                 ← 只 re-export 高层 facade（VoiceMapAnalyzer / Config / 元数据）
+│   ├── __version__.py              ← 版本/作者/版权单一来源
+│   ├── config.py
 │   ├── logger.py
-│   ├── i18n.py                     ← 字典翻译表 + tr() API
-│   ├── analyzer.py                 ← 主流程，不写 CSV
-│   ├── csv_writer.py               ← 单独负责写盘
-│   ├── metrics.py                  ← 不拆，按类内组织
+│   ├── analyzer.py                 ← 主流程 + output_vrp_csv（A0-2 会拆出 csv_writer）
+│   ├── metrics.py                  ← 所有 calculator
 │   ├── metrics_registry.py
 │   ├── plotter.py
 │   ├── plot_overlay.py
 │   ├── excel_export.py
 │   ├── report.py
-│   ├── cli.py                      ← 之前的 main.py 内容
-│   └── gui/
-│       ├── app.py                  ← VoiceMapApp 主类，仅协调
-│       ├── theme.py                ← 颜色 / 字体 / ttk style
-│       ├── widgets.py              ← 自定义 widget
+│   ├── cli.py                      ← 原 main.py
+│   └── gui.py                      ← 原 gui.py（A0-2 会拆成 gui/ 子包）
+├── tests/
+│   └── validate_params.py          ← 集成回归（A0-2 后 rename 为 test_validation.py）
+├── audio/test_Voice_EGG.wav
+├── docs/
+│   ├── UI_DESIGN.md                ← C 锁定 + D 报告
+│   ├── UI_DESIGN_OPTIONS.md
+│   └── mockups/
+└── result/                         ← gitignored 输出
+```
+
+### 3.2 目标（A0 全部完成后）
+
+```
+VoiceMap/                           ← 项目根改名（A0-5 前做）
+├── pyproject.toml                  ← 替代 requirements.txt
+├── LICENSE
+├── main.py                         ← 同上
+├── voicemap/
+│   ├── __init__.py
+│   ├── __version__.py
+│   ├── config.py
+│   ├── logger.py
+│   ├── i18n.py                     ← A0-4 加：字典翻译表 + tr() API
+│   ├── analyzer.py
+│   ├── csv_writer.py               ← A0-2 从 analyzer.output_vrp_csv 拆出
+│   ├── metrics.py
+│   ├── metrics_registry.py
+│   ├── plotter.py
+│   ├── plot_overlay.py
+│   ├── excel_export.py
+│   ├── report.py
+│   ├── cli.py
+│   └── gui/                        ← A0-2 拆 gui.py 成子包
+│       ├── app.py
+│       ├── theme.py                ← UI_DESIGN.md 的色板/字号 token 落地
+│       ├── widgets.py
 │       ├── dialogs.py              ← Settings / Compare / About
 │       └── menubar.py
 ├── tests/
-│   ├── test_validation.py          ← 集成回归（rename 自 validate_params.py）
-│   └── test_*.py                   ← 单元测试
+│   ├── test_validation.py
+│   └── test_*.py                   ← A0-2 后补的单元测试
 ├── audio/
-│   └── test_Voice_EGG.wav
 └── docs/
+    ├── UI_DESIGN.md
     ├── 用户手册.md                ← A0-5 产出
     └── 设计说明书.md
 ```

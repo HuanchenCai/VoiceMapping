@@ -426,7 +426,7 @@ METRIC_CATEGORY = {
 # just calling register(MetricSpec(...)) — no plotter edit needed.
 def _merge_registry_into_plotter():
     try:
-        from metrics_registry import REGISTRY
+        from voicemap.metrics_registry import REGISTRY
     except ImportError:
         return
     for spec in REGISTRY.values():
