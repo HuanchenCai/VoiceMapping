@@ -46,6 +46,7 @@ from voicemap.gui.widgets import MetricPopup, QueueHandler
 from voicemap.gui.dialogs import (
     SettingsDialog, CompareDialog, ProgressDialog, AboutDialog,
 )
+from voicemap.gui.modern_menu import ModernMenubar, ModernPopup
 
 # 可选的原生拖拽
 try:
@@ -141,6 +142,15 @@ class VoiceMapApp(_TkBase):
         self.option_add("*Menu*Background",         PANEL_HI)
         self.option_add("*Menu*Foreground",         TEXT)
 
+        # Sun Valley Win11-Fluent ttk theme — applies to all ttk widgets
+        # (Button / Entry / Spinbox / Combobox / Scrollbar / Progressbar
+        # …). MUST come before _init_style so our Accent.TButton /
+        # Ghost.TButton overrides layer on top of the theme defaults.
+        try:
+            import sv_ttk
+            sv_ttk.set_theme("dark")
+        except Exception:
+            pass
         self._init_style()
         self._build_menubar()
         self._build_ui()
@@ -163,8 +173,13 @@ class VoiceMapApp(_TkBase):
     # ── 样式 ──
     def _init_style(self):
         s = ttk.Style(self)
+        # If sv_ttk applied "sun-valley-dark", keep it. Only fall back to
+        # "clam" when the modern theme didn't load. clam is hideous on
+        # Win11; check before clobbering.
         try:
-            s.theme_use("clam")
+            current = s.theme_use()
+            if "sun-valley" not in current and "vista" not in current:
+                s.theme_use("clam")
         except tk.TclError:
             pass
 
@@ -289,99 +304,109 @@ class VoiceMapApp(_TkBase):
     def _build_menubar(self):
         """5-段顶部菜单栏：文件 / 编辑 / 参数 / 视图 / 帮助。
 
-        - 文件：打开 / 导出 / 设置 / 退出
-        - 编辑：画布操作（标注 / 复位 / 复制 / 保存图片）
-        - 参数：5 个 metric 分类 cascade + 上一/下一切换 + Centroid 子菜单
-        - 视图：拟合曲线
-        - 帮助：关于
-
-        widget 颜色全靠 option_add 在 __init__ 设的 *Menu.* 模板，
-        每个 tk.Menu() 不再重复传 bg / fg / activebackground / borderwidth /
-        relief 这些 —— option DB 已经全包，重复传只是噪声。
+        A0-3 改为自画 ModernMenubar + ModernPopup（``voicemap.gui.modern_menu``）
+        以躲开 tk.Menu 在 Win11 上的老 Win32 USER 菜单白边（CLAUDE.md §8.4.1）。
+        每个顶级菜单的 popup 是 lambda 工厂，每次点开重建 —— 这样
+        radiobutton 的当前选中态、各 metric 的 enable/disable 视觉色都按当下
+        ``self.metric_var`` / ``self._metric_sections_avail`` 实时反映。
         """
-        def _M(parent):
-            """所有子菜单都长一样：tearoff=0 + 灰禁文字 + 单选指示色。"""
-            return tk.Menu(parent, tearoff=0,
-                           disabledforeground=MUTED, selectcolor=ACCENT)
+        # 顶部条容器。_build_menubar() 在 _build_ui() 之前调，所以这里
+        # 第一个 pack(side="top") 自然占住顶部；后续 outer Frame 用
+        # fill="both" expand=True 填剩余区域。
+        bar = ModernMenubar(self, bg=PANEL, height=32)
+        bar.pack(side="top", fill="x")
 
-        mb = _M(self)
+        # 注册 5 个顶级菜单。每个 add_menu 只接收 label + 工厂函数；
+        # 工厂在用户点击时同步执行，所以可以 closure-capture self 拿到最新数据。
+        bar.add_menu("文件",  self._popup_file)
+        bar.add_menu("编辑",  self._popup_edit)
+        bar.add_menu("参数",  self._popup_metric)
+        bar.add_menu("视图",  self._popup_view)
+        bar.add_menu("帮助",  self._popup_help)
 
-        # ── 文件 ──
-        m_file = _M(mb)
-        m_file.add_command(label="打开 WAV...",   command=self._pick_audio)
-        m_file.add_command(label="打开输出目录",  command=self._open_output_dir)
-        m_file.add_separator()
-        m_file.add_command(label="导出 Excel",     command=self._export_excel)
-        m_file.add_command(label="生成报告",       command=self._export_report)
-        m_file.add_command(label="对比 2 段录音…", command=self._open_compare_dialog)
-        m_file.add_separator()
-        m_file.add_command(label="设置...",       command=self._open_settings)
-        m_file.add_separator()
-        m_file.add_command(label="退出",          command=self.destroy)
-        mb.add_cascade(label="文件", menu=m_file)
+        self._menubar = bar
+        # _refresh_metric_dropdown 不再操作 native tk.Menu —— 改成只更新
+        # self._metric_sections_avail，参数 popup 在弹出时读这个表上色。
+        self._metric_section_menus = {}     # 兼容旧接口（不再使用）
 
-        # ── 编辑（画布操作） ──
-        m_edit = _M(mb)
-        m_edit.add_command(label="标注",       command=self._toggle_annotation_mode)
-        m_edit.add_command(label="复位标注",   command=self._clear_overlays)
-        m_edit.add_separator()
-        m_edit.add_command(label="复制图片",   command=self._copy_canvas)
-        m_edit.add_command(label="保存图片…",  command=self._open_save_menu)
-        mb.add_cascade(label="编辑", menu=m_edit)
+    # ── popup factories（每次点开新建一个 ModernPopup） ──────────────────
+    def _popup_file(self) -> "ModernPopup":
+        p = ModernPopup(self)
+        p.add_command("打开 WAV...",       command=self._pick_audio,     accelerator="Ctrl+O")
+        p.add_command("打开输出目录",      command=self._open_output_dir)
+        p.add_separator()
+        p.add_command("导出 Excel",        command=self._export_excel)
+        p.add_command("生成报告",          command=self._export_report)
+        p.add_command("对比 2 段录音…",    command=self._open_compare_dialog)
+        p.add_separator()
+        p.add_command("设置...",           command=self._open_settings,  accelerator="Ctrl+,")
+        p.add_separator()
+        p.add_command("退出",              command=self.destroy)
+        return p
 
-        # ── 参数（5 个 metric 分类 + 切换 + Centroid 子菜单） ──
-        # **不**用 state="disabled" 来灰化分析前的项 —— Windows native menu
-        # 给 disabled 项加 3D 浮雕效果，深色背景下文字带白色幻影
-        # （CLAUDE.md §8 老坑）。改用 foreground=MUTED 让视觉变灰；
-        # 点击没数据的 metric，_on_metric_change 已有 "col in df.columns"
-        # 守卫保证不会乱画。
-        m_metric = _M(mb)
-        m_metric.add_command(label="上一个 metric  ←", command=lambda: self._cycle_metric(-1))
-        m_metric.add_command(label="下一个 metric  →", command=lambda: self._cycle_metric(+1))
-        m_metric.add_separator()
+    def _popup_edit(self) -> "ModernPopup":
+        p = ModernPopup(self)
+        annot_label = "标注 ●" if getattr(self, "_annot_mode_on", False) else "标注"
+        p.add_command(annot_label,         command=self._toggle_annotation_mode)
+        p.add_command("复位标注",          command=self._clear_overlays)
+        p.add_separator()
+        p.add_command("复制图片",          command=self._copy_canvas,    accelerator="Ctrl+C")
+        p.add_command("保存图片…",         command=self._open_save_menu, accelerator="Ctrl+S")
+        return p
 
-        self._metric_section_menus = {}
+    def _popup_metric(self) -> "ModernPopup":
+        p = ModernPopup(self)
+        p.add_command("上一个 metric  ←", command=lambda: self._cycle_metric(-1))
+        p.add_command("下一个 metric  →", command=lambda: self._cycle_metric(+1))
+        p.add_separator()
+        # 5 个分类 cascade — 每个的工厂闭包绑定 section
+        avail_set = self._available_metric_columns()
         for section_title, metrics in _METRIC_SECTIONS:
-            m = _M(m_metric)
-            entries = []
-            for name in metrics:
-                m.add_radiobutton(label=name,
-                                   variable=self.metric_var,
-                                   value=name,
-                                   foreground=MUTED)   # 灰色起手；分析后 _refresh 调整
-                entries.append((name, m.index("end")))
-            # cascade 标签去掉 "声学 · " 前缀的英文部分（保留中文部分）
-            m_metric.add_cascade(
-                label=section_title.split(" · ", 1)[0],
-                menu=m)
-            self._metric_section_menus[section_title] = (m, entries)
+            label = section_title.split(" · ", 1)[0]
+            p.add_cascade(label,
+                          popup_factory=lambda m=metrics, av=avail_set:
+                              self._popup_metric_section(m, av))
+        p.add_separator()
+        p.add_cascade("聚类中心 (Centroid)", popup_factory=self._popup_centroid)
+        return p
 
-        # Centroid 子菜单
-        m_metric.add_separator()
-        m_centroid = _M(m_metric)
-        m_centroid.add_command(label="加载 centroid CSV...", command=self._load_centroids)
-        m_centroid.add_command(label="保存当前 centroids", command=self._save_centroids)
-        m_centroid.add_command(label="多 wav 联合训练...",  command=self._train_centroids_from_many)
-        m_metric.add_cascade(label="聚类中心 (Centroid)", menu=m_centroid)
-        # 把 m_centroid 持有住，否则 GC 会清掉
-        self._m_centroid = m_centroid
+    def _popup_metric_section(self, metrics, avail_set) -> "ModernPopup":
+        p = ModernPopup(self)
+        for name in metrics:
+            fg = TEXT if name in avail_set else MUTED
+            p.add_radiobutton(name,
+                              variable=self.metric_var,
+                              value=name,
+                              foreground=fg)
+        return p
 
-        mb.add_cascade(label="参数", menu=m_metric)
+    def _popup_centroid(self) -> "ModernPopup":
+        p = ModernPopup(self)
+        p.add_command("加载 centroid CSV...", command=self._load_centroids)
+        p.add_command("保存当前 centroids",   command=self._save_centroids)
+        p.add_command("多 wav 联合训练...",   command=self._train_centroids_from_many)
+        return p
 
-        # ── 视图（拟合曲线） ──
-        m_view = _M(mb)
-        m_view.add_command(label="拟合曲线…", command=self._open_fit_menu)
-        mb.add_cascade(label="视图", menu=m_view)
+    def _popup_view(self) -> "ModernPopup":
+        p = ModernPopup(self)
+        p.add_command("拟合曲线…", command=self._open_fit_menu)
+        return p
 
-        # ── 帮助 ──
-        m_help = _M(mb)
-        m_help.add_command(label="关于...", command=self._open_about)
-        mb.add_cascade(label="帮助", menu=m_help)
+    def _popup_help(self) -> "ModernPopup":
+        p = ModernPopup(self)
+        p.add_command("关于...", command=self._open_about)
+        return p
 
-        self.config(menu=mb)
-        self._menubar = mb
-        # 保住其余子菜单引用（cascade 不持有 Python 引用，会被 GC）
-        self._menus = (m_file, m_edit, m_metric, m_view, m_help)
+    def _available_metric_columns(self) -> set:
+        """Set of metric column names that have non-zero data in the
+        current analysis. Empty set when no analysis has run yet."""
+        sa = getattr(self, "_metric_sections_avail", None)
+        if not sa:
+            return set()
+        out = set()
+        for _section, cols in sa:
+            out.update(cols)
+        return out
 
     def _open_about(self):
         """显示关于对话框（版本/作者/版权）。"""

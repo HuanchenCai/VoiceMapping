@@ -45,6 +45,7 @@ dependencies = [
     "matplotlib>=3.5",
     "scikit-learn>=1.1",       # KMeans for EGG / cPhon clusters
     "openpyxl>=3.0",            # .xlsx export
+    "sv-ttk>=2.6",              # Sun Valley Win11-Fluent ttk theme
 ]
 
 [project.optional-dependencies]

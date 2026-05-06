@@ -1,0 +1,374 @@
+# -*- coding: utf-8 -*-
+"""Custom modern menubar + popup, replacing tk.Menu's classic Win32 chrome.
+
+Why this exists
+---------------
+``tk.Menu`` on Windows binds to the old USER32 menu API, which paints a 1 px
+hard white frame around every dropdown — visually inconsistent with modern
+Win11 apps (Explorer, Office, VS Code) that use Fluent / WinUI rendering.
+Tk has no binding to the Fluent path, so to get a borderless dark-themed
+dropdown we have to build the whole thing ourselves.
+
+What we do
+----------
+* :class:`ModernMenubar` — a horizontal ``tk.Frame`` of clickable button
+  labels. Hover changes background to PANEL_HI; click posts a popup below.
+* :class:`ModernPopup` — a borderless ``Toplevel`` (overrideredirect) that
+  renders item rows by hand. Supports commands, separators, cascades, and
+  radiobutton-style state. Auto-dismiss on Escape / click outside.
+* Optional rounded corners via Win32 ``SetWindowRgn``.
+
+Multi-monitor / focus / dismiss issues from the old MetricPopup era are
+already fixed here (withdraw → set geometry → deiconify; outside-click via
+delayed root binding instead of FocusOut).
+"""
+
+from __future__ import annotations
+
+import sys
+import tkinter as tk
+from typing import Callable, Optional
+
+from voicemap.gui.theme import (
+    BG, PANEL, PANEL_HI, BORDER, TEXT, MUTED, ACCENT, ACCENT_HI, BG_APP,
+    FONT_UI, FONT_UI_B,
+)
+
+_ROUND_RADIUS = 6      # popup corner radius in px
+
+
+# ─── helper: round corners on a Toplevel via Win32 SetWindowRgn ───────────
+def _apply_rounded(toplevel: tk.Toplevel, radius: int = _ROUND_RADIUS) -> None:
+    """Cut a rounded clip region on ``toplevel`` so corners look modern.
+
+    Win-only; silently no-ops elsewhere or if anything ctypes-related fails.
+    """
+    if not sys.platform.startswith("win"):
+        return
+    try:
+        from ctypes import windll
+        toplevel.update_idletasks()
+        w = toplevel.winfo_width()
+        h = toplevel.winfo_height()
+        if w < 4 or h < 4:
+            return
+        # tk's frame() returns the HWND as a hex string like "0x12345"
+        hwnd = int(toplevel.frame(), 16)
+        # CreateRoundRectRgn + SetWindowRgn — Tk owns the HWND; clipping
+        # only affects what's visible on screen, not the widget tree.
+        hrgn = windll.gdi32.CreateRoundRectRgn(
+            0, 0, w + 1, h + 1, radius * 2, radius * 2)
+        windll.user32.SetWindowRgn(hwnd, hrgn, True)
+    except Exception:
+        pass
+
+
+# ─── ModernMenubar ────────────────────────────────────────────────────────
+class ModernMenubar(tk.Frame):
+    """Horizontal menu bar, packed at the top of a window's content area.
+
+    Each entry is a label + dropdown factory. Click the label → call
+    factory() to build a fresh ModernPopup, then show it below the label.
+    """
+
+    def __init__(self, parent: tk.Misc, *, bg: str = PANEL, height: int = 32):
+        super().__init__(parent, bg=bg, height=height)
+        self.pack_propagate(False)
+        self._buttons: list[tk.Label] = []
+        self._open_popup: Optional[ModernPopup] = None
+
+    def add_menu(self, label: str, popup_factory: Callable[[], "ModernPopup"]) -> tk.Label:
+        """Add a top-level menu. ``popup_factory`` builds and returns the
+        ModernPopup instance every time the menu is opened (rebuilt fresh
+        so radiobutton state and dynamic items reflect current data)."""
+        btn = tk.Label(self, text=label,
+                       bg=PANEL, fg=TEXT,
+                       font=FONT_UI,
+                       padx=14, pady=6,
+                       cursor="hand2")
+        btn.pack(side="left")
+
+        def _on_enter(_e=None):
+            if self._open_popup is None:
+                btn.configure(bg=PANEL_HI)
+
+        def _on_leave(_e=None):
+            if self._open_popup is None:
+                btn.configure(bg=PANEL)
+
+        def _on_click(_e=None):
+            # Toggle: clicking the same menu again closes it.
+            if self._open_popup is not None:
+                try:
+                    if self._open_popup.winfo_exists():
+                        self._open_popup.destroy()
+                except tk.TclError:
+                    pass
+                self._open_popup = None
+                btn.configure(bg=PANEL)
+                return
+            popup = popup_factory()
+            popup.bind("<Destroy>", lambda _e, b=btn: b.configure(bg=PANEL))
+            popup.show_below(btn)
+            self._open_popup = popup
+            btn.configure(bg=ACCENT)
+
+        btn.bind("<Enter>", _on_enter)
+        btn.bind("<Leave>", _on_leave)
+        btn.bind("<Button-1>", _on_click)
+        self._buttons.append(btn)
+        return btn
+
+
+# ─── ModernPopup ──────────────────────────────────────────────────────────
+class ModernPopup(tk.Toplevel):
+    """Borderless dark-themed popup, replacing tk.Menu cascades.
+
+    Items are added via :meth:`add_command`, :meth:`add_separator`,
+    :meth:`add_cascade`, :meth:`add_radiobutton`. After all items are added,
+    the caller (or ModernMenubar) invokes :meth:`show_below` /
+    :meth:`show_at` to position and reveal the popup.
+    """
+
+    # Layout dimensions (8 px grid). Same for all popups.
+    ROW_PADX  = 14
+    ROW_PADY  = 6
+    SEP_PAD   = 4
+
+    def __init__(self, parent: tk.Misc):
+        super().__init__(parent)
+        self.withdraw()
+        self.transient(parent)
+        self.overrideredirect(True)
+        self.configure(bg=PANEL_HI, bd=0, highlightthickness=0)
+        self._closing = False
+        self._outside_binding = None
+        self._app_root: Optional[tk.Misc] = self.winfo_toplevel()
+
+        # Inner frame so we have control over border padding (faked
+        # 1 px BORDER colour line all around for separation from window).
+        self._frame = tk.Frame(self, bg=PANEL_HI)
+        self._frame.pack(padx=1, pady=1, fill="both", expand=True)
+
+        self._sub_popup: Optional[ModernPopup] = None
+        self._items: list[dict] = []   # bookkeeping: rows, types, callbacks
+
+        self.bind("<Escape>", lambda _e: self.destroy())
+
+    # ── adders ────────────────────────────────────────────────────────
+    def add_command(self, label: str,
+                    command: Optional[Callable] = None,
+                    accelerator: str = "",
+                    foreground: str = TEXT) -> None:
+        row = self._make_row(label, foreground=foreground,
+                             accelerator=accelerator,
+                             on_click=lambda: (command and command(), self.destroy()))
+        self._items.append({"type": "command", "row": row})
+
+    def add_separator(self) -> None:
+        sep = tk.Frame(self._frame, bg=BORDER, height=1)
+        sep.pack(fill="x", padx=8, pady=self.SEP_PAD)
+        self._items.append({"type": "separator", "row": sep})
+
+    def add_cascade(self, label: str,
+                    popup_factory: Callable[[], "ModernPopup"]) -> None:
+        row = self._make_row(label, foreground=TEXT,
+                             cascade_arrow=True,
+                             on_click=lambda r=None: self._open_cascade(r, popup_factory))
+        # We need to know which row's bbox to anchor the cascade against,
+        # so wire on_click after the fact with the row reference.
+        def _click_with_row(_e=None, _row=row, _factory=popup_factory):
+            self._open_cascade(_row, _factory)
+        row.bind("<Button-1>", _click_with_row)
+        for child in row.winfo_children():
+            child.bind("<Button-1>", _click_with_row)
+        self._items.append({"type": "cascade", "row": row})
+
+    def add_radiobutton(self, label: str, variable: tk.StringVar, value: str,
+                        foreground: str = TEXT) -> None:
+        is_selected = (variable.get() == value)
+        marker = "●" if is_selected else " "
+        def _click(v=variable, val=value):
+            v.set(val)
+            self.destroy()
+        row = self._make_row(label, foreground=foreground,
+                             prefix=marker, on_click=_click)
+        self._items.append({"type": "radio", "row": row,
+                             "variable": variable, "value": value})
+
+    # ── row factory ───────────────────────────────────────────────────
+    def _make_row(self, label: str, *,
+                  foreground: str = TEXT,
+                  accelerator: str = "",
+                  prefix: str = "",
+                  cascade_arrow: bool = False,
+                  on_click: Optional[Callable] = None) -> tk.Frame:
+        row = tk.Frame(self._frame, bg=PANEL_HI)
+        row.pack(fill="x")
+
+        # Optional radio-style marker (●) on the left
+        if prefix:
+            tk.Label(row, text=prefix, bg=PANEL_HI, fg=ACCENT,
+                     font=FONT_UI_B, padx=6).pack(side="left")
+        else:
+            tk.Frame(row, bg=PANEL_HI, width=18).pack(side="left")
+
+        lbl = tk.Label(row, text=label, bg=PANEL_HI, fg=foreground,
+                       font=FONT_UI, anchor="w",
+                       padx=self.ROW_PADX, pady=self.ROW_PADY)
+        lbl.pack(side="left", fill="x", expand=True)
+
+        if accelerator:
+            tk.Label(row, text=accelerator, bg=PANEL_HI, fg=MUTED,
+                     font=FONT_UI, padx=12).pack(side="right")
+        if cascade_arrow:
+            tk.Label(row, text="▸", bg=PANEL_HI, fg=MUTED,
+                     font=FONT_UI, padx=8).pack(side="right")
+
+        # Hover/click handling. Bind on row + every child so movement
+        # between sub-widgets stays "inside the row".
+        children = (row, lbl) + tuple(c for c in row.winfo_children() if c is not lbl)
+
+        def _hover_in(_e=None):
+            row.configure(bg=ACCENT)
+            for c in row.winfo_children():
+                try:
+                    c.configure(bg=ACCENT, fg=BG_APP)
+                except tk.TclError:
+                    pass
+
+        def _hover_out(_e=None):
+            row.configure(bg=PANEL_HI)
+            for c in row.winfo_children():
+                try:
+                    # Restore prefix marker as ACCENT, others as their fg.
+                    if c.cget("text") in ("▸", "●"):
+                        c.configure(bg=PANEL_HI, fg=ACCENT)
+                    else:
+                        c.configure(bg=PANEL_HI, fg=foreground)
+                except tk.TclError:
+                    pass
+
+        for w in children:
+            w.bind("<Enter>", _hover_in, add="+")
+            w.bind("<Leave>", _hover_out, add="+")
+            if on_click is not None:
+                w.bind("<Button-1>",
+                       lambda _e, cb=on_click: cb(),
+                       add="+")
+        return row
+
+    # ── cascade handling ───────────────────────────────────────────────
+    def _open_cascade(self, row: tk.Frame,
+                      popup_factory: Callable[[], "ModernPopup"]) -> None:
+        # Close any prior sub-popup
+        if self._sub_popup is not None:
+            try:
+                if self._sub_popup.winfo_exists():
+                    self._sub_popup.destroy()
+            except tk.TclError:
+                pass
+            self._sub_popup = None
+        sub = popup_factory()
+        # Anchor: top-right of the row
+        try:
+            row.update_idletasks()
+            x = row.winfo_rootx() + row.winfo_width() - 4
+            y = row.winfo_rooty()
+            sub.show_at(x, y, parent_popup=self)
+            self._sub_popup = sub
+        except tk.TclError:
+            pass
+
+    # ── show / dismiss ─────────────────────────────────────────────────
+    def show_below(self, anchor_widget: tk.Widget) -> None:
+        try:
+            anchor_widget.update_idletasks()
+            x = anchor_widget.winfo_rootx()
+            y = anchor_widget.winfo_rooty() + anchor_widget.winfo_height()
+            self.show_at(x, y)
+        except tk.TclError:
+            pass
+
+    def show_at(self, x: int, y: int, parent_popup: Optional["ModernPopup"] = None) -> None:
+        try:
+            self._app_root = (parent_popup._app_root if parent_popup
+                              else self.winfo_toplevel())
+            self.update_idletasks()
+            ww = max(self.winfo_reqwidth(), 200)
+            wh = max(self.winfo_reqheight(), 40)
+            sw = self.winfo_screenwidth()
+            sh = self.winfo_screenheight()
+            if x + ww > sw:
+                x = max(0, sw - ww - 8)
+            if y + wh > sh:
+                y = max(0, y - wh)
+            self.geometry(f"{ww}x{wh}+{x}+{y}")
+            self.deiconify()
+            self.lift()
+            try:
+                self.attributes("-topmost", True)
+                self.after(200, lambda: self.attributes("-topmost", False))
+            except tk.TclError:
+                pass
+            _apply_rounded(self, _ROUND_RADIUS)
+            # Outside-click dismiss after a short grace period (Tk fires
+            # spurious focus-out events during the initial mapping).
+            self.after(150, self._install_outside_click)
+        except tk.TclError:
+            pass
+
+    def _install_outside_click(self) -> None:
+        if self._closing or not self.winfo_exists():
+            return
+        try:
+            if self._app_root is not None:
+                self._outside_binding = self._app_root.bind(
+                    "<ButtonPress>", self._on_root_click, add="+")
+        except tk.TclError:
+            pass
+
+    def _on_root_click(self, event) -> None:
+        if self._closing:
+            return
+        # Walk widget master chain. Inside self OR inside any sub_popup →
+        # don't close. Otherwise close everything.
+        w = event.widget
+        while w is not None:
+            if w is self:
+                return
+            if self._sub_popup is not None and w is self._sub_popup:
+                return
+            try:
+                w = w.master
+            except Exception:
+                break
+        # Click was outside: close sub first then self
+        if self._sub_popup is not None:
+            try:
+                self._sub_popup.destroy()
+            except tk.TclError:
+                pass
+            self._sub_popup = None
+        self.destroy()
+
+    def destroy(self) -> None:
+        if self._closing:
+            return
+        self._closing = True
+        try:
+            if self._outside_binding is not None and self._app_root is not None:
+                self._app_root.unbind("<ButtonPress>", self._outside_binding)
+                self._outside_binding = None
+        except (tk.TclError, Exception):
+            pass
+        if self._sub_popup is not None:
+            try:
+                self._sub_popup.destroy()
+            except tk.TclError:
+                pass
+            self._sub_popup = None
+        try:
+            super().destroy()
+        except tk.TclError:
+            pass
