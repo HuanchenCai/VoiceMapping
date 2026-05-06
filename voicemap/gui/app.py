@@ -65,7 +65,7 @@ class TrackEntry:
     cached state (df / cycles count / wall time)."""
     __slots__ = ("path", "sr", "duration", "channels",
                  "df", "cells", "cycles", "dt", "state",
-                 "csv", "analyzer")
+                 "csv", "analyzer", "_waveform_cache")
 
     def __init__(self, path: Path):
         self.path = path
@@ -88,6 +88,7 @@ class TrackEntry:
         self.state: str = "queued"   # queued / analyzing / analyzed / failed
         self.csv: str = ""
         self.analyzer = None
+        self._waveform_cache = None    # populated lazily by row builder
 
 
 
@@ -808,29 +809,35 @@ class VoiceMapApp(_TkBase):
 
     def _build_track_row(self, parent, entry: "TrackEntry", idx: int) -> tk.Frame:
         """Single track row in option-C spec format:
-            ▌ 01 ✓ test_Voice_EGG.wav   44.1k Hz · 8.2s · 12,525 网格   ▓▓░
-        ▌ left strip is ACCENT only on the active row."""
+            ▌ 01 ✓ test_Voice_EGG.wav     44.1k Hz · 8.2s · 12,525 cells   ▓▓░
+        ▌ left strip is ACCENT only on the active row.
+        Right side renders a tiny block-character waveform sketch from
+        the audio file's amplitude buckets (cheap, no matplotlib)."""
         is_active = (idx == self._active_track)
+        bg_row = PANEL_HI if is_active else PANEL
 
-        outer = tk.Frame(parent, bg=PANEL_HI if is_active else PANEL,
-                         cursor="hand2")
-        # Active marker bar on the left
-        marker_color = ACCENT if is_active else PANEL
-        marker = tk.Frame(outer, bg=marker_color, width=4)
+        outer = tk.Frame(parent, bg=bg_row, cursor="hand2")
+        marker = tk.Frame(outer,
+                          bg=ACCENT if is_active else bg_row,
+                          width=4)
         marker.pack(side="left", fill="y")
+        # Right-side mini waveform (block characters, monospace)
+        wave_str = self._track_waveform_blocks(entry)
+        wave_lbl = tk.Label(outer, text=wave_str,
+                            bg=bg_row, fg=ACCENT_HI,
+                            font=("Consolas", 10))
+        wave_lbl.pack(side="right", padx=(0, 12))
 
-        body = tk.Frame(outer, bg=outer.cget("bg"))
+        body = tk.Frame(outer, bg=bg_row)
         body.pack(side="left", fill="x", expand=True, padx=10, pady=6)
 
         # Row 1: 编号 · 状态 · 文件名
-        line1 = tk.Frame(body, bg=body.cget("bg"))
+        line1 = tk.Frame(body, bg=bg_row)
         line1.pack(fill="x", anchor="w")
-        # Track number
         tk.Label(line1, text=f"{idx + 1:02d}",
-                 bg=body.cget("bg"), fg=MUTED,
+                 bg=bg_row, fg=MUTED,
                  font=("Consolas", 10), width=3, anchor="w"
                  ).pack(side="left")
-        # State icon
         state_icon, state_color = {
             "queued":    ("○", MUTED),
             "analyzing": ("⏵", ACCENT_HI),
@@ -838,22 +845,19 @@ class VoiceMapApp(_TkBase):
             "failed":    ("✗", ERR),
         }.get(entry.state, ("○", MUTED))
         tk.Label(line1, text=state_icon,
-                 bg=body.cget("bg"), fg=state_color,
+                 bg=bg_row, fg=state_color,
                  font=("Microsoft YaHei UI", 11, "bold"),
                  width=2, anchor="w"
                  ).pack(side="left", padx=(2, 6))
-        # Filename
         tk.Label(line1, text=entry.path.name,
-                 bg=body.cget("bg"), fg=TEXT,
+                 bg=bg_row, fg=TEXT,
                  font=FONT_UI_B, anchor="w"
                  ).pack(side="left", fill="x", expand=True)
 
-        # Row 2: 元数据
-        line2 = tk.Frame(body, bg=body.cget("bg"))
+        # Row 2: 元数据 — 11pt Microsoft YaHei UI for legibility
+        line2 = tk.Frame(body, bg=bg_row)
         line2.pack(fill="x", anchor="w")
-        # Indent below the icons so meta aligns with filename
-        tk.Frame(line2, bg=body.cget("bg"), width=44
-                 ).pack(side="left")
+        tk.Frame(line2, bg=bg_row, width=44).pack(side="left")
 
         sr_kHz = (entry.sr / 1000.0) if entry.sr else 0.0
         meta_parts = []
@@ -861,11 +865,12 @@ class VoiceMapApp(_TkBase):
             meta_parts.append(f"{sr_kHz:.1f}k Hz")
         if entry.duration:
             meta_parts.append(f"{entry.duration:.1f}s")
+        if entry.channels:
+            meta_parts.append(f"{entry.channels} ch")
         if entry.state == "analyzed" and entry.cells:
-            meta_parts.append(tr("statusbar.file_meta",
-                                  name="", n=entry.cells, dt=entry.dt
-                                  ).split("·", 1)[1].strip()  # rough reuse
-                              if False else f"{entry.cells:,} cells")
+            n_str = (f"{entry.cells:,} 网格" if get_language() == "zh"
+                     else f"{entry.cells:,} cells")
+            meta_parts.append(n_str)
         elif entry.state == "queued":
             meta_parts.append(tr("tracks.unanalyzed"))
         elif entry.state == "analyzing":
@@ -874,18 +879,58 @@ class VoiceMapApp(_TkBase):
             meta_parts.append(tr("status.failed"))
         meta_text = "  ·  ".join(meta_parts) if meta_parts else "—"
         tk.Label(line2, text=meta_text,
-                 bg=body.cget("bg"), fg=MUTED,
-                 font=("Microsoft YaHei UI", 9), anchor="w"
+                 bg=bg_row, fg=MUTED,
+                 font=("Microsoft YaHei UI", 10), anchor="w"
                  ).pack(side="left", fill="x", expand=True)
 
         # Whole-row click → switch active track
         def _click(_e=None, i=idx):
             self._tracks_set_active(i)
-        for w in (outer, body, line1, line2,
+        for w in (outer, body, line1, line2, marker, wave_lbl,
                   *line1.winfo_children(), *line2.winfo_children()):
             w.bind("<Button-1>", _click)
 
         return outer
+
+    @staticmethod
+    def _track_waveform_blocks(entry: "TrackEntry", n_buckets: int = 28) -> str:
+        """Cheap Unicode-block waveform: read the wav at a coarse stride,
+        bucket-max-abs into N columns, map each to a block height char.
+        Cached on the entry the first time it's computed.
+
+        Returns an empty string on any I/O error (the row simply omits
+        the waveform sketch — no crash)."""
+        cached = getattr(entry, "_waveform_cache", None)
+        if cached is not None:
+            return cached
+        try:
+            import soundfile as sf
+            import numpy as np
+            # Read a coarse 8 kHz mono summary — fast even on 60 s files.
+            data, sr = sf.read(str(entry.path), dtype="float32",
+                               always_2d=True)
+            mono = data[:, 0]
+            # Downsample to ~3000 samples for the bucket pass
+            target = 3000
+            if len(mono) > target:
+                step = max(1, len(mono) // target)
+                mono = mono[::step]
+            if mono.size == 0:
+                cached = ""
+            else:
+                buckets = np.array_split(mono, n_buckets)
+                amps = np.array([np.max(np.abs(b)) if len(b) else 0.0
+                                  for b in buckets])
+                if amps.max() > 0:
+                    amps = amps / amps.max()
+                # 8 levels of vertical block characters
+                blocks = " ▁▂▃▄▅▆▇█"
+                idxs = np.clip((amps * 8).astype(int), 0, 8)
+                cached = "".join(blocks[i] for i in idxs)
+        except Exception:
+            cached = ""
+        entry._waveform_cache = cached
+        return cached
 
     def _tracks_add(self, path: Path) -> int:
         """Append a new TrackEntry and re-render. Returns its index."""
