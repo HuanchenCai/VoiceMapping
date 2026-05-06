@@ -46,12 +46,28 @@ INFO          = "#3b82f6"
 # Microsoft YaHei UI is Windows-native, has dedicated glyphs for both
 # Latin and Han, and avoids the "some chars look bold, others don't"
 # fallback artefact that Segoe UI exhibits when mixing Chinese.
-FONT_UI    = ("Microsoft YaHei UI", 10)
-FONT_UI_B  = ("Microsoft YaHei UI", 10, "bold")
-FONT_TITLE = ("Microsoft YaHei UI", 16, "bold")
-FONT_SUB   = ("Microsoft YaHei UI", 10)
-FONT_DROP  = ("Microsoft YaHei UI", 13, "bold")
-FONT_MONO  = ("Consolas", 9)
+#
+# A0-4 typography scale (consistent across the app):
+#   Caption  9pt   tiny / unit hints
+#   Small   10pt   row metadata, status bar
+#   Body    11pt   default UI body, buttons
+#   BodyB   11pt bold       section labels (Tracks / Metric / etc.)
+#   Sub     12pt   header status pill
+#   Drop    13pt bold       drop-zone main hint
+#   H2      15pt bold       Inspector value pill / metric-bar emphasis
+#   Title   18pt bold       window header (嗓音声学品质多维分析图谱)
+#   Display 22pt bold       Inspector metric name + value big number
+FONT_CAPTION = ("Microsoft YaHei UI",  9)
+FONT_SMALL   = ("Microsoft YaHei UI", 10)
+FONT_UI      = ("Microsoft YaHei UI", 11)
+FONT_UI_B    = ("Microsoft YaHei UI", 11, "bold")
+FONT_SUB     = ("Microsoft YaHei UI", 12)
+FONT_DROP    = ("Microsoft YaHei UI", 13, "bold")
+FONT_H2      = ("Microsoft YaHei UI", 15, "bold")
+FONT_TITLE   = ("Microsoft YaHei UI", 18, "bold")
+FONT_DISPLAY = ("Microsoft YaHei UI", 22, "bold")
+FONT_MONO    = ("Consolas", 10)
+FONT_MONO_B  = ("Consolas", 22, "bold")     # large numerics on value pill
 
 
 # ── Metric grouping (cascade dropdown / menubar order) ─────────────────
