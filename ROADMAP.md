@@ -34,15 +34,20 @@ M3-M7 这些研究/科研增强项**全部推到拿证后**做。
 
 #### A0-2 god 类拆分
 
-- [ ] **gui.py 拆分**（1429 行 → ~4 个文件，每个 ~350 行）：
-  - `voicemap/gui/app.py`：`VoiceMapApp` 主类，仅协调
-  - `voicemap/gui/theme.py`：颜色 / 字体 / ttk style
-  - `voicemap/gui/widgets.py`：`MetricPopup` / 自定义 widget
-  - `voicemap/gui/dialogs.py`：`SettingsDialog` / `CompareDialog` / `AboutDialog`（新）
-- [ ] **analyzer.py 拆分**：把 `output_vrp_csv()` (252 行) 抽到 `voicemap/csv_writer.py`
-- [ ] **保持 metrics.py 不拆**：内部已按 calculator 类组织得不错，硬拆反而增风险
+- [x] **gui.py 拆分**（2096 行 → 5 个文件）：
+  - [x] `voicemap/gui/__init__.py`：转出 `VoiceMapApp` / `main`（10 行）
+  - [x] `voicemap/gui/theme.py`：颜色 + 字体 + `_METRIC_SECTIONS`（~80 行）
+  - [x] `voicemap/gui/widgets.py`：`MetricPopup` + `QueueHandler`（~250 行）
+  - [x] `voicemap/gui/dialogs.py`：`SettingsDialog` / `CompareDialog` / `ProgressDialog` / `AboutDialog`（新，~370 行）
+  - [x] `voicemap/gui/app.py`：`VoiceMapApp` + `main`（剩 1505 行；类本身的进一步拆分留给 A0-4）
+  - [x] 帮助菜单加 "关于..." → AboutDialog
+- [x] **analyzer.py 拆分**：`output_vrp_csv()` (253 行) → `voicemap/csv_writer.py:write_vrp()`；analyzer 留 15 行 shim 保持 API 不变
+- [x] **保持 metrics.py 不拆**：按计划
 
-**验证**：同 A0-1。
+**验证**（A0-2 完成时）：
+- `validate_params.py`：48 PASS / 4 WARN / 0 FAIL ✓
+- `main.py audio/test_Voice_EGG.wav --plot-mode none`：12s 跑完 ✓
+- GUI 启动 + 关于对话框可弹出 ✓
 
 #### A0-3 工程化 + 软著元数据
 
