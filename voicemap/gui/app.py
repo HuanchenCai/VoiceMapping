@@ -39,12 +39,13 @@ from voicemap.plotter import draw_vrp_on_ax, METRIC_CFG, _SKIP_ZERO_METRICS
 from voicemap.gui.theme import (
     BG, PANEL, PANEL_HI, BORDER, TEXT, MUTED, ACCENT, ACCENT_HI,
     OK, WARN, ERR,
+    TEXT_SEC, TEXT_MUTED,
     FONT_UI, FONT_UI_B, FONT_TITLE, FONT_SUB, FONT_DROP, FONT_MONO,
     _METRIC_SECTIONS, _DEFAULT_METRIC_CHAIN,
 )
 from voicemap.gui.widgets import MetricPopup, QueueHandler
 from voicemap.gui.dialogs import (
-    SettingsDialog, CompareDialog, ProgressDialog, AboutDialog,
+    SettingsDialog, CompareDialog, ProgressDialog, AboutDialog, LogWindow,
 )
 from voicemap.gui.modern_menu import ModernMenubar, ModernPopup
 from voicemap.i18n import tr, set_language, get_language, subscribe as i18n_subscribe
@@ -500,7 +501,18 @@ class VoiceMapApp(_TkBase):
         _safe_text("excel_btn",       "left.export_excel")
         _safe_text("report_btn",      "left.gen_report")
         _safe_text("_compare_btn",    "left.compare")
-        _safe_text("_log_lbl",        "left.log")
+        _safe_text("_log_lbl",        "left.log")    # may be None; _safe_text guards
+        # Inspector action buttons (option-C bottom)
+        _safe_text("_inspect_btn_excel",   "inspector.btn.excel")
+        _safe_text("_inspect_btn_report",  "inspector.btn.report")
+        _safe_text("_inspect_btn_compare", "inspector.btn.compare")
+        _safe_text("_metric_nav_hint",     "metric_bar.nav_hint")
+        # Re-render Inspector (so metric description / unit / clinical
+        # band labels follow the new language).
+        try:
+            self._update_inspector()
+        except Exception:
+            pass
 
     # ── popup factories（每次点开新建一个 ModernPopup） ──────────────────
     def _popup_file(self) -> "ModernPopup":
@@ -572,7 +584,14 @@ class VoiceMapApp(_TkBase):
     def _popup_view(self) -> "ModernPopup":
         p = ModernPopup(self)
         p.add_command(tr("view.fit"), command=self._open_fit_menu)
+        p.add_separator()
+        p.add_command(tr("view.log"), command=self._open_log_window)
         return p
+
+    def _open_log_window(self):
+        """View menu → 日志面板 / Log Console — opens the standalone
+        log Toplevel. Singleton; reopening lifts the existing window."""
+        LogWindow.show(self)
 
     def _popup_help(self) -> "ModernPopup":
         p = ModernPopup(self)
@@ -736,17 +755,46 @@ class VoiceMapApp(_TkBase):
         self.metric_var.trace_add("write", self._on_metric_change)
 
     def _build_inspector(self, parent):
-        """Inspector right column. Top half scrolls (metric name +
-        description + clinical bands + current value pill); bottom half
-        is a fixed-height log panel with its own internal scrollbar.
-        A divider 1 px line separates the two halves visually."""
-        # ── Top half: scrollable area (sized via expand) ─────────────
+        """Inspector right column per docs/UI_DESIGN.md option-C spec.
+
+        Top-to-bottom (no log here — log lives in a separate Toplevel
+        opened from View menu, per spec):
+          • Metric name (large)
+          • Description
+          • Unit hint
+          • Clinical reference card
+          • Current value card (hover-driven)
+          • (vertical spacer)
+          • Action buttons (导出 Excel / 生成报告 / 对比录音)
+
+        Top half scrolls when content exceeds available height; the
+        action buttons row stays pinned at the bottom of the column.
+        """
+        # ── Bottom: action buttons (pinned, packed first with side="bottom") ─
+        actions = tk.Frame(parent, bg=PANEL)
+        actions.pack(side="bottom", fill="x", padx=14, pady=(8, 14))
+
+        self._inspect_btn_excel = ttk.Button(
+            actions, text=tr("inspector.btn.excel"),
+            style="Ghost.TButton", command=self._export_excel)
+        self._inspect_btn_excel.pack(fill="x", pady=2)
+        self._inspect_btn_report = ttk.Button(
+            actions, text=tr("inspector.btn.report"),
+            style="Ghost.TButton", command=self._export_report)
+        self._inspect_btn_report.pack(fill="x", pady=2)
+        self._inspect_btn_compare = ttk.Button(
+            actions, text=tr("inspector.btn.compare"),
+            style="Ghost.TButton", command=self._open_compare_dialog)
+        self._inspect_btn_compare.pack(fill="x", pady=2)
+
+        # 1 px BORDER divider above the actions row
+        sep = tk.Frame(parent, bg=BORDER, height=1)
+        sep.pack(side="bottom", fill="x", padx=8, pady=(0, 0))
+
+        # ── Top: scrollable area for metric details ───────────────────
         upper = tk.Frame(parent, bg=PANEL)
         upper.pack(side="top", fill="both", expand=True)
 
-        # tk.Canvas is the only built-in scrollable container in
-        # tkinter. We park a real Frame inside it and update the
-        # scrollregion whenever the inner Frame's size changes.
         scroll_canvas = tk.Canvas(upper, bg=PANEL, highlightthickness=0,
                                    borderwidth=0)
         scroll_canvas.pack(side="left", fill="both", expand=True,
@@ -760,8 +808,6 @@ class VoiceMapApp(_TkBase):
         pad = tk.Frame(scroll_canvas, bg=PANEL)
         pad_window = scroll_canvas.create_window(
             (0, 0), window=pad, anchor="nw")
-        # Make the inner pad take the full canvas width (so wrap labels
-        # know how wide they can grow).
         def _resize_pad(_event):
             scroll_canvas.itemconfigure(
                 pad_window, width=scroll_canvas.winfo_width())
@@ -769,7 +815,6 @@ class VoiceMapApp(_TkBase):
         pad.bind("<Configure>",
                  lambda _e: scroll_canvas.configure(
                      scrollregion=scroll_canvas.bbox("all")))
-        # Mouse wheel inside the Inspector → scroll the canvas
         def _on_wheel(event):
             if hasattr(event, "delta") and event.delta:
                 scroll_canvas.yview_scroll(-int(event.delta / 120), "units")
@@ -778,90 +823,90 @@ class VoiceMapApp(_TkBase):
             elif getattr(event, "num", 0) == 5:
                 scroll_canvas.yview_scroll(1, "units")
             return "break"
-        # Bind on the canvas + the inner frame so wheel works regardless
-        # of which child the cursor is over.
         for w in (scroll_canvas, pad):
             w.bind("<MouseWheel>", _on_wheel)
             w.bind("<Button-4>",   _on_wheel)
             w.bind("<Button-5>",   _on_wheel)
 
-        # ── Inspector content (lives inside scrollable pad) ───────────
-        tk.Label(pad, text=tr("inspector.title"), bg=PANEL, fg=MUTED,
-                 font=FONT_UI_B).pack(anchor="w")
-
+        # Metric name (large) — first thing per spec, no "Details" header
         self._inspector_metric_name = tk.Label(
             pad, text="—",
             bg=PANEL, fg=ACCENT,
             font=("Microsoft YaHei UI", 22, "bold"),
             anchor="w")
-        self._inspector_metric_name.pack(anchor="w", pady=(8, 0))
+        self._inspector_metric_name.pack(anchor="w")
 
         self._inspector_metric_desc = tk.Label(
             pad, text=tr("inspector.no_metric"),
-            bg=PANEL, fg=MUTED, font=FONT_UI,
+            bg=PANEL, fg=TEXT_SEC, font=FONT_UI,
             wraplength=300, justify="left", anchor="w")
-        self._inspector_metric_desc.pack(anchor="w", pady=(2, 8), fill="x")
+        self._inspector_metric_desc.pack(anchor="w", pady=(2, 0), fill="x")
 
-        # Clinical bands (rebuilt on metric switch)
+        # Unit hint (own row, small muted)
+        self._inspector_unit_lbl = tk.Label(
+            pad, text="",
+            bg=PANEL, fg=MUTED, font=("Microsoft YaHei UI", 9),
+            anchor="w")
+        self._inspector_unit_lbl.pack(anchor="w", pady=(2, 12), fill="x")
+
+        # Clinical reference card (BORDER outline)
         self._inspector_cards = tk.Frame(pad, bg=PANEL)
-        self._inspector_cards.pack(fill="x", pady=(0, 8))
+        self._inspector_cards.pack(fill="x", pady=(0, 12))
 
-        # Current-value pill (built once, updated per hover)
-        self._inspector_value_card = tk.Frame(pad, bg=PANEL)
-        self._inspector_value_card.pack(fill="x", pady=(8, 0))
+        # Current-value card (BORDER outline) — hover-updated
+        self._inspector_value_card = tk.Frame(
+            pad, bg=PANEL_HI,
+            highlightthickness=1, highlightbackground=BORDER,
+            highlightcolor=BORDER)
+        self._inspector_value_card.pack(fill="x", pady=(0, 8))
+        # inner padding via a wrap frame
+        vc_inner = tk.Frame(self._inspector_value_card, bg=PANEL_HI)
+        vc_inner.pack(fill="x", padx=12, pady=10)
         self._inspector_value_header = tk.Label(
-            self._inspector_value_card, text=tr("inspector.current"),
-            bg=PANEL, fg=ACCENT, font=FONT_UI_B)
+            vc_inner, text=tr("inspector.current"),
+            bg=PANEL_HI, fg=ACCENT, font=FONT_UI_B)
         self._inspector_value_header.pack(anchor="w", pady=(0, 4))
         self._inspector_value_coords = tk.Label(
-            self._inspector_value_card, text="—",
-            bg=PANEL, fg=MUTED, font=FONT_UI)
+            vc_inner, text="—",
+            bg=PANEL_HI, fg=MUTED, font=FONT_UI)
         self._inspector_value_coords.pack(anchor="w")
-        big = tk.Frame(self._inspector_value_card, bg=PANEL)
+        big = tk.Frame(vc_inner, bg=PANEL_HI)
         big.pack(anchor="w", pady=(2, 0))
         self._inspector_value_num = tk.Label(
             big, text="—",
-            bg=PANEL, fg=ACCENT_HI,
+            bg=PANEL_HI, fg=ACCENT_HI,
             font=("Consolas", 22, "bold"))
         self._inspector_value_num.pack(side="left")
         self._inspector_value_unit = tk.Label(
             big, text="",
-            bg=PANEL, fg=MUTED, font=FONT_UI)
+            bg=PANEL_HI, fg=MUTED, font=FONT_UI)
         self._inspector_value_unit.pack(side="left", padx=(4, 0), pady=(8, 0))
         self._inspector_value_sev = tk.Label(
-            self._inspector_value_card, text="",
-            bg=PANEL, fg=MUTED, font=FONT_UI_B)
-        self._inspector_value_sev.pack(anchor="w", pady=(2, 8))
+            vc_inner, text="",
+            bg=PANEL_HI, fg=MUTED, font=FONT_UI_B)
+        self._inspector_value_sev.pack(anchor="w", pady=(2, 0))
 
-        # ── Divider line between scrollable upper half + fixed log ──
-        sep = tk.Frame(parent, bg=BORDER, height=1)
-        sep.pack(side="top", fill="x", padx=8)
-
-        # ── Bottom half: fixed-height log ────────────────────────────
-        log_outer = tk.Frame(parent, bg=PANEL, height=180)
-        log_outer.pack(side="bottom", fill="x", padx=14, pady=(8, 14))
-        log_outer.pack_propagate(False)
-        self._log_lbl = tk.Label(log_outer, text=tr("left.log"),
-                                  bg=PANEL, fg=ACCENT, font=FONT_UI_B)
-        self._log_lbl.pack(anchor="w", pady=(0, 4))
-        log_wrap = tk.Frame(log_outer, bg=PANEL)
-        log_wrap.pack(fill="both", expand=True)
-        self.log_text = tk.Text(log_wrap, bg="#0b1117", fg=TEXT, font=FONT_MONO,
-                                bd=0, highlightthickness=1, highlightbackground=BORDER,
-                                highlightcolor=BORDER,
-                                insertbackground=TEXT, wrap="word",
-                                padx=8, pady=6, state="disabled",
-                                height=6, width=20)
-        self.log_text.pack(side="left", fill="both", expand=True)
-        sb = ttk.Scrollbar(log_wrap, command=self.log_text.yview)
-        sb.pack(side="right", fill="y")
-        self.log_text.configure(yscrollcommand=sb.set)
+        # ── Hidden log_text widget kept alive for compatibility ──────
+        # _append_log writes to it; LogWindow mirrors it. Keeping it
+        # parented inside Inspector but never packed avoids breaking
+        # all the existing _append_log call sites.
+        log_holder = tk.Frame(parent, bg=PANEL, width=0, height=0)
+        # Don't pack — invisible.
+        self.log_text = tk.Text(log_holder, bg="#0b1117", fg=TEXT,
+                                font=FONT_MONO,
+                                bd=0, highlightthickness=0,
+                                state="disabled", height=1, width=1)
+        # log_text has tag config below; no packing means it doesn't
+        # render but accepts insertions.
         self.log_text.tag_configure("INFO",    foreground=TEXT)
         self.log_text.tag_configure("DEBUG",   foreground=MUTED)
         self.log_text.tag_configure("WARNING", foreground=WARN)
         self.log_text.tag_configure("ERROR",   foreground=ERR)
         self.log_text.tag_configure("OK",      foreground=OK)
         self.log_text.tag_configure("META",    foreground=ACCENT)
+        # _log_lbl is no longer in the UI; set a stub for the
+        # _on_language_changed re-render hook.
+        self._log_lbl = None
 
     def _build_status_bar(self, parent):
         """底部 status bar：左 = 当前文件元信息 + 网格数 + 耗时；右 = 版权。"""
@@ -1382,14 +1427,18 @@ class VoiceMapApp(_TkBase):
             spec = None
         desc = (spec.description if spec else "") or "—"
         unit = (spec.unit if spec else "") or ""
-        unit_str = f"  ·  {tr('inspector.unit')}: {unit}" if unit else ""
         self._inspector_metric_name.configure(text=name)
-        self._inspector_metric_desc.configure(text=f"{desc}{unit_str}")
+        self._inspector_metric_desc.configure(text=desc)
+        # Unit on its own row (per spec mockup)
+        if unit:
+            self._inspector_unit_lbl.configure(
+                text=f"{tr('inspector.unit')}: {unit}")
+        else:
+            self._inspector_unit_lbl.configure(text="")
 
         from voicemap.report import _THRESHOLDS
         bands = _THRESHOLDS.get(name)
         self._inspector_set_clinical(bands)
-        # Reset hover pill on metric change
         self._update_inspector_value(None, None)
 
     # Severity → color mapping
@@ -1822,8 +1871,8 @@ class VoiceMapApp(_TkBase):
         self._clarity_render_after = self.after(80, lambda c=col: self._render_metric(c))
 
     def _update_statusbar(self):
-        """Reflect current data state in the bottom status bar.
-        Called on file load + analysis completion."""
+        """Reflect current data state in the bottom status bar (option-C).
+        Spec: ``● 文件 · N 网格 · k=K · M 个周期 · 耗时 X.Xs``."""
         if not hasattr(self, "_statusbar_left"):
             return
         path = getattr(self, "audio_path", None)
@@ -1833,7 +1882,24 @@ class VoiceMapApp(_TkBase):
         else:
             n = len(df) if df is not None else 0
             dt = getattr(self, "_last_analysis_time", 0.0)
-            text = tr("statusbar.file_meta", name=path.name, n=n, dt=dt)
+            # k = current cluster count (analyzer's setting, falls back to var)
+            try:
+                k = int(self.cluster_k_var.get())
+            except Exception:
+                k = 5
+            cycles = 0
+            if df is not None and "Total" in df.columns:
+                try:
+                    cycles = int(df["Total"].sum())
+                except Exception:
+                    cycles = 0
+            if cycles > 0:
+                text = tr("statusbar.file_meta_full",
+                          name=path.name, n=n, k=k,
+                          cycles=f"{cycles:,}", dt=dt)
+            else:
+                # File loaded, not yet analyzed.
+                text = tr("statusbar.file_meta", name=path.name, n=n, dt=dt)
         try:
             self._statusbar_left.configure(text=text)
         except tk.TclError:

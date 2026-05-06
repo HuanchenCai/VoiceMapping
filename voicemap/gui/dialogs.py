@@ -329,6 +329,99 @@ class ProgressDialog(tk.Toplevel):
         self.destroy()
 
 
+# ─── 日志窗（option-C: 日志不在主界面 Inspector 里） ───────────────────────
+class LogWindow(tk.Toplevel):
+    """独立日志面板。spec 里 Inspector 不放 log；通过菜单 视图 → 日志面板
+    打开此窗口。再次打开则置顶现有窗口（单例）。"""
+
+    _instance: "LogWindow | None" = None
+
+    @classmethod
+    def show(cls, app: "VoiceMapApp") -> "LogWindow":
+        if cls._instance is not None and cls._instance.winfo_exists():
+            cls._instance.lift()
+            cls._instance.focus_force()
+            return cls._instance
+        cls._instance = cls(app)
+        return cls._instance
+
+    def __init__(self, app: "VoiceMapApp"):
+        super().__init__(app)
+        self.app = app
+        self.transient(app)
+        self.title(tr("log.window.title"))
+        self.configure(bg=PANEL)
+        self.geometry("720x460")
+        self.minsize(480, 240)
+
+        pad = tk.Frame(self, bg=PANEL)
+        pad.pack(fill="both", expand=True, padx=14, pady=14)
+
+        # Title row
+        tk.Label(pad, text=tr("log.window.title"), bg=PANEL, fg=ACCENT,
+                 font=FONT_UI_B).pack(anchor="w", pady=(0, 6))
+
+        wrap = tk.Frame(pad, bg=PANEL)
+        wrap.pack(fill="both", expand=True)
+
+        # Mirror tk.Text widget; we relocate the live one from the app.
+        self.text = tk.Text(wrap, bg="#0b1117", fg=TEXT,
+                             font=("Consolas", 10),
+                             bd=0, highlightthickness=1,
+                             highlightbackground=BORDER,
+                             highlightcolor=BORDER,
+                             insertbackground=TEXT, wrap="word",
+                             padx=8, pady=6, state="disabled")
+        self.text.pack(side="left", fill="both", expand=True)
+        sb = ttk.Scrollbar(wrap, command=self.text.yview)
+        sb.pack(side="right", fill="y")
+        self.text.configure(yscrollcommand=sb.set)
+        for tag, color in (("INFO", TEXT), ("DEBUG", MUTED),
+                           ("WARNING", "#d97706"), ("ERROR", "#dc2626"),
+                           ("OK", "#84cc16"), ("META", ACCENT)):
+            self.text.tag_configure(tag, foreground=color)
+
+        # Sync existing log content from app's main log_text widget so
+        # opening the window mid-session doesn't lose history.
+        try:
+            src = app.log_text
+            src.configure(state="normal")
+            content = src.get("1.0", "end-1c")
+            src.configure(state="disabled")
+            if content:
+                self.text.configure(state="normal")
+                self.text.insert("end", content + "\n")
+                self.text.configure(state="disabled")
+                self.text.see("end")
+        except Exception:
+            pass
+
+        # Wire app's _append_log to also push into this window. The hook
+        # is removed automatically when the window is destroyed.
+        self._orig_append = app._append_log
+        def _append_to_both(level: str, text: str):
+            self._orig_append(level, text)
+            try:
+                self.text.configure(state="normal")
+                self.text.insert("end", text + "\n", level)
+                self.text.see("end")
+                self.text.configure(state="disabled")
+            except tk.TclError:
+                pass
+        app._append_log = _append_to_both
+
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _on_close(self):
+        # Restore original _append_log so closing doesn't break logging.
+        try:
+            self.app._append_log = self._orig_append
+        except Exception:
+            pass
+        type(self)._instance = None
+        self.destroy()
+
+
 # ─── 关于对话框（A0-2 新增） ────────────────────────────────────────────────
 class AboutDialog(tk.Toplevel):
     """版本 / 作者 / 版权信息。软著申请截图里要有这一张。

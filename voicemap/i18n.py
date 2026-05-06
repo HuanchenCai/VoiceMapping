@@ -106,7 +106,17 @@ STRINGS: dict[str, dict[str, str]] = {
         "inspector.current":    "本次值",
         "statusbar.no_file":    "未加载文件",
         "statusbar.file_meta":  "{name}  ·  {n} 网格  ·  耗时 {dt:.1f}s",
+        "statusbar.file_meta_full": "● {name}  ·  {n} 网格  ·  k={k}  ·  {cycles} 个周期  ·  耗时 {dt:.1f}s",
         "statusbar.copyright":  "© 2026 蔡寰宸  ·  v{ver}",
+        # Inspector action buttons (spec) + log dialog
+        "inspector.btn.excel":  "导出 Excel",
+        "inspector.btn.report": "生成报告",
+        "inspector.btn.compare":"对比 2 段录音",
+        "log.window.title":     "日志面板",
+        "view.log":             "日志面板…",
+        # Tracks panel row
+        "tracks.no_files":      "还没有文件 · 拖入 .wav 开始",
+        "tracks.unanalyzed":    "未分析",
 
         # ── left panel ──
         "left.settings":        "⚙  设置",
@@ -308,7 +318,17 @@ STRINGS: dict[str, dict[str, str]] = {
         "inspector.current":    "Current value",
         "statusbar.no_file":    "No file loaded",
         "statusbar.file_meta":  "{name}  ·  {n} cells  ·  {dt:.1f}s",
+        "statusbar.file_meta_full": "● {name}  ·  {n} cells  ·  k={k}  ·  {cycles} cycles  ·  {dt:.1f}s",
         "statusbar.copyright":  "© 2026 Huanchen Cai  ·  v{ver}",
+        # Inspector action buttons + log dialog
+        "inspector.btn.excel":  "Export Excel",
+        "inspector.btn.report": "Generate Report",
+        "inspector.btn.compare":"Compare Two Recordings",
+        "log.window.title":     "Log Console",
+        "view.log":             "Log Console…",
+        # Tracks panel row
+        "tracks.no_files":      "No file yet · drop a .wav to begin",
+        "tracks.unanalyzed":    "not analyzed",
 
         # ── left panel ──
         "left.settings":        "⚙  Settings",
