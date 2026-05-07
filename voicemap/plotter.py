@@ -687,10 +687,16 @@ def draw_vrp_comparison(df_a: pd.DataFrame,
     midi_edges = np.arange(MIDI_MIN - 0.5, MIDI_MAX + 1.5)
     spl_edges  = np.arange(SPL_MIN  - 0.5, SPL_MAX  + 1.5)
 
-    # Left + middle: per-metric palette
+    # Left + middle: per-metric palette. Long file stems
+    # ("complete_vrp_results_20260506_204735_VRP") would overflow the
+    # subplot title and visually overlap with the next subplot. Truncate
+    # to a sensible length and break onto 2 lines if metric name is long.
+    def _short(s: str, maxlen: int = 36) -> str:
+        return s if len(s) <= maxlen else "…" + s[-(maxlen - 1):]
     for ax, grid, label in ((axes[0], ga, label_a), (axes[1], gb, label_b)):
         ax.set_facecolor(_BG_AX)
-        ax.set_title(f"{label} · {cfg['label']}", color=_FG_TEXT, fontsize=9)
+        ax.set_title(f"{_short(label)}\n{cfg['label']}",
+                     color=_FG_TEXT, fontsize=9, pad=4)
         if grid.count() == 0:
             ax.text(0.5, 0.5, "no data", ha="center", va="center",
                     color="#888", transform=ax.transAxes)
@@ -720,7 +726,8 @@ def draw_vrp_comparison(df_a: pd.DataFrame,
     diff_ma = np.ma.masked_invalid(diff)
     axd = axes[2]
     axd.set_facecolor(_BG_AX)
-    axd.set_title(f"Δ = {label_a} − {label_b}", color=_FG_TEXT, fontsize=9)
+    axd.set_title(f"Δ = A − B  ({_short(label_a, 22)} − {_short(label_b, 22)})",
+                   color=_FG_TEXT, fontsize=8, pad=4)
     if diff_ma.count() == 0:
         axd.text(0.5, 0.5, "no overlap", ha="center", va="center",
                  color="#888", transform=axd.transAxes)

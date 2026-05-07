@@ -136,7 +136,11 @@ class CompareDialog(tk.Toplevel):
         self.transient(app)
         self.title(tr("compare.title"))
         self.configure(bg=PANEL)
-        self.geometry("1300x560")
+        # 1500×640: wider so the 3 subplots (A, B, A−B) and their titles
+        # don't overlap when long file stems are passed in. Min 1200×500
+        # is the floor — below that the colorbar legends cramp.
+        self.geometry("1500x640")
+        self.minsize(1200, 500)
 
         # File pickers (top bar)
         bar = tk.Frame(self, bg=PANEL)
@@ -147,14 +151,31 @@ class CompareDialog(tk.Toplevel):
         self._df_a = None
         self._df_b = None
 
+        # Path display: show *just the filename* in a Label. Showing
+        # full paths in an Entry truncated to whatever fits and looked
+        # broken (user couldn't tell which file was loaded). The full
+        # path stays in csv_a/_b StringVars for the analyzer; the Label
+        # below the filename shows the parent dir for context.
+        self._csv_name_lbls = {}
+        self._csv_dir_lbls  = {}
         for label, var, slot in (("A", self.csv_a, "a"), ("B", self.csv_b, "b")):
             f = tk.Frame(bar, bg=PANEL)
             f.pack(side="left", fill="x", expand=True, padx=(0, 8))
             tk.Label(f, text=label, bg=PANEL, fg=ACCENT,
                      font=FONT_UI_B, width=2).pack(side="left")
-            ttk.Entry(f, textvariable=var).pack(side="left", fill="x", expand=True)
-            ttk.Button(f, text="…", style="Ghost.TButton", width=3,
-                       command=lambda s=slot: self._pick_csv(s)).pack(side="left", padx=(4, 0))
+            mid = tk.Frame(f, bg=PANEL)
+            mid.pack(side="left", fill="x", expand=True)
+            self._csv_name_lbls[slot] = tk.Label(
+                mid, text=tr("compare.no_file"),
+                bg=PANEL, fg=TEXT, font=FONT_UI_B,
+                anchor="w")
+            self._csv_name_lbls[slot].pack(fill="x", anchor="w")
+            self._csv_dir_lbls[slot] = tk.Label(
+                mid, text="", bg=PANEL, fg=MUTED, font=FONT_UI,
+                anchor="w")
+            self._csv_dir_lbls[slot].pack(fill="x", anchor="w")
+            ttk.Button(f, text=tr("compare.pick_btn"), style="Ghost.TButton",
+                       command=lambda s=slot: self._pick_csv(s)).pack(side="left", padx=(8, 0))
 
         # Metric + render controls
         ctrl = tk.Frame(self, bg=PANEL)
@@ -203,10 +224,14 @@ class CompareDialog(tk.Toplevel):
         except Exception as e:  # noqa: BLE001
             self._show_msg(tr("compare.tip_read_fail", e=e))
             return
+        p = Path(path)
         if slot == "a":
             self.csv_a.set(path); self._df_a = df
         else:
             self.csv_b.set(path); self._df_b = df
+        # Update visible labels: filename prominent, parent dir muted
+        self._csv_name_lbls[slot].configure(text=p.name)
+        self._csv_dir_lbls[slot].configure(text=str(p.parent))
         # Update metric dropdown to intersection of both loaded DFs
         if self._df_a is not None and self._df_b is not None:
             common = [c for c in self._df_a.columns
