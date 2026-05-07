@@ -91,8 +91,11 @@ _METRIC_SECTIONS: list = [
         # writes the CSV columns but the metric selector hides them.
     ]),
     ("EGG · 电声门图", [
-        "Qcontact", "Icontact", "dEGGmax", "HRFegg",
+        "Qcontact", "dEGGmax", "HRFegg",
         "OQ", "SPQ", "CIQ",
+        # Icontact removed from menu — derived metric (log·Qcontact) without
+        # standalone clinical use; dEGGmax + Qcontact together convey same
+        # info more transparently. CSV column still written by the analyzer.
     ]),
     ("唱歌特异性 · Singing-specific", [
         "VibratoRate", "VibratoExtent", "VibratoJitter",

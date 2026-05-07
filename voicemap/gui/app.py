@@ -44,7 +44,7 @@ from voicemap.gui.theme import (
     FONT_CAPTION, FONT_SMALL, FONT_H2, FONT_DISPLAY, FONT_MONO_B,
     _METRIC_SECTIONS, _DEFAULT_METRIC_CHAIN,
 )
-from voicemap.gui.widgets import MetricPopup, QueueHandler
+from voicemap.gui.widgets import MetricPopup, QueueHandler, HoverTooltip
 from voicemap.gui.dialogs import (
     SettingsDialog, CompareDialog, ProgressDialog, AboutDialog, LogWindow,
 )
@@ -1195,8 +1195,29 @@ class VoiceMapApp(_TkBase):
             pad, text="—",
             bg=PANEL, fg=ACCENT,
             font=("Microsoft YaHei UI", 19, "bold"),
-            anchor="w", justify="left")
+            anchor="w", justify="left",
+            cursor="question_arrow")   # cue: hovering reveals more info
         self._inspector_metric_name.pack(anchor="w", fill="x")
+        # Hover tooltip on the metric name — uses metric.tooltip.X (long
+        # detailed prose) if present, falls back to metric.desc.X
+        # (the short blurb shown right under the name).
+        def _metric_tooltip_text() -> str:
+            name = self.metric_var.get() if hasattr(self, "metric_var") else ""
+            if not name:
+                return ""
+            tip_key = f"metric.tooltip.{name}"
+            tip = tr(tip_key)
+            if tip == tip_key:
+                # Fall back to the short description so users still see
+                # *something* for less-common metrics.
+                short_key = f"metric.desc.{name}"
+                tip = tr(short_key)
+                if tip == short_key:
+                    tip = ""
+            return tip
+        self._inspector_metric_tip = HoverTooltip(
+            self._inspector_metric_name, _metric_tooltip_text)
+        self._inspector_metric_tip.attach()
 
         self._inspector_metric_desc = tk.Label(
             pad, text=tr("inspector.no_metric"),
@@ -2509,8 +2530,23 @@ class VoiceMapApp(_TkBase):
         """A | B | A-B comparison on two previously-written VRP CSVs."""
         CompareDialog(self)
 
+    def _open_with_default_app(self, path):
+        """Open `path` with the OS default application. Used after
+        Excel / report exports so the user sees their output immediately
+        instead of having to dig through the output folder."""
+        try:
+            if sys.platform.startswith("win"):
+                os.startfile(str(path))  # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", str(path)])
+            else:
+                subprocess.Popen(["xdg-open", str(path)])
+        except Exception as e:  # noqa: BLE001
+            self._append_log("ERROR", tr("log.open_fail", path=path, e=e))
+
     def _export_report(self):
-        """生成中文嗓音分析报告 (.md)：每项指标按临床阈值自动分级。"""
+        """生成中文嗓音分析报告 (.md)：每项指标按临床阈值自动分级。
+        导出成功后用系统默认 .md 关联程序打开（用户要求：导完即开）。"""
         if self._last_df is None or self.last_csv is None:
             self._append_log("WARNING", tr("log.no_data_for_report"))
             return
@@ -2528,11 +2564,14 @@ class VoiceMapApp(_TkBase):
             audio_name = self.audio_path.name if self.audio_path else "(unknown)"
             generate_report(self._last_df, path, audio_name=audio_name)
             self._append_log("META", tr("log.report_saved", path=path))
+            # Auto-open per user spec
+            self._open_with_default_app(path)
         except Exception as e:  # noqa: BLE001
             self._append_log("ERROR", tr("log.report_fail", e=e))
 
     def _export_excel(self):
-        """一次分析完成后，可导出 .xlsx：Summary + Grouped + 每 metric 一个 heatmap sheet。"""
+        """一次分析完成后，可导出 .xlsx：Summary + Grouped + 每 metric 一个 heatmap sheet。
+        导出成功后用 Excel/WPS 打开（用户要求：导完即开）。"""
         if self._last_df is None or self.last_csv is None:
             self._append_log("WARNING", tr("log.no_data_for_excel"))
             return
@@ -2549,6 +2588,7 @@ class VoiceMapApp(_TkBase):
             from voicemap.excel_export import export_vrp_xlsx
             export_vrp_xlsx(self._last_df, path)
             self._append_log("META", tr("log.excel_saved", path=path))
+            self._open_with_default_app(path)
         except Exception as e:  # noqa: BLE001
             self._append_log("ERROR", tr("log.excel_fail", e=e))
 

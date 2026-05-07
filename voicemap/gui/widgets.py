@@ -248,6 +248,112 @@ class MetricPopup(tk.Toplevel):
             pass
 
 
+class HoverTooltip:
+    """Simple delayed-show tooltip for any tk widget.
+
+    Usage:
+        tip = HoverTooltip(widget, lambda: tr("metric.tooltip.OQ"))
+        tip.attach()           # binds <Enter> / <Leave> / <Motion>
+        tip.set_text_provider(lambda: tr("metric.tooltip.NEW"))  # update later
+
+    Why a class instead of a module-level helper:
+      * the text provider is a callback so callers can re-translate
+        on the fly (language switch);
+      * clean teardown — `detach()` unbinds and kills any pending
+        after() callback (avoids leaking timers on widget destroy).
+
+    The tooltip itself is a borderless Toplevel with a small padded
+    Label. Same look-and-feel as ModernPopup but stripped down — no
+    rounded corners, no click-outside-to-close (it just disappears on
+    <Leave>).
+    """
+
+    DELAY_MS = 500    # ms to wait before showing (avoids flicker on transit)
+    MAX_WIDTH = 360   # wraplength for long descriptions
+
+    def __init__(self, widget, text_provider):
+        self._widget = widget
+        self._provider = text_provider
+        self._after_id: str | None = None
+        self._tip: tk.Toplevel | None = None
+
+    def set_text_provider(self, provider):
+        self._provider = provider
+
+    def attach(self):
+        self._widget.bind("<Enter>", self._on_enter, add="+")
+        self._widget.bind("<Leave>", self._on_leave, add="+")
+        self._widget.bind("<ButtonPress>", self._on_leave, add="+")
+
+    def detach(self):
+        if self._after_id is not None:
+            try:
+                self._widget.after_cancel(self._after_id)
+            except Exception:
+                pass
+            self._after_id = None
+        self._hide()
+
+    def _on_enter(self, _event=None):
+        if self._after_id is not None:
+            try:
+                self._widget.after_cancel(self._after_id)
+            except Exception:
+                pass
+        self._after_id = self._widget.after(self.DELAY_MS, self._show)
+
+    def _on_leave(self, _event=None):
+        if self._after_id is not None:
+            try:
+                self._widget.after_cancel(self._after_id)
+            except Exception:
+                pass
+            self._after_id = None
+        self._hide()
+
+    def _show(self):
+        self._after_id = None
+        try:
+            text = self._provider()
+        except Exception:
+            return
+        if not text:
+            return
+        # Position just below + slightly right of the widget
+        x = self._widget.winfo_rootx() + 8
+        y = self._widget.winfo_rooty() + self._widget.winfo_height() + 6
+
+        tip = tk.Toplevel(self._widget)
+        tip.wm_overrideredirect(True)
+        try:
+            tip.wm_attributes("-topmost", True)
+        except tk.TclError:
+            pass
+        tip.configure(bg=BORDER)    # 1 px border via outer frame bg
+        inner = tk.Frame(tip, bg=PANEL_HI)
+        inner.pack(padx=1, pady=1)   # gives the BORDER frame its 1 px ring
+        lbl = tk.Label(
+            inner,
+            text=text,
+            bg=PANEL_HI, fg=TEXT,
+            font=("Microsoft YaHei UI", 10),
+            justify="left", anchor="w",
+            wraplength=self.MAX_WIDTH,
+            padx=12, pady=10,
+        )
+        lbl.pack()
+        tip.wm_geometry(f"+{x}+{y}")
+        self._tip = tip
+
+    def _hide(self):
+        if self._tip is not None:
+            try:
+                self._tip.destroy()
+            except tk.TclError:
+                pass
+            self._tip = None
+
+
 class QueueHandler(logging.Handler):
     """Logging handler that pushes records to a queue.
 
