@@ -558,7 +558,12 @@ class VoiceMapApp(_TkBase):
         except tk.TclError:
             pass
         _safe_text("drop_sub",        "drop.subtitle")
-        _safe_text("_metric_label",   "header.metric")
+        # `header.metric` resolves to 'Metric' in BOTH zh and en — that
+        # was the wrong key; the actual i18n entry for this label is
+        # `metric_bar.label` (zh: '指标'). Using header.metric meant the
+        # label switched to 'Metric' permanently after the first
+        # language-change broadcast even back in zh mode.
+        _safe_text("_metric_label",   "metric_bar.label")
         _safe_text("_settings_btn",   "left.settings")
         _safe_text("_latest_csv_lbl", "left.latest_csv")
         _safe_text("open_csv_btn",    "left.open_csv")
