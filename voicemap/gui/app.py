@@ -2090,7 +2090,7 @@ class VoiceMapApp(_TkBase):
             return
 
         # Modal progress dialog (reuse ProgressDialog shell)
-        dlg = ProgressDialog(self, f"{len(paths)} 个 wav")
+        dlg = ProgressDialog(self, tr("progress.train_n_wavs", n=len(paths)))
         self._progress_dialog = dlg
         dlg.set_status(tr("progress.training"))
 

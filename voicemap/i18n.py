@@ -236,6 +236,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "progress.heading":     "正在分析 · Voice Range Profile",
         "progress.preparing":   "准备中…",
         "progress.training":    "准备训练…",
+        "progress.train_n_wavs":"{n} 个 wav",
 
         # ── about dialog ──
         "about.title":          "关于",
@@ -448,6 +449,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "progress.heading":     "Analyzing · Voice Range Profile",
         "progress.preparing":   "Preparing…",
         "progress.training":    "Preparing training…",
+        "progress.train_n_wavs":"{n} wav files",
 
         # ── about dialog ──
         "about.title":          "About",
