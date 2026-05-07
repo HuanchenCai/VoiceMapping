@@ -11,6 +11,7 @@ Output:
 """
 
 from PyInstaller.utils.hooks import collect_all
+import os, sys, glob
 
 # ── Collect data + binaries + hidden imports from packages that ship
 # their own resource files / DLLs that PyInstaller can't auto-detect.
@@ -29,6 +30,31 @@ for pkg in ('matplotlib', 'sv_ttk', 'tkinterdnd2', 'soundfile'):
         extra_hidden.extend(hiddenimports)
     except Exception as e:
         print(f"WARNING: collect_all({pkg!r}) failed: {e}")
+
+# ── Conda-specific runtime DLLs not on the standard search path
+# Conda places libffi (ffi-7.dll / ffi-8.dll) under
+# <env>/Library/bin/ — Python's _ctypes module imports it indirectly,
+# but PyInstaller's auto-detect doesn't crawl Library/bin (that's a
+# conda layout convention, not a stdlib one). Same applies to OpenSSL,
+# zlib, sqlite3 if they're conda-installed. We pull every .dll in
+# Library/bin into the bundle root.
+def _conda_runtime_dlls():
+    out = []
+    # sys.prefix in a conda env is .../envs/<name>; sibling Library/bin
+    # holds the runtime DLLs.
+    for cand in (
+        os.path.join(sys.prefix, "Library", "bin"),
+        os.path.join(os.path.dirname(sys.executable), "Library", "bin"),
+    ):
+        if os.path.isdir(cand):
+            for dll in glob.glob(os.path.join(cand, "*.dll")):
+                # Place at bundle root next to python310.dll so
+                # LoadLibrary finds them via the EXE's own dir.
+                out.append((dll, "."))
+            break
+    return out
+
+extra_binaries.extend(_conda_runtime_dlls())
 
 
 block_cipher = None
