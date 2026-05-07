@@ -1184,20 +1184,30 @@ class VoiceMapApp(_TkBase):
         pad = tk.Frame(parent, bg=PANEL)
         pad.pack(side="top", fill="both", expand=True, padx=14, pady=14)
 
-        # Metric name (large) — long names like 'SpectralBandwidth' or
-        # 'HammarbergIndex' got clipped to 'SpectralBandwidt' at 22pt bold
-        # at higher-DPI Windows scaling. tk's wraplength doesn't help
-        # (no whitespace in metric names → no wrap), so we shrink the
-        # font from 22pt to 19pt — keeps the strong visual hierarchy spec
-        # called for ('big amber title') while leaving headroom for the
-        # longest name to render in full inside the 420 px Inspector.
+        # Metric name (large) + small ⓘ glyph — the glyph is the visible
+        # cue that hovering reveals a detailed tooltip. Long names like
+        # 'SpectralBandwidth' / 'HammarbergIndex' overflowed at 22pt bold
+        # under high-DPI Windows scaling, so we shrink to 19pt bold —
+        # keeps the strong visual hierarchy spec called for while
+        # leaving headroom for the longest name.
+        title_row = tk.Frame(pad, bg=PANEL)
+        title_row.pack(anchor="w", fill="x")
         self._inspector_metric_name = tk.Label(
-            pad, text="—",
+            title_row, text="—",
             bg=PANEL, fg=ACCENT,
             font=("Microsoft YaHei UI", 19, "bold"),
             anchor="w", justify="left",
-            cursor="question_arrow")   # cue: hovering reveals more info
-        self._inspector_metric_name.pack(anchor="w", fill="x")
+            cursor="question_arrow")
+        self._inspector_metric_name.pack(side="left", fill="x", expand=True)
+        # ⓘ next to the title — small, muted; positioned to the right of
+        # the metric name so users immediately know "hover for more".
+        self._inspector_info_glyph = tk.Label(
+            title_row, text="ⓘ",
+            bg=PANEL, fg=MUTED,
+            font=("Microsoft YaHei UI", 14),
+            cursor="question_arrow")
+        self._inspector_info_glyph.pack(side="right", padx=(4, 0), pady=(8, 0))
+
         # Hover tooltip on the metric name — uses metric.tooltip.X (long
         # detailed prose) if present, falls back to metric.desc.X
         # (the short blurb shown right under the name).
@@ -1208,16 +1218,19 @@ class VoiceMapApp(_TkBase):
             tip_key = f"metric.tooltip.{name}"
             tip = tr(tip_key)
             if tip == tip_key:
-                # Fall back to the short description so users still see
-                # *something* for less-common metrics.
                 short_key = f"metric.desc.{name}"
                 tip = tr(short_key)
                 if tip == short_key:
                     tip = ""
             return tip
+        # Attach tooltip to BOTH the name label and the ⓘ glyph so users
+        # can hover either to trigger it.
         self._inspector_metric_tip = HoverTooltip(
             self._inspector_metric_name, _metric_tooltip_text)
         self._inspector_metric_tip.attach()
+        self._inspector_info_glyph_tip = HoverTooltip(
+            self._inspector_info_glyph, _metric_tooltip_text)
+        self._inspector_info_glyph_tip.attach()
 
         self._inspector_metric_desc = tk.Label(
             pad, text=tr("inspector.no_metric"),
@@ -1259,13 +1272,16 @@ class VoiceMapApp(_TkBase):
         self._log_lbl = None
 
     def _build_status_bar(self, parent):
-        """底部 status bar：左 = 当前文件元信息 + 网格数 + 耗时；右 = 版权。"""
-        bar = tk.Frame(parent, bg=PANEL, height=28)
+        """底部 status bar：左 = 当前文件元信息 + 网格数 + 耗时；右 = 版权。
+        height=34 (was 28) — at higher-DPI Windows scaling, FONT_UI 11pt
+        descenders were getting clipped at the bottom edge of the 28 px
+        bar; 34 gives Microsoft YaHei UI's full glyph height + padding."""
+        bar = tk.Frame(parent, bg=PANEL, height=34)
         bar.pack(side="bottom", fill="x")
         bar.pack_propagate(False)
 
         inner = tk.Frame(bar, bg=PANEL)
-        inner.pack(fill="x", padx=16, pady=4)
+        inner.pack(fill="x", padx=16, pady=6)
 
         self._statusbar_left = tk.Label(inner, text=tr("statusbar.no_file"),
                                          bg=PANEL, fg=MUTED, font=FONT_UI)
@@ -1900,11 +1916,12 @@ class VoiceMapApp(_TkBase):
                 rng = f"≥ {lo:g}"
             else:
                 rng = f"{lo:g} – {hi:g}"
-            # range column: width=10 was 12 — saves a few px so the label
-            # column has more room without wrapping. FONT_CAPTION instead
-            # of FONT_MONO trims another ~3 px per row.
+            # range column: width=14 (was 10) so values like '0.13 – 0.19'
+            # (with U+2013 en-dash) fit without overlapping the next
+            # column. Sidebar+padx=14 leaves the label column ~290 px
+            # which still fits all _THRESHOLDS labels in zh.
             tk.Label(row, text=rng, bg=PANEL, fg=TEXT,
-                     font=("Consolas", 9), width=10, anchor="w"
+                     font=("Consolas", 9), width=14, anchor="w"
                      ).pack(side="left")
             # No wraplength — Inspector is 360 px wide, range column eats
             # ~75 px, leaving ~250 px for the label, which is enough for
@@ -2531,9 +2548,7 @@ class VoiceMapApp(_TkBase):
         CompareDialog(self)
 
     def _open_with_default_app(self, path):
-        """Open `path` with the OS default application. Used after
-        Excel / report exports so the user sees their output immediately
-        instead of having to dig through the output folder."""
+        """Open `path` with the OS default application."""
         try:
             if sys.platform.startswith("win"):
                 os.startfile(str(path))  # type: ignore[attr-defined]
@@ -2544,9 +2559,86 @@ class VoiceMapApp(_TkBase):
         except Exception as e:  # noqa: BLE001
             self._append_log("ERROR", tr("log.open_fail", path=path, e=e))
 
+    def _reveal_in_folder(self, path):
+        """Open the parent directory of `path` in the OS file manager.
+        On Windows uses /select so the file itself is highlighted."""
+        p = Path(path)
+        try:
+            if sys.platform.startswith("win"):
+                # explorer /select, "C:\full\path\file" highlights the file
+                subprocess.Popen(["explorer", "/select,", str(p)])
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", "-R", str(p)])
+            else:
+                subprocess.Popen(["xdg-open", str(p.parent)])
+        except Exception as e:  # noqa: BLE001
+            self._append_log("ERROR", tr("log.open_fail", path=p.parent, e=e))
+
+    def _post_export_prompt(self, path: str):
+        """After a successful export, ask the user what to do with the
+        file: open it / show in folder / dismiss. A small modal Toplevel
+        that mirrors ModernPopup styling. Per user spec — auto-opening
+        is too aggressive when the user just wanted the file saved."""
+        from voicemap.gui.theme import (
+            BG, PANEL, PANEL_HI, BORDER, TEXT, ACCENT, ACCENT_HI, MUTED,
+            FONT_UI, FONT_UI_B,
+        )
+        dlg = tk.Toplevel(self)
+        dlg.title(tr("export.done.title"))
+        dlg.configure(bg=PANEL)
+        dlg.transient(self)
+        dlg.resizable(False, False)
+        dlg.grab_set()
+
+        body = tk.Frame(dlg, bg=PANEL)
+        body.pack(fill="both", expand=True, padx=18, pady=14)
+
+        tk.Label(body, text=tr("export.done.heading"),
+                 bg=PANEL, fg=ACCENT, font=FONT_UI_B,
+                 anchor="w").pack(fill="x", pady=(0, 4))
+        tk.Label(body, text=Path(path).name,
+                 bg=PANEL, fg=TEXT, font=FONT_UI_B,
+                 anchor="w").pack(fill="x")
+        tk.Label(body, text=str(Path(path).parent),
+                 bg=PANEL, fg=MUTED, font=FONT_UI,
+                 anchor="w", wraplength=460,
+                 justify="left").pack(fill="x", pady=(0, 12))
+
+        btns = tk.Frame(body, bg=PANEL)
+        btns.pack(fill="x")
+
+        def _open_file():
+            dlg.destroy()
+            self._open_with_default_app(path)
+
+        def _open_folder():
+            dlg.destroy()
+            self._reveal_in_folder(path)
+
+        def _dismiss():
+            dlg.destroy()
+
+        ttk.Button(btns, text=tr("export.done.open_file"),
+                   style="Accent.TButton",
+                   command=_open_file).pack(side="left", padx=(0, 6))
+        ttk.Button(btns, text=tr("export.done.open_folder"),
+                   style="Ghost.TButton",
+                   command=_open_folder).pack(side="left", padx=(0, 6))
+        ttk.Button(btns, text=tr("export.done.dismiss"),
+                   style="Ghost.TButton",
+                   command=_dismiss).pack(side="right")
+
+        # Center over the parent window
+        dlg.update_idletasks()
+        w = dlg.winfo_reqwidth(); h = dlg.winfo_reqheight()
+        px = self.winfo_rootx() + (self.winfo_width() - w) // 2
+        py = self.winfo_rooty() + (self.winfo_height() - h) // 2
+        dlg.geometry(f"+{max(0, px)}+{max(0, py)}")
+        dlg.bind("<Escape>", lambda _e: _dismiss())
+
     def _export_report(self):
-        """生成中文嗓音分析报告 (.md)：每项指标按临床阈值自动分级。
-        导出成功后用系统默认 .md 关联程序打开（用户要求：导完即开）。"""
+        """生成中文嗓音分析报告 (.md)：每项指标按阈值自动分级。
+        导出成功后弹窗询问：打开文件 / 打开文件夹 / 不打开。"""
         if self._last_df is None or self.last_csv is None:
             self._append_log("WARNING", tr("log.no_data_for_report"))
             return
@@ -2564,14 +2656,13 @@ class VoiceMapApp(_TkBase):
             audio_name = self.audio_path.name if self.audio_path else "(unknown)"
             generate_report(self._last_df, path, audio_name=audio_name)
             self._append_log("META", tr("log.report_saved", path=path))
-            # Auto-open per user spec
-            self._open_with_default_app(path)
+            self._post_export_prompt(path)
         except Exception as e:  # noqa: BLE001
             self._append_log("ERROR", tr("log.report_fail", e=e))
 
     def _export_excel(self):
         """一次分析完成后，可导出 .xlsx：Summary + Grouped + 每 metric 一个 heatmap sheet。
-        导出成功后用 Excel/WPS 打开（用户要求：导完即开）。"""
+        导出成功后弹窗询问：打开文件 / 打开文件夹 / 不打开。"""
         if self._last_df is None or self.last_csv is None:
             self._append_log("WARNING", tr("log.no_data_for_excel"))
             return
@@ -2588,7 +2679,7 @@ class VoiceMapApp(_TkBase):
             from voicemap.excel_export import export_vrp_xlsx
             export_vrp_xlsx(self._last_df, path)
             self._append_log("META", tr("log.excel_saved", path=path))
-            self._open_with_default_app(path)
+            self._post_export_prompt(path)
         except Exception as e:  # noqa: BLE001
             self._append_log("ERROR", tr("log.excel_fail", e=e))
 
