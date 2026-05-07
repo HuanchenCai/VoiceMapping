@@ -97,8 +97,9 @@ class TrackEntry:
 class VoiceMapApp(_TkBase):
     def __init__(self):
         super().__init__()
-        dnd_hint = "" if _DND_OK else "（未安装 tkinterdnd2，拖放已降级为点击）"
-        self.title(f"{tr('app.title')} {dnd_hint}".strip())
+        # Window title 干净，只放软件名；tkinterdnd2 缺失的提示由 drop zone
+        # 的 "drop.title_no_dnd" 文案承担（已 i18n 化，标题栏不再混入双语字串）。
+        self.title(tr('app.title'))
         # Subscribe to i18n language changes so the title + menubar
         # rebuild when the user switches language at runtime.
         i18n_subscribe(self._on_language_changed)
