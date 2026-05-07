@@ -112,6 +112,58 @@ _THRESHOLDS: Dict[str, List[Tuple[float, float, str, str]]] = {
     ],
 }
 
+# English translations of the band labels above. Indexed by zh string
+# so the GUI's `_inspector_set_clinical` can swap labels at render time
+# without touching `_THRESHOLDS` (which the report.md generator still
+# wants in zh). If a zh label is missing here, the zh label falls
+# through unchanged.
+_THRESHOLDS_LABEL_EN: Dict[str, str] = {
+    "正常":             "normal",
+    "轻度异常":         "mildly abnormal",
+    "病理":             "pathological",
+    "可能病理":         "likely pathological",
+    "中等":             "intermediate",
+    "健康":             "healthy",
+    "极佳":             "excellent",
+    "临界":             "borderline",
+    "可能气声":         "possibly breathy",
+    "高置信度":         "high confidence",
+    "置信度偏低":       "low confidence",
+    "无显著颤音":       "no clear vibrato",
+    "慢颤音":           "slow vibrato",
+    "典型颤音":         "typical vibrato",
+    "快颤音":           "fast vibrato",
+    "异常颤动":         "abnormal tremor",
+    "颤音弱":           "weak vibrato",
+    "颤音中等":         "moderate vibrato",
+    "颤音明显":         "strong vibrato",
+    "颤音偏宽":         "wide vibrato",
+    "无明显共振峰":     "no clear formant",
+    "共振峰显著":       "clear formant",
+    "共振峰极强":       "very strong formant",
+    "压声 / 紧张":      "pressed / tense",
+    "正常嗓音":         "normal voice",
+    "气声 / 松弛":      "breathy / lax",
+    "接触不足，气声型": "under-contact, breathy",
+    "正常接触":         "normal contact",
+    "接触过强，挤压型": "over-contact, pressed",
+    "开商低，挤压声型": "low OQ, pressed",
+    "开商正常，模态":   "normal OQ, modal",
+    "开商高，气声型":   "high OQ, breathy",
+    "短":               "short",
+    "良好":             "good",
+    "偏低":             "low",
+    "高比例浊音":       "high voicing",
+}
+
+def get_band_label(zh_label: str, lang: str) -> str:
+    """Map a `_THRESHOLDS` band label to the active language. Returns
+    the original zh string when lang != 'en' or when no en mapping
+    exists — graceful fallback so the GUI never shows a missing key."""
+    if lang == "en":
+        return _THRESHOLDS_LABEL_EN.get(zh_label, zh_label)
+    return zh_label
+
 # Severity → emoji + colour for plain-text rendering
 _SEVERITY_TAG = {
     "good":     "✓ 良好",

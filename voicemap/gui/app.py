@@ -440,25 +440,28 @@ class VoiceMapApp(_TkBase):
                 old_sep.destroy()
             except tk.TclError:
                 pass
+        self._menubar_sep = None
 
         bar = ModernMenubar(self, bg=PANEL, height=32)
-        # On first build _outer doesn't exist yet → just pack at top.
-        # On rebuild (language switch) _outer is already packed → place
-        # the new bar BEFORE it so the bar stays above the content.
-        outer = getattr(self, "_outer", None)
-        if outer is not None and outer.winfo_exists():
-            bar.pack(side="top", fill="x", before=outer)
+        # On first build the header frame doesn't exist yet → just pack
+        # at top. On rebuild (language switch) we MUST anchor before the
+        # FIRST top-side widget — that's the header. If we anchor before
+        # `_outer` (the canvas/inspector frame) instead, the new bar
+        # lands between the metric bar and the canvas → user sees
+        # "menu bar fell to the bottom" (reported regression).
+        anchor = getattr(self, "_header_frame", None) \
+                 or getattr(self, "_outer", None)
+        if anchor is not None and anchor.winfo_exists():
+            bar.pack(side="top", fill="x", before=anchor)
         else:
             bar.pack(side="top", fill="x")
-        # Thin BORDER divider just below the menubar so the eye reads
-        # 'menubar | content' as a clean boundary instead of seeing
-        # the BG-coloured pady gap as a stray dark stripe.
-        sep = tk.Frame(self, bg=BORDER, height=1)
-        if outer is not None and outer.winfo_exists():
-            sep.pack(side="top", fill="x", before=outer)
-        else:
-            sep.pack(side="top", fill="x")
-        self._menubar_sep = sep
+        # No 1 px BORDER divider — the menubar and the header both use
+        # bg=PANEL, so a divider line shows as a stray dark stripe
+        # against the otherwise continuous PANEL strip. User feedback:
+        # "菜单栏还是有黑色横条". The visual hierarchy already reads
+        # menubar → title row from the typography alone (button labels
+        # vs FONT_TITLE), no separator needed.
+        self._menubar_sep = None
 
         bar.add_menu(tr("menu.file"),   self._popup_file)
         bar.add_menu(tr("menu.edit"),   self._popup_edit)
@@ -528,6 +531,7 @@ class VoiceMapApp(_TkBase):
                 pass
 
         _safe_text("_header_title",   "app.title")
+        _safe_text("_tracks_label",   "tracks.label")
         # status_lbl: re-render under the current status_key/kwargs
         if hasattr(self, "status_lbl") and hasattr(self, "_status_key"):
             try:
@@ -738,8 +742,14 @@ class VoiceMapApp(_TkBase):
         # natural continuation of the bar instead of having a BG-coloured
         # gap show as a 'black stripe'. Internal padding gives the title
         # breathing room while staying visually attached to the menubar.
+        # Saved as self._header_frame so the menubar rebuild path can
+        # `pack(... before=self._header_frame)` and stay at the very top
+        # after a language switch (otherwise the new bar lands between
+        # the metric bar and the canvas, which the user reported as
+        # "menu bar fell to the bottom").
         head = tk.Frame(parent, bg=PANEL)
-        head.pack(fill="x")
+        head.pack(side="top", fill="x")
+        self._header_frame = head
         # padx=16 matches outer.padx so title aligns with content below
         head_inner = tk.Frame(head, bg=PANEL)
         head_inner.pack(fill="x", padx=16, pady=(6, 8))   # was (8, 12) — slim
@@ -772,8 +782,13 @@ class VoiceMapApp(_TkBase):
         inner = tk.Frame(bar, bg=PANEL)
         inner.pack(fill="x", padx=16, pady=(6, 6))   # was 10 — slim chrome
 
-        tk.Label(inner, text=tr("tracks.label"), bg=PANEL, fg=ACCENT,
-                 font=FONT_UI_B).pack(anchor="w", pady=(0, 4))
+        # Saved as self._tracks_label so _on_language_changed can update
+        # the text on language switch — was hardcoded as a throw-away
+        # Label and stayed in zh forever in en mode.
+        self._tracks_label = tk.Label(
+            inner, text=tr("tracks.label"), bg=PANEL, fg=ACCENT,
+            font=FONT_UI_B)
+        self._tracks_label.pack(anchor="w", pady=(0, 4))
 
         # Container that holds either the empty-state drop zone or
         # the rows-of-tracks scroll area. We swap children on first
@@ -1929,7 +1944,13 @@ class VoiceMapApp(_TkBase):
             # wraplength=200 was wrapping unnecessarily (200 < 250) and
             # blowing each row to 2-3 lines = ~66 px each. One line is 36 px,
             # cutting cards reqheight from ~330 px to ~220 px.
-            tk.Label(row, text=label, bg=PANEL,
+            #
+            # In en mode, swap the zh label for its en translation via
+            # get_band_label() — the report.py CSV / Markdown writer
+            # still uses zh literals; only the GUI display needs i18n.
+            from voicemap.report import get_band_label
+            display_label = get_band_label(label, get_language())
+            tk.Label(row, text=display_label, bg=PANEL,
                      fg=sev_color.get(sev, TEXT), font=FONT_UI,
                      anchor="w", justify="left"
                      ).pack(side="left", fill="x", expand=True)
