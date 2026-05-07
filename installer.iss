@@ -32,8 +32,15 @@ PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 
 [Languages]
-Name: "chs"; MessagesFile: "compiler:Default.isl,compiler:Languages\ChineseSimplified.isl"
+; English is always available. Chinese Simplified is shipped only by the
+; Inno Setup "Translations" download (not the base installer). If that
+; .isl file is missing on the build host, fall back to English only —
+; otherwise compilation breaks. Drop ChineseSimplified.isl into Inno
+; Setup's Languages\ folder once and the chs option lights up.
 Name: "en";  MessagesFile: "compiler:Default.isl"
+#ifexist "compiler:Languages\ChineseSimplified.isl"
+Name: "chs"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+#endif
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
