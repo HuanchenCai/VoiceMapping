@@ -1115,42 +1115,17 @@ class VoiceMapApp(_TkBase):
             bg=PANEL_HI, fg=MUTED, font=FONT_UI_B)
         self._inspector_value_sev.pack(anchor="w", pady=(2, 0))
 
-        # ── Top: scrollable area for metric details ───────────────────
-        upper = tk.Frame(parent, bg=PANEL)
-        upper.pack(side="top", fill="both", expand=True)
-
-        scroll_canvas = tk.Canvas(upper, bg=PANEL, highlightthickness=0,
-                                   borderwidth=0)
-        scroll_canvas.pack(side="left", fill="both", expand=True,
-                           padx=(14, 0), pady=14)
-        sb_inspector = ttk.Scrollbar(upper, orient="vertical",
-                                      command=scroll_canvas.yview)
-        sb_inspector.pack(side="right", fill="y", pady=14)
-        scroll_canvas.configure(yscrollcommand=sb_inspector.set)
-        self._inspector_scroll = scroll_canvas
-
-        pad = tk.Frame(scroll_canvas, bg=PANEL)
-        pad_window = scroll_canvas.create_window(
-            (0, 0), window=pad, anchor="nw")
-        def _resize_pad(_event):
-            scroll_canvas.itemconfigure(
-                pad_window, width=scroll_canvas.winfo_width())
-        scroll_canvas.bind("<Configure>", _resize_pad)
-        pad.bind("<Configure>",
-                 lambda _e: scroll_canvas.configure(
-                     scrollregion=scroll_canvas.bbox("all")))
-        def _on_wheel(event):
-            if hasattr(event, "delta") and event.delta:
-                scroll_canvas.yview_scroll(-int(event.delta / 120), "units")
-            elif getattr(event, "num", 0) == 4:
-                scroll_canvas.yview_scroll(-1, "units")
-            elif getattr(event, "num", 0) == 5:
-                scroll_canvas.yview_scroll(1, "units")
-            return "break"
-        for w in (scroll_canvas, pad):
-            w.bind("<MouseWheel>", _on_wheel)
-            w.bind("<Button-4>",   _on_wheel)
-            w.bind("<Button-5>",   _on_wheel)
+        # ── Top: metric details (plain pack, no scrollable canvas)
+        # Earlier attempt used a scrollable tk.Canvas, but with sv-ttk
+        # the canvas didn't acquire usable height under fill="both"
+        # expand=True and the content vanished. Reverting to direct
+        # pack — the default 1280x800 window has plenty of vertical
+        # room for the static cards (metric name + desc + clinical
+        # bands), and the pinned value pill + actions stay visible
+        # regardless. Users who shrink the window past the floor
+        # accept that the top-most cards may clip.
+        pad = tk.Frame(parent, bg=PANEL)
+        pad.pack(side="top", fill="x", padx=14, pady=14)
 
         # Metric name (large) — first thing per spec, no "Details" header
         self._inspector_metric_name = tk.Label(
