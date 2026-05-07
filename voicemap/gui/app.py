@@ -118,8 +118,8 @@ class VoiceMapApp(_TkBase):
         # Min 1280×900 covers the realistic ≤4-band metrics plus
         # pinned value pill + actions; rare 5-band overflow at min size
         # is the failure floor we accept.
-        self.geometry("1500x1180")
-        self.minsize(1280, 900)
+        self.geometry("1600x1180")
+        self.minsize(1380, 900)
         self.configure(bg=BG)
 
         self.output_dir_var = tk.StringVar(value=str(_HERE / DEFAULT_CONFIG.output_dir))
@@ -377,7 +377,11 @@ class VoiceMapApp(_TkBase):
         self._build_tracks_panel(self)
         self._build_metric_bar(self)
 
-        # Main split: canvas (left, expand) + inspector (right, 360 fixed)
+        # Main split: canvas (left, expand) + inspector (right, 420 fixed).
+        # Inspector was 360 (per docs/UI_DESIGN.md) but ZH labels in
+        # clinical bands ("开商正常 (0.4-0.7, 模态)" etc.) overflow at 360.
+        # 420 gives ~85 px more for the band-label column without
+        # squeezing the heatmap (canvas still > 1100 px wide).
         # padx=16 matches the rest of the chrome's left/right margin.
         # pady at top is 8 px — enough breath after metric bar without
         # surfacing a BG stripe.
@@ -385,7 +389,7 @@ class VoiceMapApp(_TkBase):
         outer.pack(side="top", fill="both", expand=True,
                    padx=16, pady=(8, 8))
 
-        self.inspector = tk.Frame(outer, bg=PANEL, width=360,
+        self.inspector = tk.Frame(outer, bg=PANEL, width=420,
                                    highlightthickness=1,
                                    highlightbackground=BORDER,
                                    highlightcolor=BORDER)
@@ -852,12 +856,18 @@ class VoiceMapApp(_TkBase):
                           bg=ACCENT if is_active else bg_row,
                           width=4)
         marker.pack(side="left", fill="y")
-        # Right-side mini waveform (block characters, monospace)
-        wave_str = self._track_waveform_blocks(entry)
-        wave_lbl = tk.Label(outer, text=wave_str,
-                            bg=bg_row, fg=ACCENT_HI,
-                            font=FONT_MONO)
-        wave_lbl.pack(side="right", padx=(0, 12))
+        # Right-side mini waveform — drawn as a tk.Canvas with vertical
+        # bars rather than Unicode block chars (those rendered as sparse
+        # dashes when most of the audio was below 1/8 of peak — looked
+        # broken). 220×36 px gives enough resolution to show envelope
+        # shape and dynamic range of typical 30-180 s recordings.
+        wave_amps = self._track_waveform_amps(entry)
+        wave_canvas = tk.Canvas(outer, width=220, height=36,
+                                bg=bg_row, highlightthickness=0, bd=0)
+        wave_canvas.pack(side="right", padx=(0, 12))
+        if wave_amps is not None and len(wave_amps) > 0:
+            self._draw_waveform_canvas(wave_canvas, wave_amps,
+                                        220, 36, ACCENT_HI)
 
         body = tk.Frame(outer, bg=bg_row)
         body.pack(side="left", fill="x", expand=True, padx=10, pady=6)
@@ -917,51 +927,81 @@ class VoiceMapApp(_TkBase):
         # Whole-row click → switch active track
         def _click(_e=None, i=idx):
             self._tracks_set_active(i)
-        for w in (outer, body, line1, line2, marker, wave_lbl,
+        for w in (outer, body, line1, line2, marker, wave_canvas,
                   *line1.winfo_children(), *line2.winfo_children()):
             w.bind("<Button-1>", _click)
 
         return outer
 
     @staticmethod
-    def _track_waveform_blocks(entry: "TrackEntry", n_buckets: int = 28) -> str:
-        """Cheap Unicode-block waveform: read the wav at a coarse stride,
-        bucket-max-abs into N columns, map each to a block height char.
-        Cached on the entry the first time it's computed.
+    def _track_waveform_amps(entry: "TrackEntry", n_buckets: int = 110):
+        """Read the wav, peak-bucket into N normalised amplitudes [0,1].
+        Returns a numpy array of length n_buckets, or None on I/O error.
+        Cached on the entry object so subsequent re-renders are free.
 
-        Returns an empty string on any I/O error (the row simply omits
-        the waveform sketch — no crash)."""
-        cached = getattr(entry, "_waveform_cache", None)
-        if cached is not None:
-            return cached
+        n_buckets=110 gives 2 px per bar at 220 px canvas width — dense
+        enough to look like a real envelope, sparse enough to avoid
+        Tkinter's slow per-rect overhead on long file lists.
+        """
+        cached_amps = getattr(entry, "_waveform_cache", None)
+        if isinstance(cached_amps, tuple) and cached_amps[0] == n_buckets:
+            return cached_amps[1]
         try:
             import soundfile as sf
             import numpy as np
-            # Read a coarse 8 kHz mono summary — fast even on 60 s files.
-            data, sr = sf.read(str(entry.path), dtype="float32",
-                               always_2d=True)
+            data, _sr = sf.read(str(entry.path), dtype="float32",
+                                always_2d=True)
             mono = data[:, 0]
-            # Downsample to ~3000 samples for the bucket pass
-            target = 3000
+            # Coarse pre-downsample: keep ~3 × n_buckets samples per
+            # bucket so the max-abs has something to chew on.
+            target = max(3000, n_buckets * 4)
             if len(mono) > target:
                 step = max(1, len(mono) // target)
                 mono = mono[::step]
             if mono.size == 0:
-                cached = ""
+                amps = None
             else:
                 buckets = np.array_split(mono, n_buckets)
                 amps = np.array([np.max(np.abs(b)) if len(b) else 0.0
-                                  for b in buckets])
-                if amps.max() > 0:
-                    amps = amps / amps.max()
-                # 8 levels of vertical block characters
-                blocks = " ▁▂▃▄▅▆▇█"
-                idxs = np.clip((amps * 8).astype(int), 0, 8)
-                cached = "".join(blocks[i] for i in idxs)
+                                  for b in buckets], dtype=np.float32)
+                m = float(amps.max())
+                if m > 0:
+                    amps = amps / m
         except Exception:
-            cached = ""
-        entry._waveform_cache = cached
-        return cached
+            amps = None
+        entry._waveform_cache = (n_buckets, amps)
+        return amps
+
+    @staticmethod
+    def _draw_waveform_canvas(canvas: tk.Canvas, amps,
+                              w: int, h: int, color: str) -> None:
+        """Render a centered vertical-bar waveform onto an existing
+        tk.Canvas. Bars are anti-shrunk to a 1.5 px floor so quiet
+        passages are still visible (the Unicode-block version flattened
+        them to ▁ which looked broken)."""
+        canvas.delete("wave")
+        n = len(amps)
+        if n == 0 or w <= 0:
+            return
+        bar_w = max(1, int(w / n))
+        gap = 1 if bar_w > 1 else 0
+        midline = h / 2
+        for i in range(n):
+            a = float(amps[i])
+            # Floor at 1.5 px so silence still draws a thin line —
+            # otherwise the canvas looks empty for low-volume passages.
+            half = max(1.0, a * (h / 2 - 1)) if a > 0.02 else 1.0
+            x0 = i * bar_w
+            x1 = x0 + max(1, bar_w - gap)
+            canvas.create_rectangle(x0, midline - half,
+                                     x1, midline + half,
+                                     fill=color, outline="",
+                                     tags="wave")
+
+    # NOTE: the old `_track_waveform_blocks` (Unicode-block sketch) was
+    # removed in favour of `_track_waveform_amps` + `_draw_waveform_canvas`
+    # — block chars rendered as sparse dashes for any audio with a few
+    # peaks and a lot of quiet, which is most voice recordings.
 
     def _tracks_add(self, path: Path) -> int:
         """Append a new TrackEntry and re-render. Returns its index."""
@@ -1155,7 +1195,7 @@ class VoiceMapApp(_TkBase):
         self._inspector_metric_desc = tk.Label(
             pad, text=tr("inspector.no_metric"),
             bg=PANEL, fg=TEXT_SEC, font=FONT_UI,
-            wraplength=300, justify="left", anchor="w")
+            wraplength=370, justify="left", anchor="w")   # was 300, inspector now 420 wide
         self._inspector_metric_desc.pack(anchor="w", pady=(2, 0), fill="x")
 
         # Unit hint (own row, small muted)
@@ -1775,7 +1815,14 @@ class VoiceMapApp(_TkBase):
             spec = get_spec(name)
         except Exception:
             spec = None
-        desc = (spec.description if spec else "") or "—"
+        # tr(f"metric.desc.{name}") looks up the i18n table; if neither
+        # zh nor en has the key, tr() returns the bare key — in that case
+        # fall back to the registry's English description so an
+        # un-translated metric still shows something readable.
+        key = f"metric.desc.{name}"
+        desc = tr(key)
+        if desc == key:                       # no entry in either language
+            desc = (spec.description if spec else "") or "—"
         unit = (spec.unit if spec else "") or ""
         self._inspector_metric_name.configure(text=name)
         self._inspector_metric_desc.configure(text=desc)
@@ -1877,7 +1924,7 @@ class VoiceMapApp(_TkBase):
             row = df[(df["MIDI"] == mi) & (df["dB"] == si)]
             if row.empty:
                 self._inspector_value_coords.configure(
-                    text=f"MIDI {mi} · SPL {si} dB · — ")
+                    text=tr("inspector.coords_no_data", mi=mi, si=si))
                 self._inspector_value_num.configure(text="—", fg=ACCENT_HI)
                 self._inspector_value_sev.configure(text="")
                 return
@@ -1906,12 +1953,14 @@ class VoiceMapApp(_TkBase):
 
         color = sev_color.get(sev, ACCENT_HI)
         self._inspector_value_coords.configure(
-            text=f"MIDI {mi}  ·  SPL {si} dB")
+            text=tr("inspector.coords", mi=mi, si=si))
         self._inspector_value_num.configure(text=f"{value:.2f}", fg=color)
         self._inspector_value_unit.configure(text=unit)
         if sev is not None:
+            # severity word goes through tr() so it shows 优/正常/注意/异常
+            # in zh and good/normal/watch/abnormal in en
             self._inspector_value_sev.configure(
-                text=f"{sev_label[sev]}  {sev}", fg=color)
+                text=f"{sev_label[sev]}  {tr(f'severity.{sev}')}", fg=color)
         else:
             self._inspector_value_sev.configure(text="")
 
