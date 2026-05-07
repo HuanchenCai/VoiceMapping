@@ -8,21 +8,28 @@ Output:
     dist/VoiceMap/VoiceMap.exe   (one-folder layout, faster startup
                                   than --onefile and easier to debug
                                   missing-binary issues)
-
-Why one-folder instead of --onefile?
-    --onefile bootstraps by extracting the bundle to %TEMP% on every
-    launch; a 200 MB build means a 1-2 s pause + extra disk churn.
-    one-folder ships dist/VoiceMap/ as a regular Windows app dir; the
-    Inno Setup installer wraps that as a single .exe for the user.
-
-Hidden imports / data-collect notes:
-    - sv_ttk: ships a TCL theme file; --collect-data needed
-    - matplotlib: defers a lot via importlib; collect-all keeps PyInstaller
-      from missing backend pieces
-    - tkinterdnd2: ships .tcl files alongside .py; collect-all
-    - soundfile: bundles libsndfile via cffi; collect-all
-    - numba: aggressive runtime JIT; hidden imports for numba.core.types
 """
+
+from PyInstaller.utils.hooks import collect_all
+
+# ── Collect data + binaries + hidden imports from packages that ship
+# their own resource files / DLLs that PyInstaller can't auto-detect.
+# Modern PyInstaller (>= 6.0) returns 2-tuples (src, dst_dir); we
+# merge them into the lists handed to Analysis() at construction time
+# rather than mutating a.datas / a.binaries afterwards (the post-init
+# format is the 3-tuple TOC and direct concatenation breaks).
+extra_datas = []
+extra_binaries = []
+extra_hidden = []
+for pkg in ('matplotlib', 'sv_ttk', 'tkinterdnd2', 'soundfile'):
+    try:
+        datas, binaries, hiddenimports = collect_all(pkg)
+        extra_datas.extend(datas)
+        extra_binaries.extend(binaries)
+        extra_hidden.extend(hiddenimports)
+    except Exception as e:
+        print(f"WARNING: collect_all({pkg!r}) failed: {e}")
+
 
 block_cipher = None
 
@@ -30,10 +37,11 @@ block_cipher = None
 a = Analysis(
     ['voicemap/cli.py'],
     pathex=['.'],
-    binaries=[],
+    binaries=extra_binaries,
     datas=[
         # Bundle the i18n module's STRINGS as part of the package
         ('voicemap', 'voicemap'),
+        *extra_datas,
     ],
     hiddenimports=[
         'numba.core.types',
@@ -54,6 +62,7 @@ a = Analysis(
         'voicemap.config',
         'voicemap.logger',
         'voicemap.analyzer',
+        *extra_hidden,
     ],
     hookspath=[],
     hooksconfig={},
@@ -70,20 +79,6 @@ a = Analysis(
     cipher=block_cipher,
     noarchive=False,
 )
-
-# Pull in matplotlib / soundfile / sv_ttk / tkinterdnd2 data files.
-# PyInstaller's collect_all handles the awkward bits (TCL theme files,
-# libsndfile DLL, matplotlib mpl-data dir, etc.) without us hardcoding
-# paths.
-from PyInstaller.utils.hooks import collect_all
-for pkg in ('matplotlib', 'sv_ttk', 'tkinterdnd2', 'soundfile'):
-    try:
-        datas, binaries, hiddenimports = collect_all(pkg)
-        a.datas      += datas
-        a.binaries   += binaries
-        a.hiddenimports += hiddenimports
-    except Exception as e:
-        print(f"WARNING: collect_all({pkg!r}) failed: {e}")
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
