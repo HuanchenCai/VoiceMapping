@@ -103,11 +103,23 @@ class VoiceMapApp(_TkBase):
         # Subscribe to i18n language changes so the title + menubar
         # rebuild when the user switches language at runtime.
         i18n_subscribe(self._on_language_changed)
-        # Default 1280×800 gives the option-C layout enough room for both
-        # canvas and Inspector. Min 1200×720 is the floor; below that the
-        # Inspector starts to overflow (mitigated by the inner scrollbar).
-        self.geometry("1280x800")
-        self.minsize(1200, 720)
+        # Default 1500×1180 picked empirically so the Inspector's
+        # worst-case content fits at default size with no clipping:
+        #   chrome (menubar/header/tracks/metric-bar/status) ≈ 383 px
+        #   inspector content for 5-band metric (e.g. VibratoRate):
+        #     pad (name + desc + unit + 5 cards) reqh 422 px
+        #     pinned value pill ≈ 176 px
+        #     actions + sep + paddings ≈ 200 px
+        #   inspector total: ≈ 800 px → window ≥ 1180 px
+        # 1500×1180 gives ~30 px of breathing room. Fits most modern
+        # monitors (1440p+); on 1080p the user gets auto-hide taskbar
+        # or has to drag the window taller. Per user spec: "标准的尺寸,
+        # 可以大一点, 但是任何信息都不能被裁掉".
+        # Min 1280×900 covers the realistic ≤4-band metrics plus
+        # pinned value pill + actions; rare 5-band overflow at min size
+        # is the failure floor we accept.
+        self.geometry("1500x1180")
+        self.minsize(1280, 900)
         self.configure(bg=BG)
 
         self.output_dir_var = tk.StringVar(value=str(_HERE / DEFAULT_CONFIG.output_dir))
@@ -726,7 +738,7 @@ class VoiceMapApp(_TkBase):
         head.pack(fill="x")
         # padx=16 matches outer.padx so title aligns with content below
         head_inner = tk.Frame(head, bg=PANEL)
-        head_inner.pack(fill="x", padx=16, pady=(8, 12))
+        head_inner.pack(fill="x", padx=16, pady=(6, 8))   # was (8, 12) — slim
         self._header_title = tk.Label(head_inner, text=tr("app.title"),
                                        bg=PANEL, fg=TEXT, font=FONT_TITLE)
         self._header_title.pack(side="left")
@@ -754,10 +766,10 @@ class VoiceMapApp(_TkBase):
         bar.pack(side="top", fill="x")
 
         inner = tk.Frame(bar, bg=PANEL)
-        inner.pack(fill="x", padx=16, pady=10)
+        inner.pack(fill="x", padx=16, pady=(6, 6))   # was 10 — slim chrome
 
         tk.Label(inner, text=tr("tracks.label"), bg=PANEL, fg=ACCENT,
-                 font=FONT_UI_B).pack(anchor="w", pady=(0, 6))
+                 font=FONT_UI_B).pack(anchor="w", pady=(0, 4))
 
         # Container that holds either the empty-state drop zone or
         # the rows-of-tracks scroll area. We swap children on first
@@ -772,7 +784,7 @@ class VoiceMapApp(_TkBase):
                                    highlightcolor=ACCENT, cursor="hand2")
         self.drop_zone.pack(fill="x")
         drop_inner = tk.Frame(self.drop_zone, bg=PANEL_HI)
-        drop_inner.pack(fill="x", padx=18, pady=10)
+        drop_inner.pack(fill="x", padx=18, pady=8)   # was 10 — slim chrome
         self.drop_label = tk.Label(
             drop_inner,
             text=tr("drop.title" if _DND_OK else "drop.title_no_dnd"),
@@ -1019,7 +1031,7 @@ class VoiceMapApp(_TkBase):
         bar.pack(side="top", fill="x")
 
         inner = tk.Frame(bar, bg=PANEL)
-        inner.pack(fill="x", padx=16, pady=8)
+        inner.pack(fill="x", padx=16, pady=6)   # was 8 — slim chrome
 
         self._metric_label = tk.Label(inner, text=tr("metric_bar.label"),
                                        bg=PANEL, fg=ACCENT, font=FONT_UI_B)
@@ -1090,12 +1102,17 @@ class VoiceMapApp(_TkBase):
             highlightcolor=BORDER)
         self._inspector_value_card.pack(side="bottom", fill="x",
                                          padx=14, pady=(0, 8))
+        # Tightened padding (pady 6 instead of 10) and a smaller numeric
+        # font (FONT_TITLE 18pt bold instead of FONT_MONO_B 22pt) — the
+        # value pill was eating ~195 px and pushing the clinical band
+        # area off the bottom; this trims it to ~140 px without losing
+        # legibility (the number is still the visually dominant element).
         vc_inner = tk.Frame(self._inspector_value_card, bg=PANEL_HI)
-        vc_inner.pack(fill="x", padx=12, pady=10)
+        vc_inner.pack(fill="x", padx=12, pady=6)
         self._inspector_value_header = tk.Label(
             vc_inner, text=tr("inspector.current"),
             bg=PANEL_HI, fg=ACCENT, font=FONT_UI_B)
-        self._inspector_value_header.pack(anchor="w", pady=(0, 4))
+        self._inspector_value_header.pack(anchor="w", pady=(0, 2))
         self._inspector_value_coords = tk.Label(
             vc_inner, text="—",
             bg=PANEL_HI, fg=MUTED, font=FONT_UI)
@@ -1105,28 +1122,27 @@ class VoiceMapApp(_TkBase):
         self._inspector_value_num = tk.Label(
             big, text="—",
             bg=PANEL_HI, fg=ACCENT_HI,
-            font=FONT_MONO_B)
+            font=("Consolas", 18, "bold"))   # was FONT_MONO_B (22pt)
         self._inspector_value_num.pack(side="left")
         self._inspector_value_unit = tk.Label(
             big, text="",
             bg=PANEL_HI, fg=MUTED, font=FONT_UI)
-        self._inspector_value_unit.pack(side="left", padx=(4, 0), pady=(8, 0))
+        self._inspector_value_unit.pack(side="left", padx=(4, 0), pady=(6, 0))
         self._inspector_value_sev = tk.Label(
             vc_inner, text="",
             bg=PANEL_HI, fg=MUTED, font=FONT_UI_B)
         self._inspector_value_sev.pack(anchor="w", pady=(2, 0))
 
         # ── Top: metric details (plain pack, no scrollable canvas)
-        # Earlier attempt used a scrollable tk.Canvas, but with sv-ttk
-        # the canvas didn't acquire usable height under fill="both"
-        # expand=True and the content vanished. Reverting to direct
-        # pack — the default 1280x800 window has plenty of vertical
-        # room for the static cards (metric name + desc + clinical
-        # bands), and the pinned value pill + actions stay visible
-        # regardless. Users who shrink the window past the floor
-        # accept that the top-most cards may clip.
+        # `fill="both", expand=True` is critical: pad gets all the
+        # vertical room left after the pinned value pill + actions
+        # claim their natural height. Without expand=True, pad would
+        # only get its reqheight, and any overflow would be clipped
+        # invisibly — that's the bug the user hit at 1280x800.
+        # With the default window now 1500×1000, a worst-case 5-band
+        # metric (~830 px content) fits without clipping.
         pad = tk.Frame(parent, bg=PANEL)
-        pad.pack(side="top", fill="x", padx=14, pady=14)
+        pad.pack(side="top", fill="both", expand=True, padx=14, pady=14)
 
         # Metric name (large) — first thing per spec, no "Details" header
         self._inspector_metric_name = tk.Label(
@@ -1810,12 +1826,21 @@ class VoiceMapApp(_TkBase):
                 rng = f"≥ {lo:g}"
             else:
                 rng = f"{lo:g} – {hi:g}"
+            # range column: width=10 was 12 — saves a few px so the label
+            # column has more room without wrapping. FONT_CAPTION instead
+            # of FONT_MONO trims another ~3 px per row.
             tk.Label(row, text=rng, bg=PANEL, fg=TEXT,
-                     font=FONT_MONO, width=12, anchor="w"
+                     font=("Consolas", 9), width=10, anchor="w"
                      ).pack(side="left")
+            # No wraplength — Inspector is 360 px wide, range column eats
+            # ~75 px, leaving ~250 px for the label, which is enough for
+            # every band label in _THRESHOLDS to render on a single line.
+            # wraplength=200 was wrapping unnecessarily (200 < 250) and
+            # blowing each row to 2-3 lines = ~66 px each. One line is 36 px,
+            # cutting cards reqheight from ~330 px to ~220 px.
             tk.Label(row, text=label, bg=PANEL,
                      fg=sev_color.get(sev, TEXT), font=FONT_UI,
-                     anchor="w", justify="left", wraplength=200
+                     anchor="w", justify="left"
                      ).pack(side="left", fill="x", expand=True)
 
     def _update_inspector_value(self, midi: float | None, spl: float | None):
