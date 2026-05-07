@@ -10,13 +10,20 @@ REM Force Python to use UTF-8 for stdout/stderr so any log messages with
 REM Chinese characters render cleanly in the console window if it appears.
 set PYTHONUTF8=1
 
-REM Use the conda env python explicitly so the user doesn't need to
-REM activate the env first.
-set PY=C:\Users\huanc\miniconda3\envs\fonadyn\python.exe
+REM Find a usable Python (same probe order as build_exe.bat):
+REM   1. VOICEMAP_PYTHON env var (override)
+REM   2. user's known conda env (developer machine default)
+REM   3. anything called "python" on PATH
+set PY=
+if defined VOICEMAP_PYTHON if exist "%VOICEMAP_PYTHON%" set PY=%VOICEMAP_PYTHON%
+if not defined PY if exist "%USERPROFILE%\miniconda3\envs\fonadyn\python.exe" set PY=%USERPROFILE%\miniconda3\envs\fonadyn\python.exe
+if not defined PY if exist "%USERPROFILE%\anaconda3\envs\fonadyn\python.exe" set PY=%USERPROFILE%\anaconda3\envs\fonadyn\python.exe
+if not defined PY for %%P in (python.exe) do if not defined PY set PY=%%~$PATH:P
 
-if not exist "%PY%" (
-    echo [ERROR] Python not found at: %PY%
-    echo Edit this .bat and update the PY=... line to your Python path.
+if not defined PY (
+    echo [ERROR] No Python found.
+    echo Set VOICEMAP_PYTHON to your interpreter, install conda env "fonadyn",
+    echo or put python on PATH.
     pause
     exit /b 1
 )
