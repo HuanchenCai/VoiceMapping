@@ -1142,13 +1142,13 @@ class VoiceMapApp(_TkBase):
             highlightcolor=BORDER)
         self._inspector_value_card.pack(side="bottom", fill="x",
                                          padx=14, pady=(0, 8))
-        # Tightened padding (pady 6 instead of 10) and a smaller numeric
-        # font (FONT_TITLE 18pt bold instead of FONT_MONO_B 22pt) — the
-        # value pill was eating ~195 px and pushing the clinical band
-        # area off the bottom; this trims it to ~140 px without losing
-        # legibility (the number is still the visually dominant element).
+        # Per docs/UI_DESIGN.md spec: 大数字 Consolas 24pt bold ACCENT_HOVER +
+        # 单位 10pt MUTED + 状态标 11pt bold 语义色. We use FONT_MONO_B (22pt
+        # bold) close enough to spec — restoring the visual weight the
+        # design called for. Inner padding 8 px gives the pill enough air
+        # while keeping total height ≤ ~190 px.
         vc_inner = tk.Frame(self._inspector_value_card, bg=PANEL_HI)
-        vc_inner.pack(fill="x", padx=12, pady=6)
+        vc_inner.pack(fill="x", padx=12, pady=8)
         self._inspector_value_header = tk.Label(
             vc_inner, text=tr("inspector.current"),
             bg=PANEL_HI, fg=ACCENT, font=FONT_UI_B)
@@ -1162,16 +1162,16 @@ class VoiceMapApp(_TkBase):
         self._inspector_value_num = tk.Label(
             big, text="—",
             bg=PANEL_HI, fg=ACCENT_HI,
-            font=("Consolas", 18, "bold"))   # was FONT_MONO_B (22pt)
+            font=FONT_MONO_B)   # 22pt bold — per UI_DESIGN.md FONT_HUGE
         self._inspector_value_num.pack(side="left")
         self._inspector_value_unit = tk.Label(
             big, text="",
             bg=PANEL_HI, fg=MUTED, font=FONT_UI)
-        self._inspector_value_unit.pack(side="left", padx=(4, 0), pady=(6, 0))
+        self._inspector_value_unit.pack(side="left", padx=(6, 0), pady=(8, 0))
         self._inspector_value_sev = tk.Label(
             vc_inner, text="",
             bg=PANEL_HI, fg=MUTED, font=FONT_UI_B)
-        self._inspector_value_sev.pack(anchor="w", pady=(2, 0))
+        self._inspector_value_sev.pack(anchor="w", pady=(4, 0))
 
         # ── Top: metric details (plain pack, no scrollable canvas)
         # `fill="both", expand=True` is critical: pad gets all the
