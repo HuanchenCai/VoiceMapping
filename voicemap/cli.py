@@ -190,8 +190,18 @@ def _run_one(args, config, logger, audio_path: str, save_centroids_once: bool = 
 def main():
     args = _build_parser().parse_args()
 
-    # GUI short-circuit — no config/analyzer setup needed
-    if args.gui:
+    # When the user double-clicks VoiceMap.exe (no CLI args at all),
+    # launch the GUI rather than dropping into CLI-with-default-audio
+    # (which fails as 'audio file not found' and the cmd window
+    # vanishes — confusing for end users). Detect "no useful args"
+    # by checking that no work-mode flag is set and no positional was
+    # given. Power users running `voicemap audio.wav` from cmd still
+    # hit the CLI path normally.
+    no_work_mode = not (
+        args.gui or args.batch or args.compare or args.train_centroids
+        or args.audio
+    )
+    if args.gui or no_work_mode:
         from voicemap.gui import main as gui_main
         gui_main()
         return
