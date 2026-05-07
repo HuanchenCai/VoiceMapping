@@ -175,7 +175,10 @@ class ModernPopup(tk.Toplevel):
     # Layout dimensions (8 px grid). Same for all popups.
     ROW_PADX  = 14
     ROW_PADY  = 6
-    SEP_PAD   = 4
+    SEP_PAD   = 0   # was 4 — user reported the 4 px PANEL_HI gap above
+                    # and below the separator looked like "黑条纹 在每个
+                    # 格子的正中间". Zero pad makes the sep a 1 px line
+                    # flush against the row, no extra dead space.
 
     def __init__(self, parent: tk.Misc):
         super().__init__(parent)
@@ -214,6 +217,10 @@ class ModernPopup(tk.Toplevel):
         self._items.append({"type": "command", "row": row})
 
     def add_separator(self) -> None:
+        # Separator: 1 px BORDER line with no surrounding pad. Was
+        # SEP_PAD=4 PANEL_HI gap above + below the line, which looked
+        # like a stray "black stripe" in the popup body. Now it's
+        # just a clean hairline between groups, flush with the rows.
         sep = tk.Frame(self._frame, bg=BORDER, height=1)
         sep.pack(fill="x", padx=8, pady=self.SEP_PAD)
         self._items.append({"type": "separator", "row": sep})

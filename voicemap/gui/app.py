@@ -532,6 +532,10 @@ class VoiceMapApp(_TkBase):
 
         _safe_text("_header_title",   "app.title")
         _safe_text("_tracks_label",   "tracks.label")
+        # Inspector value pill header: "本次值" / "Current value" — was
+        # set once at construction with tr() but never re-pulled, so
+        # it stayed zh in en mode (user-visible bug).
+        _safe_text("_inspector_value_header", "inspector.current")
         # status_lbl: re-render under the current status_key/kwargs
         if hasattr(self, "status_lbl") and hasattr(self, "_status_key"):
             try:
