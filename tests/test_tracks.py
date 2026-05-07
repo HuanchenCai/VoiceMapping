@@ -34,18 +34,23 @@ class TestTrackEntry(unittest.TestCase):
         self.assertIsNone(e.df)
         self.assertEqual(e.cells, 0)
 
-    def test_waveform_blocks_renders_unicode(self):
+    def test_waveform_amps_returns_normalised_array(self):
+        """Replaced the old Unicode-block sketch with a tk.Canvas
+        bar chart driven by `_track_waveform_amps`. The amps array is
+        normalised to [0, 1] and the cache is a (n_buckets, amps) tuple."""
+        import numpy as np
         from voicemap.gui.app import TrackEntry, VoiceMapApp
         e = TrackEntry(SAMPLE)
-        wave = VoiceMapApp._track_waveform_blocks(e)
-        # 28 chars from ' ▁▂▃▄▅▆▇█'
-        self.assertEqual(len(wave), 28)
-        for ch in wave:
-            self.assertIn(ch, " ▁▂▃▄▅▆▇█")
-        # Cached on second call
-        wave2 = VoiceMapApp._track_waveform_blocks(e)
-        self.assertEqual(wave, wave2)
-        self.assertEqual(e._waveform_cache, wave)
+        amps = VoiceMapApp._track_waveform_amps(e, n_buckets=64)
+        self.assertIsNotNone(amps)
+        self.assertEqual(len(amps), 64)
+        self.assertGreaterEqual(amps.min(), 0.0)
+        self.assertLessEqual(amps.max(), 1.0)
+        # Cached on second call (tuple keyed by n_buckets)
+        amps2 = VoiceMapApp._track_waveform_amps(e, n_buckets=64)
+        self.assertTrue(np.array_equal(amps, amps2))
+        self.assertEqual(e._waveform_cache[0], 64)
+        self.assertTrue(np.array_equal(e._waveform_cache[1], amps))
 
 
 @unittest.skipUnless(SAMPLE.exists(), f"sample WAV missing at {SAMPLE}")
