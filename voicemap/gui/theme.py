@@ -87,7 +87,8 @@ _METRIC_SECTIONS: list = [
         "SpectralFlatness", "SpectralSlope",
         "SpectralSkewness", "SpectralKurtosis",
         "AlphaRatio", "HammarbergIndex", "GNE",
-        *(f"MFCC{i+1}" for i in range(13)),
+        # MFCC 1-13 removed from menu per UI spec — analyzer still
+        # writes the CSV columns but the metric selector hides them.
     ]),
     ("EGG · 电声门图", [
         "Qcontact", "Icontact", "dEGGmax", "HRFegg",

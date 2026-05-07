@@ -388,15 +388,11 @@ def _populate_m1_addons():
         待验证=True,
         description="max(0-2 kHz dB) − max(2-5 kHz dB)."))
 
-    # MFCC 1-13 (待验证)
-    for i in range(1, 14):
-        register(MetricSpec(
-            key=f"MFCC{i}", category="Acoustic",
-            label=f"MFCC {i}",
-            vmin=-100.0, vmax=100.0, unit="",
-            cmap=_plt.get_cmap("viridis"),
-            待验证=True,
-            description=f"Mel-frequency cepstral coefficient {i} (DCT-II of log-mel)."))
+    # MFCC 1-13: removed from the registry per user spec — 13 entries
+    # cluttered the metric menu without clinical actionability for end
+    # users. Analyzer still computes the columns and writes them to CSV
+    # for power users who need them; they're just hidden from the GUI
+    # metric selector.
 
     # ── Singing — Formant bandwidths / dispersion / SPR / Vibrato Jitter ──
     register(MetricSpec(
