@@ -1184,13 +1184,19 @@ class VoiceMapApp(_TkBase):
         pad = tk.Frame(parent, bg=PANEL)
         pad.pack(side="top", fill="both", expand=True, padx=14, pady=14)
 
-        # Metric name (large) — first thing per spec, no "Details" header
+        # Metric name (large) — long names like 'SpectralBandwidth' or
+        # 'HammarbergIndex' got clipped to 'SpectralBandwidt' at 22pt bold
+        # at higher-DPI Windows scaling. tk's wraplength doesn't help
+        # (no whitespace in metric names → no wrap), so we shrink the
+        # font from 22pt to 19pt — keeps the strong visual hierarchy spec
+        # called for ('big amber title') while leaving headroom for the
+        # longest name to render in full inside the 420 px Inspector.
         self._inspector_metric_name = tk.Label(
             pad, text="—",
             bg=PANEL, fg=ACCENT,
-            font=FONT_DISPLAY,
-            anchor="w")
-        self._inspector_metric_name.pack(anchor="w")
+            font=("Microsoft YaHei UI", 19, "bold"),
+            anchor="w", justify="left")
+        self._inspector_metric_name.pack(anchor="w", fill="x")
 
         self._inspector_metric_desc = tk.Label(
             pad, text=tr("inspector.no_metric"),
