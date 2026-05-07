@@ -113,17 +113,16 @@ M3-M7 这些研究/科研增强项**全部推到拿证后**做。
 | A0-2 god 类拆分 | ✅ commit 56172ad |
 | A0-3 工程化 + 软著元数据 | ✅ commit 4f1188e + 后续 |
 | A0-4 中英双语 + option-C 布局 | ✅ commit ec11ddb（5 个 wave 累计） |
-| A0-5 打包 + 用户文档 | 🟡 文档定稿 / spec 写好；exe 实际构建 + 截图待跑 |
+| A0-5 打包 + 用户文档 | ✅ exe 构建 + 启动验证；installer + 截图待跑 |
 | `validate_params.py` 全绿 | ✅ 48 PASS / 4 WARN / 0 FAIL（贯穿） |
 | 中英文 UI 截图各一组 | 🟡 待人工跑 GUI 截屏 |
-| 一个能跑的 `VoiceMap.exe` | 🟡 双击 `build_exe.bat` 即可 |
+| 一个能跑的 `VoiceMap.exe` | ✅ `dist/VoiceMap/VoiceMap.exe` 17.0 MB exe / 350 MB folder，双击启动正常 |
 | 用户手册 + 设计说明书定稿 | ✅ commit ef3002d |
 | git tag `v1.0.0` | 🟡 上述都验证后打 |
 
-剩下三件需要人工 session：
-1. 跑一次 `build_exe.bat` 验证 PyInstaller spec
-2. 跑一次 `ISCC.exe installer.iss` 验证 Inno Setup
-3. 截 8-10 张 v1.0.0 截图（中英文各一组）
+剩下两件需要人工 session：
+1. 跑一次 `ISCC.exe installer.iss` 验证 Inno Setup（需先安装 Inno Setup 6）
+2. 截 8-10 张 v1.0.0 截图（中英文各一组）
 
 完成后即可打 `v1.0.0` tag 然后进 A1（软著申请材料包）。
 
