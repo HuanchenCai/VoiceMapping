@@ -110,6 +110,69 @@ _THRESHOLDS: Dict[str, List[Tuple[float, float, str, str]]] = {
         (0.5,    0.85,  "正常",                                "normal"),
         (0.85,  1e9,    "高比例浊音",                          "good"),
     ],
+    # ── batch 2: extra reference ranges per user spec ──
+    # Crest factor: 1.4-2.0 typical for speech, < 1.5 = saturated /
+    # over-compressed, > 3 = transient-heavy. Cite: Boersma & Weenink
+    # Praat manual §intensity, default expected range.
+    "Crest": [
+        (-1e9,   1.4,   "饱和 / 过压缩",                        "watch"),
+        (1.4,    2.0,   "典型语音",                            "normal"),
+        (2.0,    3.0,   "动态丰富",                            "good"),
+        (3.0,   1e9,    "瞬态主导",                            "watch"),
+    ],
+    # SpecBal (10·log10(E_low / E_high), 1500 Hz cut): around 0 dB =
+    # balanced; > 0 = darker; < 0 = brighter. Voice clinic norm
+    # typically -10 to +10 dB.
+    "SpecBal": [
+        (-1e9,   -10.0, "明亮 / 高频主导",                      "watch"),
+        (-10.0,   10.0, "平衡",                                "normal"),
+        (10.0,   1e9,   "暗哑 / 低频主导",                      "watch"),
+    ],
+    # SpectralFlatness (Wiener entropy): 0 = pure tone, 1 = white noise.
+    # Voiced speech 0.05-0.30; > 0.5 indicates noise dominance.
+    "SpectralFlatness": [
+        (0.0,    0.05,  "纯音化",                              "watch"),
+        (0.05,   0.30,  "典型嗓音",                            "normal"),
+        (0.30,   0.50,  "噪声偏多",                            "watch"),
+        (0.50,  1e9,    "噪声主导",                            "abnormal"),
+    ],
+    # AlphaRatio (10·log10(E[50-1000] / E[1-5kHz])):
+    # +ve = lax / dark; -ve = tense / bright. Eyben et al. clinical
+    # voice norms: -10 to +10 dB normal range.
+    "AlphaRatio": [
+        (-1e9,   -10.0, "声门绷紧 / 偏亮",                      "watch"),
+        (-10.0,   10.0, "正常",                                "normal"),
+        (10.0,   1e9,   "声门松弛 / 偏暗",                      "watch"),
+    ],
+    # HammarbergIndex: typical voice 15-30 dB. > 35 dB = breathy /
+    # depressed; < 10 dB = pressed / aroused. (Hammarberg 1980 study
+    # on dysphonic voices.)
+    "HammarbergIndex": [
+        (-1e9,   10.0,  "压制 / 紧张",                          "watch"),
+        (10.0,   30.0,  "正常",                                "normal"),
+        (30.0,  1e9,    "气声 / 低沉",                          "watch"),
+    ],
+    # DUV (% unvoiced): inverse of VoicingRatio. < 15% normal sustained
+    # phonation; > 50% suggests breathy / interrupted phonation.
+    "DUV": [
+        (0.0,    15.0,  "正常",                                "normal"),
+        (15.0,   50.0,  "中度断点",                            "watch"),
+        (50.0,  1e9,    "高度断点 / 气声",                      "abnormal"),
+    ],
+    # Entropy (sample-entropy on EGG harmonics): 0 = perfectly
+    # repeating, > 1.5 = chaotic. Healthy voice 0.3-1.0.
+    "Entropy": [
+        (-1e9,   0.3,   "高度规律",                            "good"),
+        (0.3,    1.0,   "正常",                                "normal"),
+        (1.0,   1e9,    "无序振动",                            "watch"),
+    ],
+    # SPR (Singing Power Ratio): trained singers > -7 dB indicates
+    # presence of singer's formant; speech voices typically -25 to -15 dB.
+    "SPR": [
+        (-1e9,   -25.0, "无歌者共振",                          "normal"),
+        (-25.0,  -10.0, "中等共振",                            "normal"),
+        (-10.0,  1e9,   "强烈歌者共振",                        "good"),
+    ],
 }
 
 # English translations of the band labels above. Indexed by zh string
@@ -154,6 +217,30 @@ _THRESHOLDS_LABEL_EN: Dict[str, str] = {
     "良好":             "good",
     "偏低":             "low",
     "高比例浊音":       "high voicing",
+    # batch 2 — Crest / SpecBal / SpectralFlatness / AlphaRatio /
+    # HammarbergIndex / DUV / Entropy / SPR
+    "饱和 / 过压缩":    "saturated / over-compressed",
+    "典型语音":         "typical speech",
+    "动态丰富":         "dynamic-rich",
+    "瞬态主导":         "transient-dominated",
+    "明亮 / 高频主导":  "bright / high-freq dominated",
+    "平衡":             "balanced",
+    "暗哑 / 低频主导":  "dark / low-freq dominated",
+    "纯音化":           "tonal",
+    "典型嗓音":         "typical voice",
+    "噪声偏多":         "noisy",
+    "噪声主导":         "noise-dominated",
+    "声门绷紧 / 偏亮":  "tight glottis / bright",
+    "声门松弛 / 偏暗":  "lax glottis / dark",
+    "压制 / 紧张":      "pressed / tense",
+    "气声 / 低沉":      "breathy / muffled",
+    "中度断点":         "moderately broken",
+    "高度断点 / 气声":  "highly broken / breathy",
+    "高度规律":         "highly regular",
+    "无序振动":         "disordered vibration",
+    "无歌者共振":       "no singer's formant",
+    "中等共振":         "moderate resonance",
+    "强烈歌者共振":     "strong singer's formant",
 }
 
 def get_band_label(zh_label: str, lang: str) -> str:

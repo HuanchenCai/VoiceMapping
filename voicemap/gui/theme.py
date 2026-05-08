@@ -64,7 +64,11 @@ FONT_UI_B    = ("Microsoft YaHei UI", 11, "bold")
 FONT_SUB     = ("Microsoft YaHei UI", 12)
 FONT_DROP    = ("Microsoft YaHei UI", 13, "bold")
 FONT_H2      = ("Microsoft YaHei UI", 15, "bold")
-FONT_TITLE   = ("Microsoft YaHei UI", 18, "bold")
+# Header app title — was 18pt; UI_DESIGN.md spec calls 13pt, but at
+# Windows 100% DPI 13 reads tiny next to the canvas. 14pt bold lands
+# close to spec while keeping the title legible. Visual hierarchy
+# stays correct (Inspector metric name 19 > header 14 > body 11).
+FONT_TITLE   = ("Microsoft YaHei UI", 14, "bold")
 FONT_DISPLAY = ("Microsoft YaHei UI", 22, "bold")
 FONT_MONO    = ("Consolas", 10)
 FONT_MONO_B  = ("Consolas", 22, "bold")     # large numerics on value pill
