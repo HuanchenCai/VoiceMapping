@@ -217,15 +217,15 @@ class ModernPopup(tk.Toplevel):
         self._items.append({"type": "command", "row": row})
 
     def add_separator(self) -> None:
-        # Separator: bg matches the popup body (PANEL_HI) — invisible.
-        # User explicitly judged the previously-visible BORDER #3a3a3a
-        # hairline a "design issue" / 黑横线. Keeping the call as a
-        # no-op semantic anchor (e.g. for future grouping logic) but
-        # not drawing anything. The visual hierarchy of grouped menu
-        # items reads fine from indentation + cascade arrows alone.
-        sep = tk.Frame(self._frame, bg=PANEL_HI, height=1)
-        sep.pack(fill="x")
-        self._items.append({"type": "separator", "row": sep})
+        # No-op. Earlier versions drew a 1 px BORDER hairline + 4 px
+        # PANEL_HI surround that the user repeatedly judged a "黑横线
+        # / design issue". Even after dropping to a 1 px PANEL_HI
+        # frame (bg = row bg, supposedly invisible), users still saw
+        # a faint band — likely subpixel rounding on the 1 px Frame's
+        # geometry. Truly removing the widget removes the artifact.
+        # The call stays here so existing code can keep using it as
+        # a semantic anchor for future grouping work.
+        self._items.append({"type": "separator", "row": None})
 
     def add_cascade(self, label: str,
                     popup_factory: Callable[[], "ModernPopup"]) -> None:

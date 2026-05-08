@@ -838,11 +838,19 @@ class VoiceMapApp(_TkBase):
         self._tracks_list_frame: tk.Frame | None = None
 
     # ── multi-file Tracks Panel: row factory + state transitions ────────
+    # Tracks Panel viewport: caps visible height to ~5 rows × 28 px = 140 px.
+    # Beyond that we scroll instead of growing the panel (per user spec:
+    # "更多文件装不下了，可以滚动查看，不要动整个窗口的大小").
+    TRACKS_VIEWPORT_H = 145
+
     def _tracks_render(self):
         """Render the Tracks Panel from self._tracks. Switches between
-        empty-state drop zone and a scrollable list of track rows."""
+        empty-state drop zone and a scrollable list of track rows.
+
+        Scrollable list = tk.Canvas + Scrollbar wrapping a Frame. When
+        rows exceed TRACKS_VIEWPORT_H the scrollbar appears; below that
+        the canvas just renders all rows visible."""
         if not self._tracks:
-            # Show empty state, hide list
             try:
                 if self._tracks_list_frame is not None:
                     self._tracks_list_frame.pack_forget()
@@ -851,85 +859,146 @@ class VoiceMapApp(_TkBase):
                 pass
             return
 
-        # Hide drop zone, show list
         try:
             self.drop_zone.pack_forget()
         except tk.TclError:
             pass
 
-        # (Re)build the list frame
+        # (Re)build the scrollable list container
         if self._tracks_list_frame is not None:
             try:
                 self._tracks_list_frame.destroy()
             except tk.TclError:
                 pass
-        self._tracks_list_frame = tk.Frame(self._tracks_body, bg=PANEL)
-        self._tracks_list_frame.pack(fill="x")
+
+        # Outer frame holds the canvas + scrollbar side by side
+        outer = tk.Frame(self._tracks_body, bg=PANEL,
+                         height=self.TRACKS_VIEWPORT_H)
+        outer.pack(fill="x")
+        outer.pack_propagate(False)
+        self._tracks_list_frame = outer
+
+        canvas = tk.Canvas(outer, bg=PANEL,
+                           highlightthickness=0, bd=0)
+        sb = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=sb.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        # Keep scrollbar packed only when needed — checked after building rows
+        self._tracks_canvas = canvas
+        self._tracks_scrollbar = sb
+
+        # Inner frame is the actual rows container; placed in canvas via
+        # create_window so y-scrolling works.
+        inner = tk.Frame(canvas, bg=PANEL)
+        inner_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        # Resize the inner frame width to match canvas width on configure
+        def _on_canvas_resize(e):
+            try:
+                canvas.itemconfigure(inner_id, width=e.width)
+            except tk.TclError:
+                pass
+        canvas.bind("<Configure>", _on_canvas_resize, add="+")
+
+        # Update scrollregion + show/hide scrollbar based on inner height
+        def _on_inner_configure(_e=None):
+            try:
+                canvas.configure(scrollregion=canvas.bbox("all"))
+                inner_h = inner.winfo_reqheight()
+                if inner_h > self.TRACKS_VIEWPORT_H:
+                    if not sb.winfo_ismapped():
+                        sb.pack(side="right", fill="y")
+                else:
+                    if sb.winfo_ismapped():
+                        sb.pack_forget()
+            except tk.TclError:
+                pass
+        inner.bind("<Configure>", _on_inner_configure, add="+")
 
         self._track_row_widgets = []
         for i, entry in enumerate(self._tracks):
-            row = self._build_track_row(self._tracks_list_frame, entry, i)
+            row = self._build_track_row(inner, entry, i)
             row.pack(fill="x", pady=1)
             self._track_row_widgets.append(row)
 
+        # Scroll wheel binding propagates up from rows
+        canvas.bind("<MouseWheel>", self._on_tracks_mousewheel, add="+")
+        outer.bind("<MouseWheel>", self._on_tracks_mousewheel, add="+")
+        inner.bind("<MouseWheel>", self._on_tracks_mousewheel, add="+")
+
+    def _on_tracks_mousewheel(self, event):
+        """MouseWheel handler for the Tracks Panel scrollable canvas.
+        Bound on rows + canvas + inner frame so wheel works wherever
+        the cursor is inside the panel."""
+        canvas = getattr(self, "_tracks_canvas", None)
+        if canvas is None or not canvas.winfo_exists():
+            return
+        # Windows/Mac give ±120 per notch in event.delta
+        units = -1 if event.delta > 0 else 1
+        try:
+            canvas.yview_scroll(units, "units")
+        except tk.TclError:
+            pass
+
     def _build_track_row(self, parent, entry: "TrackEntry", idx: int) -> tk.Frame:
-        """Single track row in option-C spec format:
-            ▌ 01 ✓ test_Voice_EGG.wav     44.1k Hz · 8.2s · 12,525 cells   ▓▓░
-        ▌ left strip is ACCENT only on the active row.
-        Right side renders a tiny block-character waveform sketch from
-        the audio file's amplitude buckets (cheap, no matplotlib)."""
+        """Compact single-line track row (per user request):
+            ▌ 01 ✓ filename.wav   44.1k Hz · 8.2s · 514 网格   ▓▓░
+        ▌ marker is ACCENT only on the active row. Filename + meta on
+        the SAME line (was 2 lines), so vertical density doubles and
+        the panel can show 5-6 tracks without growing.
+        """
         is_active = (idx == self._active_track)
         bg_row = PANEL_HI if is_active else PANEL
 
-        outer = tk.Frame(parent, bg=bg_row, cursor="hand2")
+        # height fixed to ~28 px so all rows are uniform; pady inside
+        # is 4 (was 6 across two lines = ~52 px tall — way too much).
+        outer = tk.Frame(parent, bg=bg_row, cursor="hand2", height=28)
+        outer.pack_propagate(False)
         marker = tk.Frame(outer,
                           bg=ACCENT if is_active else bg_row,
                           width=4)
         marker.pack(side="left", fill="y")
-        # Right-side mini waveform — drawn as a tk.Canvas with vertical
-        # bars rather than Unicode block chars (those rendered as sparse
-        # dashes when most of the audio was below 1/8 of peak — looked
-        # broken). 220×36 px gives enough resolution to show envelope
-        # shape and dynamic range of typical 30-180 s recordings.
+
+        # Right-side mini waveform (smaller — was 220×36, now 160×22 to
+        # match new compact row height).
         wave_amps = self._track_waveform_amps(entry)
-        wave_canvas = tk.Canvas(outer, width=220, height=36,
+        wave_canvas = tk.Canvas(outer, width=160, height=22,
                                 bg=bg_row, highlightthickness=0, bd=0)
-        wave_canvas.pack(side="right", padx=(0, 12))
+        wave_canvas.pack(side="right", padx=(0, 10), pady=3)
         if wave_amps is not None and len(wave_amps) > 0:
             self._draw_waveform_canvas(wave_canvas, wave_amps,
-                                        220, 36, ACCENT_HI)
+                                        160, 22, ACCENT_HI)
 
         body = tk.Frame(outer, bg=bg_row)
-        body.pack(side="left", fill="x", expand=True, padx=10, pady=6)
+        body.pack(side="left", fill="both", expand=True, padx=8, pady=4)
 
-        # Row 1: 编号 · 状态 · 文件名
-        line1 = tk.Frame(body, bg=bg_row)
-        line1.pack(fill="x", anchor="w")
-        tk.Label(line1, text=f"{idx + 1:02d}",
+        # 编号 (Consolas 9pt mono so '01' / '12' line up clean)
+        tk.Label(body, text=f"{idx + 1:02d}",
                  bg=bg_row, fg=MUTED,
-                 font=FONT_MONO, width=3, anchor="w"
+                 font=("Consolas", 9), width=3, anchor="w"
                  ).pack(side="left")
+
+        # 状态 icon
         state_icon, state_color = {
             "queued":    ("○", MUTED),
             "analyzing": ("⏵", ACCENT_HI),
             "analyzed":  ("✓", OK),
             "failed":    ("✗", ERR),
         }.get(entry.state, ("○", MUTED))
-        tk.Label(line1, text=state_icon,
+        tk.Label(body, text=state_icon,
                  bg=bg_row, fg=state_color,
                  font=FONT_UI_B,
                  width=2, anchor="w"
                  ).pack(side="left", padx=(2, 6))
-        tk.Label(line1, text=entry.path.name,
+
+        # 文件名 (FONT_UI 11pt — was bold, now regular for less weight
+        # so the meta beside it doesn't feel demoted).
+        tk.Label(body, text=entry.path.name,
                  bg=bg_row, fg=TEXT,
-                 font=FONT_UI_B, anchor="w"
-                 ).pack(side="left", fill="x", expand=True)
+                 font=FONT_UI, anchor="w"
+                 ).pack(side="left")
 
-        # Row 2: 元数据 — 11pt Microsoft YaHei UI for legibility
-        line2 = tk.Frame(body, bg=bg_row)
-        line2.pack(fill="x", anchor="w")
-        tk.Frame(line2, bg=bg_row, width=44).pack(side="left")
-
+        # meta on the SAME line, muted & smaller (FONT_CAPTION 9pt).
         sr_kHz = (entry.sr / 1000.0) if entry.sr else 0.0
         meta_parts = []
         if entry.sr:
@@ -949,17 +1018,21 @@ class VoiceMapApp(_TkBase):
         elif entry.state == "failed":
             meta_parts.append(tr("status.failed"))
         meta_text = "  ·  ".join(meta_parts) if meta_parts else "—"
-        tk.Label(line2, text=meta_text,
+        tk.Label(body, text=meta_text,
                  bg=bg_row, fg=MUTED,
-                 font=FONT_SMALL, anchor="w"
-                 ).pack(side="left", fill="x", expand=True)
+                 font=FONT_CAPTION, anchor="w"
+                 ).pack(side="left", padx=(10, 0), fill="x", expand=True)
 
         # Whole-row click → switch active track
         def _click(_e=None, i=idx):
             self._tracks_set_active(i)
-        for w in (outer, body, line1, line2, marker, wave_canvas,
-                  *line1.winfo_children(), *line2.winfo_children()):
+        for w in (outer, body, marker, wave_canvas,
+                  *body.winfo_children()):
             w.bind("<Button-1>", _click)
+        # Mouse wheel on row delegates up to the scrollable container so
+        # users can scroll the track list naturally even when over a row.
+        for w in (outer, body, marker, wave_canvas, *body.winfo_children()):
+            w.bind("<MouseWheel>", self._on_tracks_mousewheel, add="+")
 
         return outer
 
