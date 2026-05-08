@@ -136,10 +136,18 @@ class CompareDialog(tk.Toplevel):
         self.transient(app)
         self.title(tr("compare.title"))
         self.configure(bg=PANEL)
-        # 1500×640: wider so the 3 subplots (A, B, A−B) and their titles
-        # don't overlap when long file stems are passed in. Min 1200×500
-        # is the floor — below that the colorbar legends cramp.
-        self.geometry("1500x640")
+        # Three subplots side-by-side (A | B | Δ) need a lot of horizontal
+        # room. The matplotlib figure is 14 inches wide; at 150% Windows
+        # DPI scaling that's ~2310 px, so a 1500 px dialog cropped the
+        # third (Δ) subplot off the right edge — user reported this.
+        # Default to 90 % of screen width capped at 1900 px, so we use
+        # almost the full monitor on 1080p / 1440p screens but never
+        # overflow on smaller displays.
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        dlg_w = min(1900, max(1400, int(sw * 0.90)))
+        dlg_h = min(900,  max(560,  int(sh * 0.70)))
+        self.geometry(f"{dlg_w}x{dlg_h}")
         self.minsize(1200, 500)
 
         # File pickers (top bar)
