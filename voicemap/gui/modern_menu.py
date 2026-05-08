@@ -286,25 +286,43 @@ class ModernPopup(tk.Toplevel):
         # between sub-widgets stays "inside the row".
         children = (row, lbl) + tuple(c for c in row.winfo_children() if c is not lbl)
 
+        def _set_bg(c, color):
+            # Frame widgets don't accept fg= — combining bg+fg in one
+            # configure call raises TclError on Frames, so the bg
+            # never gets applied either. Symptom: 18 px placeholder
+            # Frame on the left edge of a hovered (ACCENT) row stayed
+            # at PANEL_HI — looked like "item 左边一条黑线".
+            # Set bg first (works for everyone), fg afterwards (only
+            # widgets that support it).
+            try:
+                c.configure(bg=color)
+            except tk.TclError:
+                pass
+
+        def _set_fg(c, color):
+            try:
+                c.configure(fg=color)
+            except tk.TclError:
+                pass
+
         def _hover_in(_e=None):
-            row.configure(bg=ACCENT)
+            _set_bg(row, ACCENT)
             for c in row.winfo_children():
-                try:
-                    c.configure(bg=ACCENT, fg=BG_APP)
-                except tk.TclError:
-                    pass
+                _set_bg(c, ACCENT)
+                _set_fg(c, BG_APP)
 
         def _hover_out(_e=None):
-            row.configure(bg=PANEL_HI)
+            _set_bg(row, PANEL_HI)
             for c in row.winfo_children():
+                _set_bg(c, PANEL_HI)
+                # Restore prefix marker as ACCENT, others as their fg.
+                # Placeholder Frames have no `text` so cget raises;
+                # _set_fg already swallows that.
                 try:
-                    # Restore prefix marker as ACCENT, others as their fg.
-                    if c.cget("text") in ("▸", "●"):
-                        c.configure(bg=PANEL_HI, fg=ACCENT)
-                    else:
-                        c.configure(bg=PANEL_HI, fg=foreground)
+                    is_marker = c.cget("text") in ("▸", "●")
                 except tk.TclError:
-                    pass
+                    is_marker = False
+                _set_fg(c, ACCENT if is_marker else foreground)
 
         for w in children:
             w.bind("<Enter>", _hover_in, add="+")
