@@ -217,12 +217,14 @@ class ModernPopup(tk.Toplevel):
         self._items.append({"type": "command", "row": row})
 
     def add_separator(self) -> None:
-        # Separator: 1 px BORDER line with no surrounding pad. Was
-        # SEP_PAD=4 PANEL_HI gap above + below the line, which looked
-        # like a stray "black stripe" in the popup body. Now it's
-        # just a clean hairline between groups, flush with the rows.
-        sep = tk.Frame(self._frame, bg=BORDER, height=1)
-        sep.pack(fill="x", padx=8, pady=self.SEP_PAD)
+        # Separator: bg matches the popup body (PANEL_HI) — invisible.
+        # User explicitly judged the previously-visible BORDER #3a3a3a
+        # hairline a "design issue" / 黑横线. Keeping the call as a
+        # no-op semantic anchor (e.g. for future grouping logic) but
+        # not drawing anything. The visual hierarchy of grouped menu
+        # items reads fine from indentation + cascade arrows alone.
+        sep = tk.Frame(self._frame, bg=PANEL_HI, height=1)
+        sep.pack(fill="x")
         self._items.append({"type": "separator", "row": sep})
 
     def add_cascade(self, label: str,

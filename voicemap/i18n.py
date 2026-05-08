@@ -52,6 +52,8 @@ STRINGS: dict[str, dict[str, str]] = {
 
         # ── file menu ──
         "file.open_wav":        "打开 WAV...",
+        "file.add_files":       "添加文件…",
+        "file.add_folder":      "添加文件夹…",
         "file.open_outdir":     "打开输出目录",
         "file.export_excel":    "导出 Excel",
         "file.gen_report":      "生成报告",
@@ -140,6 +142,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "log.ignored_non_wav":  "忽略：非 .wav 文件",
         "log.analysis_busy":    "分析进行中，已忽略新文件",
         "log.no_file":          "文件不存在：{path}",
+        "log.no_wav_in_folder": "目录里没有 .wav 文件：{folder}",
+        "log.folder_loaded":    "✓ 添加 {n} 个 wav 自：{folder}",
         "log.no_outdir":        "请先指定输出目录",
         "log.centroid_loaded":  "✓ centroids 加载：{name} k={k}",
         "log.centroid_load_fail":"centroid 加载失败：{e}",
@@ -178,6 +182,7 @@ STRINGS: dict[str, dict[str, str]] = {
 
         # ── filedialog titles ──
         "fd.pick_audio":        "选择音频文件",
+        "fd.pick_folder":       "选择音频文件夹",
         "fd.pick_outdir":       "选择输出目录",
         "fd.pick_centroid":     "加载 centroid CSV",
         "fd.pick_train_wavs":   "选择多个 .wav 做联合 centroid 训练",
@@ -393,6 +398,8 @@ STRINGS: dict[str, dict[str, str]] = {
 
         # ── file menu ──
         "file.open_wav":        "Open WAV...",
+        "file.add_files":       "Add files…",
+        "file.add_folder":      "Add folder…",
         "file.open_outdir":     "Open Output Folder",
         "file.export_excel":    "Export Excel",
         "file.gen_report":      "Generate Report",
@@ -481,6 +488,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "log.ignored_non_wav":  "Ignored: not a .wav file",
         "log.analysis_busy":    "Analysis in progress, ignoring new file",
         "log.no_file":          "File does not exist: {path}",
+        "log.no_wav_in_folder": "No .wav files found under: {folder}",
+        "log.folder_loaded":    "✓ Added {n} wav file(s) from: {folder}",
         "log.no_outdir":        "Specify an output directory first",
         "log.centroid_loaded":  "✓ centroids loaded: {name} k={k}",
         "log.centroid_load_fail":"centroid load failed: {e}",
@@ -519,6 +528,7 @@ STRINGS: dict[str, dict[str, str]] = {
 
         # ── filedialog titles ──
         "fd.pick_audio":        "Pick an audio file",
+        "fd.pick_folder":       "Pick an audio folder",
         "fd.pick_outdir":       "Pick output folder",
         "fd.pick_centroid":     "Load centroid CSV",
         "fd.pick_train_wavs":   "Pick multiple .wav for joint centroid training",

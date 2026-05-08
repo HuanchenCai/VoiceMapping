@@ -576,7 +576,9 @@ class VoiceMapApp(_TkBase):
         _safe_text("_inspect_btn_excel",   "inspector.btn.excel")
         _safe_text("_inspect_btn_report",  "inspector.btn.report")
         _safe_text("_inspect_btn_compare", "inspector.btn.compare")
-        _safe_text("_metric_nav_hint",     "metric_bar.nav_hint")
+        # Nav buttons (replacing the old _metric_nav_hint single label)
+        _safe_text("_metric_prev_btn",     "metric.prev")
+        _safe_text("_metric_next_btn",     "metric.next")
         # Re-render Inspector (so metric description / unit / clinical
         # band labels follow the new language).
         try:
@@ -604,7 +606,11 @@ class VoiceMapApp(_TkBase):
     # ── popup factories（每次点开新建一个 ModernPopup） ──────────────────
     def _popup_file(self) -> "ModernPopup":
         p = ModernPopup(self)
-        p.add_command(tr("file.open_wav"),    command=self._pick_audio,     accelerator="Ctrl+O")
+        # 添加文件 (multi-select) + 添加文件夹 (recursive folder pick) —
+        # both append to the Tracks Panel queue, first added auto-analyzes.
+        p.add_command(tr("file.add_files"),   command=self._pick_audio,        accelerator="Ctrl+O")
+        p.add_command(tr("file.add_folder"),  command=self._pick_audio_folder)
+        p.add_separator()
         p.add_command(tr("file.open_outdir"), command=self._open_output_dir)
         p.add_separator()
         p.add_command(tr("file.export_excel"), command=self._export_excel)
@@ -1115,10 +1121,38 @@ class VoiceMapApp(_TkBase):
         self.metric_btn.pack(side="left")
         self.metric_btn.config(state="disabled")
 
-        # Nav hint
-        self._metric_nav_hint = tk.Label(inner, text=tr("metric_bar.nav_hint"),
-                                          bg=PANEL, fg=MUTED, font=FONT_UI)
-        self._metric_nav_hint.pack(side="left", padx=(16, 0))
+        # Nav hint — split into two clickable buttons (Prev / Next)
+        # because users keep clicking the text expecting it to do
+        # something. Was a single muted Label saying "│  上一个ㅤ←ㅤ
+        # 下一个ㅤ→" which read as a hint but did nothing on click.
+        # Now: explicit "上一个" / "下一个" labels that cycle the metric.
+        # The "│" separator stays as a static visual divider.
+        sep = tk.Label(inner, text="│", bg=PANEL, fg=BORDER, font=FONT_UI)
+        sep.pack(side="left", padx=(16, 8))
+
+        self._metric_prev_btn = tk.Label(
+            inner, text=tr("metric.prev"),
+            bg=PANEL, fg=MUTED, font=FONT_UI,
+            cursor="hand2")
+        self._metric_prev_btn.pack(side="left", padx=(0, 12))
+        self._metric_prev_btn.bind("<Button-1>",
+                                    lambda _e: self._cycle_metric(-1))
+        self._metric_prev_btn.bind(
+            "<Enter>", lambda _e: self._metric_prev_btn.configure(fg=ACCENT))
+        self._metric_prev_btn.bind(
+            "<Leave>", lambda _e: self._metric_prev_btn.configure(fg=MUTED))
+
+        self._metric_next_btn = tk.Label(
+            inner, text=tr("metric.next"),
+            bg=PANEL, fg=MUTED, font=FONT_UI,
+            cursor="hand2")
+        self._metric_next_btn.pack(side="left")
+        self._metric_next_btn.bind("<Button-1>",
+                                    lambda _e: self._cycle_metric(+1))
+        self._metric_next_btn.bind(
+            "<Enter>", lambda _e: self._metric_next_btn.configure(fg=ACCENT))
+        self._metric_next_btn.bind(
+            "<Leave>", lambda _e: self._metric_next_btn.configure(fg=MUTED))
 
         self._metric_popup = None
         self.metric_menu = None
@@ -1566,6 +1600,27 @@ class VoiceMapApp(_TkBase):
             return
         for path in paths:
             self._on_audio_dropped(path)
+
+    def _pick_audio_folder(self):
+        """Recursively pick every .wav under a directory and add them
+        to the Tracks Panel. First file becomes active + auto-analyzed,
+        rest queue up for click-to-analyze. Mirrors the CLI --batch mode."""
+        if self._worker and self._worker.is_alive():
+            self._append_log("WARNING", tr("log.analysis_busy"))
+            return
+        folder = filedialog.askdirectory(
+            title=tr("fd.pick_folder"),
+            initialdir=str(Path(self.output_dir_var.get()).parent))
+        if not folder:
+            return
+        wavs = sorted(Path(folder).rglob("*.wav"))
+        if not wavs:
+            self._append_log("WARNING", tr("log.no_wav_in_folder", folder=folder))
+            return
+        self._append_log("META", tr("log.folder_loaded",
+                                     folder=folder, n=len(wavs)))
+        for p in wavs:
+            self._on_audio_dropped(str(p))
 
     def _on_audio_dropped(self, path) -> None:
         """Add a file to the Tracks Panel. First file becomes active and
