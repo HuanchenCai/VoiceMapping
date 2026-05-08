@@ -69,8 +69,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "edit.save_image":      "保存图片…",
 
         # ── metric menu ──
-        "metric.prev":          "上一个 metric  ←",
-        "metric.next":          "下一个 metric  →",
+        "metric.prev":          "上一个  ←",
+        "metric.next":          "下一个  →",
         "metric.acoustic":      "声学",
         "metric.egg":           "EGG",
         "metric.singing":       "唱歌特异性",
@@ -415,8 +415,8 @@ STRINGS: dict[str, dict[str, str]] = {
         "edit.save_image":      "Save Image…",
 
         # ── metric menu ──
-        "metric.prev":          "Previous metric  ←",
-        "metric.next":          "Next metric  →",
+        "metric.prev":          "Previous  ←",
+        "metric.next":          "Next  →",
         "metric.acoustic":      "Acoustic",
         "metric.egg":           "EGG",
         "metric.singing":       "Singing-specific",
