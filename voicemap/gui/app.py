@@ -602,6 +602,14 @@ class VoiceMapApp(_TkBase):
             self._tracks_render()
         except Exception:
             pass
+        # Canvas placeholder text is matplotlib-rendered, not a tk widget,
+        # so language switch needs to redraw it explicitly. Skip when an
+        # actual analysis is showing (don't trash a real heatmap).
+        try:
+            if getattr(self, "_showing_placeholder", False):
+                self._show_placeholder()
+        except Exception:
+            pass
 
     # ── popup factories（每次点开新建一个 ModernPopup） ──────────────────
     def _popup_file(self) -> "ModernPopup":
@@ -1652,8 +1660,10 @@ class VoiceMapApp(_TkBase):
         ax.text(0.5, 0.40, msg, transform=ax.transAxes,
                 ha="center", va="center",
                 color="#444444", fontsize=15, weight="bold")
-        ax.text(0.5, 0.32,
-                "Stereo WAV  ·  Ch 1 = Microphone  ·  Ch 2 = EGG",
+        # Subtitle was hardcoded English; goes through tr() now so
+        # zh mode shows zh, en mode shows en — matches the new
+        # placeholder title 'Open a file or folder to start' tone.
+        ax.text(0.5, 0.32, tr("drop.subtitle"),
                 transform=ax.transAxes,
                 ha="center", va="center",
                 color="#888888", fontsize=9)
