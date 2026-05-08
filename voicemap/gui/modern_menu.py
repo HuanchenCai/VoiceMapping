@@ -214,6 +214,12 @@ class ModernPopup(tk.Toplevel):
         row = self._make_row(label, foreground=foreground,
                              accelerator=accelerator,
                              on_click=lambda: (command and command(), self.destroy()))
+        # Hovering a non-cascade row → close any cascade sub-popup that
+        # may have been opened by hovering a cascade earlier. Otherwise
+        # a stale submenu lingers while the cursor is on a different item.
+        row.bind("<Enter>", self._close_sub_popup, add="+")
+        for child in row.winfo_children():
+            child.bind("<Enter>", self._close_sub_popup, add="+")
         self._items.append({"type": "command", "row": row})
 
     def add_separator(self) -> None:
@@ -232,14 +238,51 @@ class ModernPopup(tk.Toplevel):
         row = self._make_row(label, foreground=TEXT,
                              cascade_arrow=True,
                              on_click=lambda r=None: self._open_cascade(r, popup_factory))
-        # We need to know which row's bbox to anchor the cascade against,
-        # so wire on_click after the fact with the row reference.
+        # Click-to-open binding (kept for accessibility / touchscreens).
         def _click_with_row(_e=None, _row=row, _factory=popup_factory):
             self._open_cascade(_row, _factory)
         row.bind("<Button-1>", _click_with_row)
         for child in row.winfo_children():
             child.bind("<Button-1>", _click_with_row)
+
+        # Hover-to-open: schedule _open_cascade after 200 ms so a quick
+        # mouse traverse over the cascade row doesn't trigger. Cancelling
+        # the after-id on Leave avoids spurious opens. Standard Win32
+        # / GTK menu UX, the user pointed out we were missing it.
+        cascade_state: dict = {"after_id": None}
+        def _hover_open(_e=None, _row=row, _factory=popup_factory):
+            if cascade_state["after_id"] is not None:
+                try: row.after_cancel(cascade_state["after_id"])
+                except Exception: pass
+            cascade_state["after_id"] = row.after(
+                200, lambda: self._open_cascade(_row, _factory))
+
+        def _hover_cancel(_e=None):
+            if cascade_state["after_id"] is not None:
+                try: row.after_cancel(cascade_state["after_id"])
+                except Exception: pass
+                cascade_state["after_id"] = None
+
+        row.bind("<Enter>", _hover_open, add="+")
+        row.bind("<Leave>", _hover_cancel, add="+")
+        for child in row.winfo_children():
+            child.bind("<Enter>", _hover_open, add="+")
+            child.bind("<Leave>", _hover_cancel, add="+")
         self._items.append({"type": "cascade", "row": row})
+
+    def _close_sub_popup(self, _e=None) -> None:
+        """Close any currently-open cascade submenu. Called by sibling
+        rows' <Enter> so navigating away from a cascade auto-closes its
+        submenu — no leftover popup hanging out while the cursor is
+        clearly on a different item."""
+        if self._sub_popup is None:
+            return
+        try:
+            if self._sub_popup.winfo_exists():
+                self._sub_popup.destroy()
+        except tk.TclError:
+            pass
+        self._sub_popup = None
 
     def add_radiobutton(self, label: str, variable: tk.StringVar, value: str,
                         foreground: str = TEXT) -> None:
@@ -250,6 +293,10 @@ class ModernPopup(tk.Toplevel):
             self.destroy()
         row = self._make_row(label, foreground=foreground,
                              prefix=marker, on_click=_click)
+        # Same hover-close-sub-popup behavior as add_command.
+        row.bind("<Enter>", self._close_sub_popup, add="+")
+        for child in row.winfo_children():
+            child.bind("<Enter>", self._close_sub_popup, add="+")
         self._items.append({"type": "radio", "row": row,
                              "variable": variable, "value": value})
 
