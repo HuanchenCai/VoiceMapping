@@ -94,7 +94,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "drop.title":           "拖入 .wav 文件  /  点击浏览",
         "drop.title_no_dnd":    "点击浏览（安装 tkinterdnd2 可启用拖拽）",
         "drop.subtitle":        "立体声 WAV · 通道 1 = 麦克风   通道 2 = EGG",
-        "drop.placeholder":     "拖入 .wav 文件开始",
+        "drop.placeholder":     "打开文件或文件夹以开始",
         "header.metric":        "Metric",
 
         # ── option-C layout (Tracks / Metric Bar / Inspector / Status Bar) ──
@@ -440,7 +440,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "drop.title":           "Drop a .wav file  /  click to browse",
         "drop.title_no_dnd":    "Click to browse (install tkinterdnd2 to enable drag-drop)",
         "drop.subtitle":        "Stereo WAV · Ch 1 = Microphone   Ch 2 = EGG",
-        "drop.placeholder":     "Drop a .wav file to begin",
+        "drop.placeholder":     "Open a file or folder to start",
         "header.metric":        "Metric",
 
         # ── option-C layout ──
