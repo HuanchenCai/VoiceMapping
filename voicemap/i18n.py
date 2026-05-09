@@ -83,7 +83,6 @@ STRINGS: dict[str, dict[str, str]] = {
 
         # ── view menu ──
         "view.fit":             "拟合曲线…",
-        "view.sections":        "只看某类参数",
 
         # ── help menu ──
         "help.about":           "关于...",
@@ -100,6 +99,7 @@ STRINGS: dict[str, dict[str, str]] = {
 
         # ── option-C layout (Tracks / Metric Bar / Inspector / Status Bar) ──
         "tracks.label":         "录音轨",
+        "tracks.start":         "开始分析",
         "metric_bar.label":     "指标",
         "metric_bar.nav_hint":  "│  上一个 ←   下一个 →",
         "inspector.title":      "详情",
@@ -471,7 +471,6 @@ STRINGS: dict[str, dict[str, str]] = {
 
         # ── view menu ──
         "view.fit":             "Fit curves…",
-        "view.sections":        "Filter metric sections",
 
         # ── help menu ──
         "help.about":           "About...",
@@ -488,6 +487,7 @@ STRINGS: dict[str, dict[str, str]] = {
 
         # ── option-C layout ──
         "tracks.label":         "Tracks",
+        "tracks.start":         "Start analysis",
         "metric_bar.label":     "Metric",
         "metric_bar.nav_hint":  "│  Prev ←   Next →",
         "inspector.title":      "Details",
