@@ -693,28 +693,8 @@ class VoiceMapApp(_TkBase):
     def _popup_view(self) -> "ModernPopup":
         p = ModernPopup(self)
         p.add_command(tr("view.fit"), command=self._open_fit_menu)
-        p.add_cascade(tr("view.sections"), popup_factory=self._popup_view_sections)
         p.add_separator()
         p.add_command(tr("view.log"), command=self._open_log_window)
-        return p
-
-    def _popup_view_sections(self) -> "ModernPopup":
-        """Section visibility filter — checkboxes for each metric category.
-        Unchecked sections are hidden from the metric_btn popup picker.
-        State stored in self._section_visible (initialised on first call)."""
-        if not hasattr(self, "_section_visible"):
-            self._section_visible = {sect: True for sect, _ in _METRIC_SECTIONS}
-        p = ModernPopup(self)
-        for section_name, _keys in _METRIC_SECTIONS:
-            visible = self._section_visible.get(section_name, True)
-            marker = "✓" if visible else " "
-            label = section_name
-            def _toggle(s=section_name):
-                self._section_visible[s] = not self._section_visible.get(s, True)
-                # Refresh the metric popup if it's currently visible — but
-                # since the popup chain auto-closes on click, we just
-                # update the flag and the next open will reflect it.
-            p.add_command(f"{marker}  {label}", command=_toggle)
         return p
 
     def _open_log_window(self):
@@ -833,13 +813,21 @@ class VoiceMapApp(_TkBase):
         inner = tk.Frame(bar, bg=PANEL)
         inner.pack(fill="x", padx=16, pady=(6, 6))   # was 10 — slim chrome
 
-        # Saved as self._tracks_label so _on_language_changed can update
-        # the text on language switch — was hardcoded as a throw-away
-        # Label and stayed in zh forever in en mode.
+        # Header row: "录音轨" label on left + "开始分析" button on right.
+        # Per user spec: dropping / picking a wav no longer auto-runs
+        # analysis — user must hit this button explicitly.
+        header_row = tk.Frame(inner, bg=PANEL)
+        header_row.pack(fill="x", pady=(0, 4))
         self._tracks_label = tk.Label(
-            inner, text=tr("tracks.label"), bg=PANEL, fg=ACCENT,
+            header_row, text=tr("tracks.label"), bg=PANEL, fg=ACCENT,
             font=FONT_UI_B)
-        self._tracks_label.pack(anchor="w", pady=(0, 4))
+        self._tracks_label.pack(side="left", anchor="w")
+        self._start_btn = ttk.Button(
+            header_row, text=tr("tracks.start"),
+            style="Accent.TButton",
+            command=self._on_start_btn_click)
+        self._start_btn.pack(side="right")
+        self._start_btn.state(["disabled"])  # nothing queued yet
 
         # Container that holds either the empty-state drop zone or
         # the rows-of-tracks scroll area. We swap children on first
@@ -1154,9 +1142,11 @@ class VoiceMapApp(_TkBase):
         return idx
 
     def _tracks_set_active(self, idx: int) -> None:
-        """Switch the displayed file. Two cases:
+        """Switch the displayed file. Selecting a queued track NO LONGER
+        auto-starts analysis — user must hit the '开始分析' button
+        explicitly (per spec: don't run on click). Two cases now:
           - target already analyzed → restore its df + re-render heatmap
-          - target queued → kick off analysis on it
+          - target queued → just switch focus; placeholder canvas stays.
         """
         if not (0 <= idx < len(self._tracks)):
             return
@@ -1175,8 +1165,10 @@ class VoiceMapApp(_TkBase):
         if entry.analyzer is not None:
             self._last_analyzer = entry.analyzer
 
-        # Update visual: marker on new active, off on previous
+        # Update visual: marker on new active, off on previous,
+        # 开始分析 button enabled state follows.
         self._tracks_render()
+        self._update_start_btn()
 
         # Refresh heatmap / Inspector / status bar from the new active.
         if entry.state == "analyzed" and entry.df is not None:
@@ -1189,10 +1181,40 @@ class VoiceMapApp(_TkBase):
                 self._update_statusbar()
             except Exception:
                 pass
-        elif entry.state == "queued":
-            # Start analysis in background
-            self._start_analysis(entry.path)
-        # 'analyzing' / 'failed' — leave UI in placeholder/error state
+        # queued / analyzing / failed → don't touch canvas (placeholder
+        # or stale heatmap stays). User clicks 开始分析 to kick off.
+
+    def _update_start_btn(self) -> None:
+        """Enable 开始分析 if the active track is queued and no
+        worker is running; disable otherwise."""
+        btn = getattr(self, "_start_btn", None)
+        if btn is None:
+            return
+        try:
+            idx = self._active_track
+            running = bool(self._worker and self._worker.is_alive())
+            if 0 <= idx < len(self._tracks) and not running:
+                entry = self._tracks[idx]
+                if entry.state == "queued":
+                    btn.state(["!disabled"])
+                    return
+            btn.state(["disabled"])
+        except Exception:
+            pass
+
+    def _on_start_btn_click(self) -> None:
+        """开始分析 button — launch analysis on the active queued track."""
+        idx = self._active_track
+        if not (0 <= idx < len(self._tracks)):
+            return
+        entry = self._tracks[idx]
+        if entry.state != "queued":
+            return
+        if self._worker and self._worker.is_alive():
+            self._append_log("WARNING", tr("log.analysis_busy"))
+            return
+        self._start_analysis(entry.path)
+        self._update_start_btn()
 
     def _track_for_path(self, path: Path) -> TrackEntry | None:
         for e in self._tracks:
@@ -1720,9 +1742,9 @@ class VoiceMapApp(_TkBase):
             self._on_audio_dropped(str(p))
 
     def _on_audio_dropped(self, path) -> None:
-        """Add a file to the Tracks Panel. First file becomes active and
-        gets analyzed automatically; later files are appended in 'queued'
-        state and only analyzed when the user clicks them."""
+        """Add a file to the Tracks Panel in 'queued' state. The first
+        file becomes active. Analysis NEVER auto-runs — user must hit
+        '开始分析' to kick it off (per spec: don't run on click)."""
         p = Path(path)
         # If already in tracks, just switch to it
         existing = self._track_for_path(p)
@@ -1731,9 +1753,12 @@ class VoiceMapApp(_TkBase):
             self._tracks_set_active(idx)
             return
         idx = self._tracks_add(p)
-        # Auto-analyze only when this is the first track loaded
+        # First track becomes active (so the 开始分析 button targets it)
+        # but does NOT auto-analyse. Subsequent drops just append to queue.
         if len(self._tracks) == 1:
             self._tracks_set_active(idx)
+        else:
+            self._update_start_btn()
 
     def _pick_output_dir(self):
         path = filedialog.askdirectory(title=tr("fd.pick_outdir"),
@@ -1912,6 +1937,7 @@ class VoiceMapApp(_TkBase):
             self._refresh_metric_dropdown()
             self._update_statusbar()
             self._update_inspector()
+            self._update_start_btn()
         else:
             self._set_status(tr("status.failed"), ERR, key="status.failed")
             self._append_log("ERROR", payload["error"])
@@ -1921,6 +1947,7 @@ class VoiceMapApp(_TkBase):
                 entry.state = "failed"
                 self._tracks_render()
             self._update_statusbar()
+            self._update_start_btn()
 
     # ── Metric 切换 ──
     def _refresh_metric_dropdown(self):
@@ -2198,12 +2225,6 @@ class VoiceMapApp(_TkBase):
         if str(self.metric_btn.cget("state")) == "disabled":
             return
         sa = getattr(self, "_metric_sections_avail", None)
-        if not sa:
-            return
-        # Apply 视图 → 只看某类参数 filter
-        visible = getattr(self, "_section_visible", {})
-        sa = [(name, cols) for name, cols in sa
-              if visible.get(name, True)]
         if not sa:
             return
 
