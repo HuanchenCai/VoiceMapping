@@ -19,7 +19,8 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 from voicemap.gui.theme import (
     PANEL, PANEL_HI, BORDER, TEXT, MUTED, ACCENT,
-    FONT_UI, FONT_UI_B,
+    OK, WARN, ERR, BG_CODE,
+    FONT_UI, FONT_UI_B, FONT_MONO,
 )
 from voicemap.i18n import tr
 
@@ -452,7 +453,7 @@ class LogWindow(tk.Toplevel):
         wrap.pack(fill="both", expand=True)
 
         # Mirror tk.Text widget; we relocate the live one from the app.
-        self.text = tk.Text(wrap, bg="#0b1117", fg=TEXT,
+        self.text = tk.Text(wrap, bg=BG_CODE, fg=TEXT,
                              font=("Consolas", 10),
                              bd=0, highlightthickness=1,
                              highlightbackground=BORDER,
@@ -463,9 +464,12 @@ class LogWindow(tk.Toplevel):
         sb = ttk.Scrollbar(wrap, command=self.text.yview)
         sb.pack(side="right", fill="y")
         self.text.configure(yscrollcommand=sb.set)
+        # Severity colors map to existing tokens (was hardcoded hex
+        # bypassing theme.py — design audit P0). WARN/ERR/OK live in
+        # theme.py and stay aligned with the Inspector severity legend.
         for tag, color in (("INFO", TEXT), ("DEBUG", MUTED),
-                           ("WARNING", "#d97706"), ("ERROR", "#dc2626"),
-                           ("OK", "#84cc16"), ("META", ACCENT)):
+                           ("WARNING", WARN), ("ERROR", ERR),
+                           ("OK", OK), ("META", ACCENT)):
             self.text.tag_configure(tag, foreground=color)
 
         # Sync existing log content from app's main log_text widget so

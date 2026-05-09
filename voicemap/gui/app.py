@@ -40,8 +40,13 @@ from voicemap.gui.theme import (
     BG, PANEL, PANEL_HI, BORDER, TEXT, MUTED, ACCENT, ACCENT_HI,
     OK, WARN, ERR,
     TEXT_SEC, TEXT_MUTED,
+    BG_DISABLED, BG_CODE,
     FONT_UI, FONT_UI_B, FONT_TITLE, FONT_SUB, FONT_DROP, FONT_MONO,
     FONT_CAPTION, FONT_SMALL, FONT_H2, FONT_DISPLAY, FONT_MONO_B,
+    FONT_BTN_INFO, FONT_INSPECTOR_NAME,
+    PLOT_FG, PLOT_FG_SPINE, PLOT_GRID, PLOT_GRID_LIGHT,
+    PLOT_OVERLAY_FIT, PLOT_OVERLAY_2,
+    PLACEHOLDER_DIM, PLACEHOLDER_TXT,
     _METRIC_SECTIONS, _DEFAULT_METRIC_CHAIN,
 )
 from voicemap.gui.widgets import MetricPopup, QueueHandler, HoverTooltip
@@ -332,7 +337,7 @@ class VoiceMapApp(_TkBase):
                     background=ACCENT, foreground=BG,
                     font=FONT_UI_B, borderwidth=0, padding=(10, 6))
         s.map("Accent.TButton",
-              background=[("active", ACCENT_HI), ("disabled", "#2a3340")],
+              background=[("active", ACCENT_HI), ("disabled", BG_DISABLED)],
               foreground=[("disabled", MUTED)])
         s.configure("Ghost.TButton",
                     background=PANEL_HI, foreground=TEXT,
@@ -1320,7 +1325,7 @@ class VoiceMapApp(_TkBase):
         self._inspector_metric_name = tk.Label(
             title_row, text="—",
             bg=PANEL, fg=ACCENT,
-            font=("Microsoft YaHei UI", 19, "bold"),
+            font=FONT_INSPECTOR_NAME,
             anchor="w", justify="left",
             cursor="question_arrow")
         self._inspector_metric_name.pack(side="left", fill="x", expand=True)
@@ -1329,7 +1334,7 @@ class VoiceMapApp(_TkBase):
         self._inspector_info_glyph = tk.Label(
             title_row, text="ⓘ",
             bg=PANEL, fg=MUTED,
-            font=("Microsoft YaHei UI", 14),
+            font=FONT_BTN_INFO,
             cursor="question_arrow")
         self._inspector_info_glyph.pack(side="right", padx=(4, 0), pady=(8, 0))
 
@@ -1380,7 +1385,7 @@ class VoiceMapApp(_TkBase):
         # all the existing _append_log call sites.
         log_holder = tk.Frame(parent, bg=PANEL, width=0, height=0)
         # Don't pack — invisible.
-        self.log_text = tk.Text(log_holder, bg="#0b1117", fg=TEXT,
+        self.log_text = tk.Text(log_holder, bg=BG_CODE, fg=TEXT,
                                 font=FONT_MONO,
                                 bd=0, highlightthickness=0,
                                 state="disabled", height=1, width=1)
@@ -1633,26 +1638,26 @@ class VoiceMapApp(_TkBase):
         ax.set_xlabel("MIDI")
         ax.set_ylabel("SPL (dB)")
         # 浅灰网格，让画面有"准备好接收数据"的感觉
-        ax.grid(True, which="both", color="#e0e0e0", linewidth=0.7, zorder=1)
+        ax.grid(True, which="both", color=PLOT_GRID_LIGHT, linewidth=0.7, zorder=1)
         ax.set_axisbelow(True)
         for spine in ax.spines.values():
-            spine.set_color("#cccccc")
+            spine.set_color(PLOT_GRID)
             spine.set_linewidth(0.8)
-        ax.tick_params(colors="#888888", labelsize=9)
+        ax.tick_params(colors=PLACEHOLDER_DIM, labelsize=9)
         # 居中提示文字（axes 坐标）
         ax.text(0.5, 0.55, "♪", transform=ax.transAxes,
                 ha="center", va="center",
                 color=ACCENT, fontsize=44, weight="bold", alpha=0.55)
         ax.text(0.5, 0.40, msg, transform=ax.transAxes,
                 ha="center", va="center",
-                color="#444444", fontsize=15, weight="bold")
+                color=PLACEHOLDER_TXT, fontsize=15, weight="bold")
         # Subtitle was hardcoded English; goes through tr() now so
         # zh mode shows zh, en mode shows en — matches the new
         # placeholder title 'Open a file or folder to start' tone.
         ax.text(0.5, 0.32, tr("drop.subtitle"),
                 transform=ax.transAxes,
                 ha="center", va="center",
-                color="#888888", fontsize=9)
+                color=PLACEHOLDER_DIM, fontsize=9)
 
         self._canvas.draw_idle()
 
@@ -2586,11 +2591,11 @@ class VoiceMapApp(_TkBase):
             return
         if kind == "center":
             artists = fit_voice_center(self._last_df, ax,
-                                        method=method, color="#ff3e88")
+                                        method=method, color=PLOT_OVERLAY_FIT)
         else:   # "trend"
             col = self.metric_var.get()
             artists = fit_metric_trend(self._last_df, col, ax,
-                                        method=method, color="#00d9ff")
+                                        method=method, color=PLOT_OVERLAY_2)
         self._overlay_mgr.add(artists)
         self._canvas.draw_idle()
         self._append_log("META", tr("log.overlay_applied", kind=kind, method=method))
