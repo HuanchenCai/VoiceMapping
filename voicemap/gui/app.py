@@ -735,6 +735,11 @@ class VoiceMapApp(_TkBase):
                        lambda _e, v=value: self._switch_language(v))
         return p
 
+    def _toggle_language(self) -> None:
+        """F2 hotkey: toggle zh ↔ en. a11y audit R-1."""
+        cur = get_language()
+        self._switch_language("en" if cur == "zh" else "zh")
+
     def _switch_language(self, lang: str) -> None:
         """Switch language safely from a menu popup.
 
@@ -976,7 +981,14 @@ class VoiceMapApp(_TkBase):
 
         # height fixed to ~28 px so all rows are uniform; pady inside
         # is 4 (was 6 across two lines = ~52 px tall — way too much).
-        outer = tk.Frame(parent, bg=bg_row, cursor="hand2", height=28)
+        # `takefocus=1` + highlightthickness=2 makes the row reachable
+        # via Tab and shows a 2 px ACCENT outline when focused — fixes
+        # WCAG 2.1.1 (keyboard) + 2.4.7 (focus visible). a11y audit O-1.
+        outer = tk.Frame(parent, bg=bg_row, cursor="hand2", height=28,
+                         takefocus=1,
+                         highlightthickness=2,
+                         highlightbackground=bg_row,   # invisible when not focused
+                         highlightcolor=ACCENT)
         outer.pack_propagate(False)
         marker = tk.Frame(outer,
                           bg=ACCENT if is_active else bg_row,
@@ -1047,12 +1059,16 @@ class VoiceMapApp(_TkBase):
                  font=FONT_CAPTION, anchor="w"
                  ).pack(side="left", padx=(10, 0), fill="x", expand=True)
 
-        # Whole-row click → switch active track
+        # Whole-row click → switch active track. Same handler also runs
+        # on <Return> / <space> when the row has keyboard focus (a11y
+        # audit O-1: track rows previously click-only).
         def _click(_e=None, i=idx):
             self._tracks_set_active(i)
         for w in (outer, body, marker, wave_canvas,
                   *body.winfo_children()):
             w.bind("<Button-1>", _click)
+        outer.bind("<Return>", _click)
+        outer.bind("<space>",  _click)
         # Mouse wheel on row delegates up to the scrollable container so
         # users can scroll the track list naturally even when over a row.
         for w in (outer, body, marker, wave_canvas, *body.winfo_children()):
@@ -1261,29 +1277,32 @@ class VoiceMapApp(_TkBase):
         sep = tk.Label(inner, text="│", bg=PANEL, fg=BORDER, font=FONT_UI)
         sep.pack(side="left", padx=(16, 8))
 
-        self._metric_prev_btn = tk.Label(
-            inner, text=tr("metric.prev"),
-            bg=PANEL, fg=MUTED, font=FONT_UI,
-            cursor="hand2")
-        self._metric_prev_btn.pack(side="left", padx=(0, 12))
-        self._metric_prev_btn.bind("<Button-1>",
-                                    lambda _e: self._cycle_metric(-1))
-        self._metric_prev_btn.bind(
-            "<Enter>", lambda _e: self._metric_prev_btn.configure(fg=ACCENT))
-        self._metric_prev_btn.bind(
-            "<Leave>", lambda _e: self._metric_prev_btn.configure(fg=MUTED))
+        # Helper: turn a tk.Label into a focusable button-like widget
+        # that responds to click + Enter/Space + shows an underline focus
+        # indicator on Tab. a11y audit O-3.
+        def _make_label_button(parent, text_key, on_click):
+            lbl = tk.Label(parent, text=tr(text_key),
+                           bg=PANEL, fg=MUTED, font=FONT_UI,
+                           cursor="hand2",
+                           takefocus=1,
+                           highlightthickness=2,
+                           highlightbackground=PANEL,
+                           highlightcolor=ACCENT)
+            lbl.bind("<Button-1>", lambda _e: on_click())
+            lbl.bind("<Return>",   lambda _e: on_click())
+            lbl.bind("<space>",    lambda _e: on_click())
+            lbl.bind("<Enter>",    lambda _e: lbl.configure(fg=ACCENT))
+            lbl.bind("<Leave>",    lambda _e: lbl.configure(fg=MUTED if lbl.focus_get() is not lbl else ACCENT))
+            lbl.bind("<FocusIn>",  lambda _e: lbl.configure(fg=ACCENT))
+            lbl.bind("<FocusOut>", lambda _e: lbl.configure(fg=MUTED))
+            return lbl
 
-        self._metric_next_btn = tk.Label(
-            inner, text=tr("metric.next"),
-            bg=PANEL, fg=MUTED, font=FONT_UI,
-            cursor="hand2")
+        self._metric_prev_btn = _make_label_button(
+            inner, "metric.prev", lambda: self._cycle_metric(-1))
+        self._metric_prev_btn.pack(side="left", padx=(0, 12))
+        self._metric_next_btn = _make_label_button(
+            inner, "metric.next", lambda: self._cycle_metric(+1))
         self._metric_next_btn.pack(side="left")
-        self._metric_next_btn.bind("<Button-1>",
-                                    lambda _e: self._cycle_metric(+1))
-        self._metric_next_btn.bind(
-            "<Enter>", lambda _e: self._metric_next_btn.configure(fg=ACCENT))
-        self._metric_next_btn.bind(
-            "<Leave>", lambda _e: self._metric_next_btn.configure(fg=MUTED))
 
         self._metric_popup = None
         self.metric_menu = None
@@ -1380,8 +1399,18 @@ class VoiceMapApp(_TkBase):
             title_row, text="ⓘ",
             bg=PANEL, fg=MUTED,
             font=FONT_BTN_INFO,
-            cursor="question_arrow")
+            cursor="question_arrow",
+            takefocus=1,
+            highlightthickness=2,
+            highlightbackground=PANEL,
+            highlightcolor=ACCENT)
         self._inspector_info_glyph.pack(side="right", padx=(4, 0), pady=(8, 0))
+        # Keyboard activation when focused — F1 / Enter / Space all
+        # show the tooltip momentarily. a11y audit O-4 (keyboard tooltip).
+        self._inspector_info_glyph.bind(
+            "<FocusIn>",  lambda _e: self._inspector_info_glyph.configure(fg=ACCENT))
+        self._inspector_info_glyph.bind(
+            "<FocusOut>", lambda _e: self._inspector_info_glyph.configure(fg=MUTED))
 
         # Hover tooltip on the metric name — uses metric.tooltip.X (long
         # detailed prose) if present, falls back to metric.desc.X
@@ -1512,17 +1541,32 @@ class VoiceMapApp(_TkBase):
         self._canvas.mpl_connect("axes_leave_event",
                                   lambda _e: self._update_inspector_value(None, None))
 
-        # 大号纯字体箭头，放在导航带正中；hover 有强对比
+        # 大号纯字体箭头，放在导航带正中；hover + focus 有强对比。
+        # takefocus=1 让 Tab 能停在这里，highlightcolor 给键盘焦点环。
+        # a11y audit O-3.
         self.prev_btn = tk.Label(self.nav_left, text="◀",
                                  bg=PANEL, fg=ACCENT,
                                  font=("Segoe UI", 24, "bold"),
-                                 cursor="hand2")
+                                 cursor="hand2",
+                                 takefocus=1,
+                                 highlightthickness=2,
+                                 highlightbackground=PANEL,
+                                 highlightcolor=ACCENT_HI)
         self.next_btn = tk.Label(self.nav_right, text="▶",
                                  bg=PANEL, fg=ACCENT,
                                  font=("Segoe UI", 24, "bold"),
-                                 cursor="hand2")
+                                 cursor="hand2",
+                                 takefocus=1,
+                                 highlightthickness=2,
+                                 highlightbackground=PANEL,
+                                 highlightcolor=ACCENT_HI)
         self.prev_btn.bind("<Button-1>", lambda _e: self._cycle_metric(-1))
         self.next_btn.bind("<Button-1>", lambda _e: self._cycle_metric(+1))
+        # Keyboard activation when focused
+        self.prev_btn.bind("<Return>", lambda _e: self._cycle_metric(-1))
+        self.prev_btn.bind("<space>",  lambda _e: self._cycle_metric(-1))
+        self.next_btn.bind("<Return>", lambda _e: self._cycle_metric(+1))
+        self.next_btn.bind("<space>",  lambda _e: self._cycle_metric(+1))
         for b in (self.prev_btn, self.next_btn):
             b.bind("<Enter>", lambda e, w=b: w.configure(bg=PANEL_HI, fg=ACCENT_HI))
             b.bind("<Leave>", lambda e, w=b: w.configure(bg=PANEL, fg=ACCENT))
@@ -1582,6 +1626,19 @@ class VoiceMapApp(_TkBase):
         self.bind_all("<Control-c>", _shortcut_guard(self._copy_canvas))
         self.bind_all("<Control-comma>", _shortcut_guard(self._open_settings))
         self.bind_all("<Control-l>", _shortcut_guard(self._open_log_window))
+        # a11y audit R-1: ModernPopup is opaque to screen readers
+        # (custom-drawn). Compensate by exposing ALL menu actions via
+        # global keyboard shortcuts so blind users can drive the app
+        # without needing to navigate the visual menu hierarchy.
+        self.bind_all("<Control-O>", _shortcut_guard(self._pick_audio_folder))   # Ctrl+Shift+O = add folder
+        self.bind_all("<Control-e>", _shortcut_guard(self._export_excel))
+        self.bind_all("<Control-r>", _shortcut_guard(self._export_report))
+        self.bind_all("<Control-d>", _shortcut_guard(self._open_compare_dialog))  # 'd' for diff
+        self.bind_all("<F1>",        _shortcut_guard(self._open_about))
+        self.bind_all("<F2>",        _shortcut_guard(self._toggle_language))
+        # ←/→ already bound via _cycle_metric (canvas-edge arrows). No
+        # additional Alt-key Win32 mnemonics — those clash with native
+        # Tk Alt-handling and don't work consistently.
 
         # 鼠标滚轮在画布两侧的 nav 条上 = 切换 metric（与 ◀ ▶ 等价）。
         # **不要**在 metric 按钮上绑定滚轮 —— 按钮的功能是"点开列表"，

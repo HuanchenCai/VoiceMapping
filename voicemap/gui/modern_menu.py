@@ -203,8 +203,15 @@ class ModernPopup(tk.Toplevel):
 
         self._sub_popup: Optional[ModernPopup] = None
         self._items: list[dict] = []   # bookkeeping: rows, types, callbacks
+        self._kb_index: int = -1       # currently keyboard-highlighted row idx
 
-        self.bind("<Escape>", lambda _e: self.destroy())
+        self.bind("<Escape>",   lambda _e: self.destroy())
+        self.bind("<Up>",       self._kb_prev)
+        self.bind("<Down>",     self._kb_next)
+        self.bind("<Return>",   self._kb_activate)
+        self.bind("<KP_Enter>", self._kb_activate)
+        self.bind("<Right>",    self._kb_open_cascade)
+        self.bind("<Left>",     self._kb_close_to_parent)
 
     # ── adders ────────────────────────────────────────────────────────
     def add_command(self, label: str,
@@ -436,10 +443,106 @@ class ModernPopup(tk.Toplevel):
             except tk.TclError:
                 pass
             _apply_rounded(self, _ROUND_RADIUS)
+            # Take keyboard focus so Up/Down/Enter route to our handlers.
+            # a11y audit O-2.
+            try:
+                self.focus_set()
+            except tk.TclError:
+                pass
             # Outside-click dismiss after a short grace period (Tk fires
             # spurious focus-out events during the initial mapping).
             self.after(150, self._install_outside_click)
         except tk.TclError:
+            pass
+
+    # ── keyboard navigation ───────────────────────────────────────────
+    def _activatable_indices(self) -> list[int]:
+        """Indices of items that respond to Enter (commands / cascades /
+        radios — anything that has a row)."""
+        return [i for i, it in enumerate(self._items)
+                if it.get("type") in ("command", "cascade", "radio")
+                and it.get("row") is not None]
+
+    def _kb_highlight(self, idx: int) -> None:
+        """Visually highlight item idx and clear others. Mimics hover
+        without firing the actual hover handler."""
+        targets = self._activatable_indices()
+        if not targets:
+            return
+        if idx < 0:
+            idx = targets[-1]
+        if idx >= len(self._items):
+            idx = targets[0]
+        # Clamp to nearest activatable
+        if idx not in targets:
+            idx = min(targets, key=lambda i: abs(i - idx))
+        self._kb_index = idx
+        for i, it in enumerate(self._items):
+            row = it.get("row")
+            if row is None:
+                continue
+            try:
+                row.event_generate("<Leave>")
+            except tk.TclError:
+                pass
+        # Fire Enter on the new target so existing _hover_in handler
+        # paints ACCENT and we get free 颜色一致性 with mouse hover.
+        target_row = self._items[idx]["row"]
+        try:
+            target_row.event_generate("<Enter>")
+        except tk.TclError:
+            pass
+
+    def _kb_prev(self, _e=None) -> None:
+        targets = self._activatable_indices()
+        if not targets:
+            return
+        cur = self._kb_index if self._kb_index in targets else targets[0]
+        pos = targets.index(cur) if cur in targets else 0
+        new = targets[(pos - 1) % len(targets)]
+        self._kb_highlight(new)
+
+    def _kb_next(self, _e=None) -> None:
+        targets = self._activatable_indices()
+        if not targets:
+            return
+        cur = self._kb_index if self._kb_index in targets else targets[0]
+        pos = targets.index(cur) if cur in targets else -1
+        new = targets[(pos + 1) % len(targets)]
+        self._kb_highlight(new)
+
+    def _kb_activate(self, _e=None) -> None:
+        if self._kb_index < 0 or self._kb_index >= len(self._items):
+            return
+        target_row = self._items[self._kb_index]["row"]
+        try:
+            target_row.event_generate("<Button-1>")
+        except tk.TclError:
+            pass
+
+    def _kb_open_cascade(self, _e=None) -> None:
+        """Right-arrow on a cascade row → open the submenu."""
+        if self._kb_index < 0 or self._kb_index >= len(self._items):
+            return
+        item = self._items[self._kb_index]
+        if item.get("type") != "cascade":
+            return
+        try:
+            item["row"].event_generate("<Button-1>")
+        except tk.TclError:
+            pass
+        # Move keyboard focus to the freshly-opened sub-popup
+        self.after(50, lambda: self._sub_popup and self._sub_popup.focus_set())
+
+    def _kb_close_to_parent(self, _e=None) -> None:
+        """Left-arrow → if we're a sub-popup, close ourselves; root
+        popup with Left does nothing (could be implemented as menubar
+        prev menu but that needs ModernMenubar collaboration)."""
+        # Heuristic: if our _app_root != .master, we're a sub-popup
+        try:
+            if isinstance(self.master, ModernPopup):
+                self.destroy()
+        except Exception:
             pass
 
     def _install_outside_click(self) -> None:
