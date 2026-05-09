@@ -69,26 +69,38 @@ def _density_cmap(n: int = 256):
     return LinearSegmentedColormap.from_list("fd_density", cols, N=n)
 
 
-# Build all custom colormaps once at import time
+# Modern color policy (2026 refactor):
+# the legacy SC HSV rainbow sweeps were colorblind-unfriendly and printed
+# to nearly identical greys on B&W. All metrics now use one of three
+# perceptually-uniform palettes — see metrics_registry.PALETTE_*.
+# Sequential metrics → viridis. Diverging (SpecBal, etc.) → coolwarm.
+# Density (cycle count, log axis) → mako (or viridis fallback).
+def _modern_seq():
+    return plt.get_cmap("viridis")
+
+def _modern_div():
+    return plt.get_cmap("coolwarm")
+
+def _modern_density():
+    try:
+        return plt.get_cmap("mako")
+    except (ValueError, KeyError):
+        return plt.get_cmap("viridis")
+
 _CMAP = {
-    # Metric*.sc palette function → colormap
-    # CPP:      cHue = v.linlin(0, 30, 2/3, 0) → blue→red
-    "CPP":      _hsv_sweep(2 / 3, 0.0,  "fd_cpp"),
-    # SpecBal:  cHue = v.linlin(-42, 0, 1/3, 0) → green→red
-    "SpecBal":  _hsv_sweep(1 / 3, 0.0,  "fd_specbal"),
-    # Crest:    cHue = v.linlin(1.414, 4, 1/3, 0) → green→red
-    "Crest":    _hsv_sweep(1 / 3, 0.0,  "fd_crest"),
-    # dEGGmax:  cHue = v.explin(1, 20, 1/3, 0) → green→red (log axis)
-    "dEGGmax":  _hsv_sweep(1 / 3, 0.0,  "fd_degg"),
-    # Icontact: cHue = v.linlin(0, 0.7, 0.67, 0) → blue→red
-    "Icontact": _hsv_sweep(0.67,  0.0,  "fd_ic"),
-    # Qcontact: cHue = v.linlin(0.1, 0.6, 0.83, 0) → purple→red
-    "Qcontact": _hsv_sweep(0.83,  0.0,  "fd_qci"),
-    # HRFegg:   cHue = v.linlin(-30, 10, 5/6, 0) → magenta→red
-    "HRFegg":   _hsv_sweep(5 / 6, 0.0,  "fd_hrf"),
-    "Clarity":  _clarity_cmap(),
-    "Entropy":  _entropy_cmap(),
-    "Total":    _density_cmap(),
+    # Sequential ("more = warmer end of viridis")
+    "CPP":      _modern_seq(),
+    "Crest":    _modern_seq(),
+    "dEGGmax":  _modern_seq(),
+    "Icontact": _modern_seq(),
+    "Qcontact": _modern_seq(),
+    "HRFegg":   _modern_seq(),
+    "Clarity":  _modern_seq(),
+    "Entropy":  _modern_seq(),
+    # Diverging — natural midpoint or symmetric range
+    "SpecBal":  _modern_div(),
+    # Density — log-scale cycle count
+    "Total":    _modern_density(),
 }
 
 # ---------------------------------------------------------------------------
