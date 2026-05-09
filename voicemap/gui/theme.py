@@ -83,7 +83,10 @@ FONT_UI      = ("Microsoft YaHei UI", 11)
 FONT_UI_B    = ("Microsoft YaHei UI", 11, "bold")
 FONT_SUB     = ("Microsoft YaHei UI", 12)
 FONT_DROP    = ("Microsoft YaHei UI", 13, "bold")
-FONT_H2      = ("Microsoft YaHei UI", 15, "bold")    # currently unused; reserved for section sub-headings
+# FONT_H2 (15 pt bold) was reserved for section sub-headings but had
+# zero callers across the entire codebase. Dropped 2026-05-10 per
+# design critique. If a sub-heading scale is needed later, prefer
+# FONT_UI_B (11 pt bold) for tighter vertical density.
 FONT_BTN_INFO = ("Microsoft YaHei UI", 14)            # ⓘ glyph next to Inspector metric name
 FONT_INSPECTOR_NAME = ("Microsoft YaHei UI", 19, "bold")  # Inspector metric title (ACCENT, no overflow at 420 px)
 # Header app title — was 18pt; UI_DESIGN.md spec calls 13pt, but at

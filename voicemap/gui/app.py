@@ -42,7 +42,7 @@ from voicemap.gui.theme import (
     TEXT_SEC, TEXT_MUTED,
     BG_DISABLED, BG_CODE,
     FONT_UI, FONT_UI_B, FONT_TITLE, FONT_SUB, FONT_DROP, FONT_MONO,
-    FONT_CAPTION, FONT_SMALL, FONT_H2, FONT_DISPLAY, FONT_MONO_B,
+    FONT_CAPTION, FONT_SMALL, FONT_DISPLAY, FONT_MONO_B,
     FONT_BTN_INFO, FONT_INSPECTOR_NAME,
     PLOT_FG, PLOT_FG_SPINE, PLOT_GRID, PLOT_GRID_LIGHT,
     PLOT_OVERLAY_FIT, PLOT_OVERLAY_2,
@@ -1539,8 +1539,10 @@ class VoiceMapApp(_TkBase):
         # current-value pill with the cell at (MIDI, SPL).
         self._canvas.mpl_connect("motion_notify_event",
                                   self._on_canvas_motion)
-        self._canvas.mpl_connect("axes_leave_event",
-                                  lambda _e: self._update_inspector_value(None, None))
+        def _on_leave(_e):
+            self._update_inspector_value(None, None)
+            self._clear_inline_readout()
+        self._canvas.mpl_connect("axes_leave_event", _on_leave)
 
         # 大号纯字体箭头，放在导航带正中；hover + focus 有强对比。
         # takefocus=1 让 Tab 能停在这里，highlightcolor 给键盘焦点环。
@@ -1723,6 +1725,8 @@ class VoiceMapApp(_TkBase):
     def _show_placeholder(self, msg: str | None = None):
         if msg is None:
             msg = tr("drop.placeholder")
+        # Clear stale inline readout when switching to placeholder
+        self._inline_readout = None
         """
         占位画面跟分析完成后的 voice map 用同一套布局：白底、同样的
         subplots_adjust 边距、MIDI/SPL 轴范围一致。这样从"未分析"
@@ -2071,7 +2075,10 @@ class VoiceMapApp(_TkBase):
 
     def _on_canvas_motion(self, event):
         """matplotlib motion handler — live-update Inspector's
-        current-value pill with the cell under the cursor.
+        current-value pill with the cell under the cursor, AND draw
+        an inline readout floating near the cursor (per design critique:
+        the eye shouldn't have to dart 700 px from cursor → Inspector
+        pill to read the value).
 
         Skip when:
           - mouse is outside the data axes
@@ -2079,6 +2086,7 @@ class VoiceMapApp(_TkBase):
           - in annotation mode (don't fight the annotation cursor)
         """
         if event.inaxes is None:
+            self._clear_inline_readout()
             return
         if getattr(self, "_showing_placeholder", True):
             return
@@ -2088,6 +2096,67 @@ class VoiceMapApp(_TkBase):
         if x is None or y is None:
             return
         self._update_inspector_value(x, y)
+        self._update_inline_readout(event, x, y)
+
+    def _clear_inline_readout(self):
+        ann = getattr(self, "_inline_readout", None)
+        if ann is not None:
+            try:
+                ann.set_visible(False)
+                self._canvas.draw_idle()
+            except Exception:
+                pass
+
+    def _update_inline_readout(self, event, midi: float, spl: float):
+        """Floating annotation near the cursor showing
+        '音高 60 · 声压 75 dB · 18.2 dB' (or en equivalent). Cheap to
+        re-position — same Annotation reused across motion events.
+        """
+        df = self._last_df
+        name = self.metric_var.get() if hasattr(self, "metric_var") else ""
+        if df is None or not name or name not in df.columns:
+            self._clear_inline_readout()
+            return
+        try:
+            mi, si = int(round(midi)), int(round(spl))
+            row = df[(df["MIDI"] == mi) & (df["dB"] == si)]
+            if row.empty:
+                self._clear_inline_readout()
+                return
+            value = float(row[name].iloc[0])
+        except Exception:
+            return
+
+        # Format text — language-aware via existing tr() coordinates key
+        from voicemap.metrics_registry import get as get_spec
+        spec = get_spec(name)
+        unit = (spec.unit if spec else "") or ""
+        coords = tr("inspector.coords", mi=mi, si=si)
+        readout = f"{coords} · {value:.2f} {unit}".rstrip()
+
+        ax = event.inaxes
+        ann = getattr(self, "_inline_readout", None)
+        if ann is None or ann.axes is not ax:
+            # First time, or axes were swapped — create a fresh annotation
+            ann = ax.annotate(
+                readout,
+                xy=(midi, spl),
+                xytext=(14, 14),                  # offset above-right of cursor
+                textcoords="offset pixels",
+                fontsize=9,
+                color="#1a1a1a",
+                bbox=dict(boxstyle="round,pad=0.35",
+                          fc="#fef3c7",            # warm pale-amber
+                          ec="#f59e0b",            # ACCENT
+                          alpha=0.95,
+                          linewidth=0.8),
+                zorder=20)
+            self._inline_readout = ann
+        else:
+            ann.set_text(readout)
+            ann.xy = (midi, spl)
+            ann.set_visible(True)
+        self._canvas.draw_idle()
 
     def _on_metric_change(self, *_):
         col = self.metric_var.get()
@@ -2316,6 +2385,11 @@ class VoiceMapApp(_TkBase):
     def _render_metric(self, col: str):
         if self._last_df is None or col not in self._last_df.columns:
             return
+        # The inline readout annotation belongs to the previous axes;
+        # forget it so a new one will be created on first hover after
+        # this re-render. Otherwise matplotlib raises when we touch
+        # `ann.set_text` on a stale Axes.
+        self._inline_readout = None
 
         # Clarity 阈值作为展示层过滤：只保留 grouped Clarity ≥ threshold 的 cell。
         # 分析时用过的阈值是下限；滑条拉低到它之下也不会让新 cell 冒出来，会提示。
