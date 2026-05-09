@@ -202,16 +202,46 @@ class CompareDialog(tk.Toplevel):
 
         # Canvas — Figure aspect 12:4 keeps 3 sub-plots horizontal but
         # leaves bottom margin for the MIDI axis label even at smallish
-        # dialog heights. matplotlib auto-resizes the figure to canvas
-        # bounds, but the figsize aspect informs the initial subplot
-        # layout and the tight_layout() pass in draw_vrp_comparison.
+        # dialog heights.
         self._fig = Figure(figsize=(12, 4.0), dpi=100, facecolor=PANEL)
         self._canvas = FigureCanvasTkAgg(self._fig, master=self)
         cw = self._canvas.get_tk_widget()
         cw.configure(bg=PANEL, highlightthickness=0, bd=0)
         cw.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+        # matplotlib's built-in <Configure> auto-resize doesn't always
+        # fire reliably in a Toplevel — the heatmap rendered at the
+        # initial figsize while the canvas widget grew, so the bottom
+        # of the plot (MIDI axis) clipped below the visible canvas.
+        # Explicitly sync figure dpi-pixels to widget pixels on every
+        # resize, then re-render so tight_layout uses the new geometry.
+        cw.bind("<Configure>", self._on_canvas_resize, add="+")
 
         self._show_msg(tr("compare.tip_load"))
+
+    def _on_canvas_resize(self, event):
+        # Push canvas widget pixel size into the figure (in inches)
+        # and re-render whatever's currently displayed (message OR
+        # comparison plot). Skip if widget is collapsing to 1×1 during
+        # initial pack.
+        w, h = event.width, event.height
+        if w < 50 or h < 50:
+            return
+        try:
+            dpi = self._fig.get_dpi() or 100
+            cur_w, cur_h = self._fig.get_size_inches()
+            need_w, need_h = w / dpi, h / dpi
+            if abs(cur_w - need_w) < 0.05 and abs(cur_h - need_h) < 0.05:
+                return
+            self._fig.set_size_inches(need_w, need_h, forward=True)
+            # Re-pack axes so the new bottom/left margins still leave
+            # room for MIDI / SPL labels at the new aspect ratio.
+            try:
+                self._fig.tight_layout(pad=0.8)
+            except Exception:
+                pass
+            self._canvas.draw_idle()
+        except tk.TclError:
+            pass
 
     def _show_msg(self, msg: str):
         self._fig.clear()
