@@ -155,12 +155,32 @@ def _copy_linux(fig: Figure, dpi: int) -> bool:
 FIT_METHODS = ("linear", "polynomial", "spline", "lowess")
 
 
+def _default_overlay_color() -> str:
+    """Lazy-import the PLOT_OVERLAY_FIT token so this module can still
+    be imported without the GUI theme installed (e.g. CLI-only use)."""
+    try:
+        from voicemap.gui.theme import PLOT_OVERLAY_FIT
+        return PLOT_OVERLAY_FIT
+    except Exception:
+        return "#ff3e88"
+
+
+def _default_overlay_color_2() -> str:
+    try:
+        from voicemap.gui.theme import PLOT_OVERLAY_2
+        return PLOT_OVERLAY_2
+    except Exception:
+        return "#00d9ff"
+
+
 def fit_overlay(ax: Axes, xs, ys,
                 method: str = "linear",
                 degree: int = 3,
-                color: str = "#ff3e88",
+                color: Optional[str] = None,
                 label: Optional[str] = None) -> list:
     """Plot a fit through (xs, ys) on `ax`. Returns list of artists added."""
+    if color is None:
+        color = _default_overlay_color()
     artists: list = []
     x = np.asarray(xs, dtype=float)
     y = np.asarray(ys, dtype=float)
@@ -220,8 +240,10 @@ def fit_overlay(ax: Axes, xs, ys,
 
 def fit_voice_center(df: pd.DataFrame, ax: Axes,
                      method: str = "polynomial", degree: int = 3,
-                     color: str = "#ff3e88") -> list:
+                     color: Optional[str] = None) -> list:
     """Per-MIDI median SPL → curve overlay (voice range center line)."""
+    if color is None:
+        color = _default_overlay_color()
     if "MIDI" not in df.columns or "dB" not in df.columns:
         return []
     g = df.groupby("MIDI")["dB"].median()
@@ -233,13 +255,15 @@ def fit_voice_center(df: pd.DataFrame, ax: Axes,
 
 def fit_metric_trend(df: pd.DataFrame, col: str, ax: Axes,
                      method: str = "polynomial", degree: int = 3,
-                     color: str = "#00d9ff") -> list:
+                     color: Optional[str] = None) -> list:
     """Per-MIDI mean of `col` plotted as a secondary-axis curve.
 
     Useful when you want to show how a metric changes across pitch
     without losing the heatmap underneath. Creates a twin y-axis on
     the right so the metric scale is independent from SPL.
     """
+    if color is None:
+        color = _default_overlay_color_2()
     if col not in df.columns or "MIDI" not in df.columns:
         return []
     g = df.groupby("MIDI")[col].mean()
@@ -261,15 +285,21 @@ def fit_metric_trend(df: pd.DataFrame, col: str, ax: Axes,
 
 # ─── Annotation ──────────────────────────────────────────────────────────────
 def add_annotation(ax: Axes, x: float, y: float, text: str,
-                   color: str = "#ff3e88") -> list:
+                   color: Optional[str] = None) -> list:
     """Marker dot + label callout at data coords (x, y)."""
+    if color is None:
+        color = _default_overlay_color()
+    try:
+        from voicemap.gui.theme import PLOT_FG as _txt_fg
+    except Exception:
+        _txt_fg = "#1a1a1a"
     artists: list = []
     pt = ax.plot([x], [y], "o", color=color, markersize=8,
                  markeredgecolor="black", markeredgewidth=0.7, zorder=10)[0]
     artists.append(pt)
     txt = ax.annotate(
         text, xy=(x, y), xytext=(8, 8), textcoords="offset points",
-        color="#1a1a1a", fontsize=9, fontweight="bold",
+        color=_txt_fg, fontsize=9, fontweight="bold",
         bbox=dict(boxstyle="round,pad=0.3", fc="white",
                   ec=color, alpha=0.92),
         arrowprops=dict(arrowstyle="-", color=color, alpha=0.7,
