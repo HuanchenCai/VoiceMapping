@@ -33,7 +33,9 @@ BG_PANEL      = PANEL
 BG_ELEVATED   = PANEL_HI
 BORDER_STRONG = "#525252"
 TEXT_SEC      = MUTED
-TEXT_MUTED    = "#737373"     # disabled / placeholder
+TEXT_MUTED    = "#8a8a8a"     # disabled / placeholder — was #737373
+                              # (3.67:1 against PANEL, fails WCAG AA);
+                              # 8a8a8a measures 4.55:1 → AA pass.
 TEXT_INVERSE  = "#0a0a0a"     # text on accent
 ACCENT_HOVER  = ACCENT_HI
 ACCENT_PRESS  = "#d97706"     # amber-600
