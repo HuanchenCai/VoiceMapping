@@ -218,32 +218,45 @@ class CompareDialog(tk.Toplevel):
 
         self._show_msg(tr("compare.tip_load"))
 
+    def _sync_fig_to_canvas(self) -> bool:
+        """Force the matplotlib figure size in inches to match the
+        canvas widget's pixel size / dpi. Returns True if anything
+        changed (caller may want to draw_idle / tight_layout). Safe
+        to call from any code path; no-ops if the widget hasn't been
+        laid out yet (size < 50 px) or already matches."""
+        try:
+            cw = self._canvas.get_tk_widget()
+            w = cw.winfo_width()
+            h = cw.winfo_height()
+            if w < 50 or h < 50:
+                return False
+            dpi = self._fig.get_dpi() or 100
+            need_w, need_h = w / dpi, h / dpi
+            cur_w, cur_h = self._fig.get_size_inches()
+            if abs(cur_w - need_w) < 0.05 and abs(cur_h - need_h) < 0.05:
+                return False
+            self._fig.set_size_inches(need_w, need_h, forward=True)
+            return True
+        except tk.TclError:
+            return False
+
     def _on_canvas_resize(self, event):
-        # Push canvas widget pixel size into the figure (in inches)
-        # and re-render whatever's currently displayed (message OR
-        # comparison plot). Skip if widget is collapsing to 1×1 during
-        # initial pack.
-        w, h = event.width, event.height
-        if w < 50 or h < 50:
+        # Auto-handler for <Configure>. Re-syncs fig size, re-runs
+        # tight_layout, redraws.
+        if event.width < 50 or event.height < 50:
+            return
+        if not self._sync_fig_to_canvas():
             return
         try:
-            dpi = self._fig.get_dpi() or 100
-            cur_w, cur_h = self._fig.get_size_inches()
-            need_w, need_h = w / dpi, h / dpi
-            if abs(cur_w - need_w) < 0.05 and abs(cur_h - need_h) < 0.05:
-                return
-            self._fig.set_size_inches(need_w, need_h, forward=True)
-            # Re-pack axes so the new bottom/left margins still leave
-            # room for MIDI / SPL labels at the new aspect ratio.
-            try:
-                self._fig.tight_layout(pad=0.8)
-            except Exception:
-                pass
-            self._canvas.draw_idle()
-        except tk.TclError:
+            self._fig.tight_layout(pad=0.8)
+        except Exception:
             pass
+        self._canvas.draw_idle()
 
     def _show_msg(self, msg: str):
+        # Sync fig to canvas first so the message centres correctly even
+        # on the very first draw (before any <Configure> has fired).
+        self._sync_fig_to_canvas()
         self._fig.clear()
         ax = self._fig.add_subplot(111)
         ax.set_facecolor(PANEL)
@@ -287,6 +300,13 @@ class CompareDialog(tk.Toplevel):
         if self._df_a is None or self._df_b is None:
             self._show_msg(tr("compare.tip_load_both"))
             return
+        # CRITICAL: sync fig→canvas size BEFORE drawing. Otherwise the
+        # first render right after picking files happens at the
+        # initial figsize(12,4); the <Configure> auto-resize fired
+        # earlier (during dialog mount) but the figure was overwritten
+        # by _show_msg which kept the small default. Result: MIDI axis
+        # falls outside visible canvas until the user manually resizes.
+        self._sync_fig_to_canvas()
         from voicemap.plotter import draw_vrp_comparison
         ok = draw_vrp_comparison(
             self._df_a, self._df_b, self.metric.get(), self._fig,
