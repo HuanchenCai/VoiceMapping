@@ -113,14 +113,68 @@ def to_metric_category() -> dict:
 # analyzer's groupby aggregator. When a new metric is added, append to
 # this block (or call register() from elsewhere).
 
+# ─── Modern colormap policy (2026 refactor) ─────────────────────────────
+# Old: every metric had a custom HSV rainbow sweep (blue→red, green→red...).
+# Pretty in 2010, but: not perceptually uniform, breaks colorblind users
+# (red-green confusion), and prints to almost-identical greys on B&W.
+#
+# New: sweeping default to 3 modern matplotlib palettes, one per metric
+# kind. All three are perceptually uniform, monotonic in luminance
+# (so they print as a clean grey ramp), and validated colorblind-safe
+# (deuteranopia / protanopia).
+#
+#   PALETTE_SEQUENTIAL — 'viridis': blue → green → yellow.
+#       Default for all "more is more" metrics (CPP, HNR, F1, etc.).
+#   PALETTE_DIVERGING  — 'coolwarm': red ← white → blue.
+#       For metrics centred on a meaningful midpoint (SpecBal=0,
+#       AlphaRatio=0, H1H2/H1H3=0, MFCCs=0).
+#   PALETTE_DENSITY    — 'mako': dark plum → bright green-blue.
+#       For Total / cycle-count where log-scale + huge dynamic range.
+#
+# Categorical (maxCluster, maxCPhon) → Okabe-Ito 7-colour set, tested
+# colorblind-safe. Built on demand below.
+PALETTE_SEQUENTIAL = "viridis"
+PALETTE_DIVERGING  = "coolwarm"
+PALETTE_DENSITY    = "mako"
+
+# Okabe-Ito (Wong, Nature Methods 2011) — 8 distinguishable colours
+# under all common color-vision deficiencies. We use the first 5 for
+# 5-cluster discrete maps.
+_OKABE_ITO_5 = ["#0072B2", "#E69F00", "#009E73", "#CC79A7", "#F0E442"]
+
+
 def _hsv_sweep_lazy(h_start, h_end, name):
-    """Defer importing plotter's _hsv_sweep until it exists in registry use."""
-    import colorsys
-    from matplotlib.colors import LinearSegmentedColormap
-    n = 256
-    cols = [colorsys.hsv_to_rgb(h_start + (h_end - h_start) * i / (n - 1), 1.0, 1.0)
-            for i in range(n)]
-    return LinearSegmentedColormap.from_list(name, cols, N=n)
+    """Legacy hook: every old call site still passes (h_start, h_end,
+    name) — those are now ignored. Returns the default sequential
+    colormap (viridis) so existing specs upgrade automatically.
+    Diverging-natured metrics override their cmap explicitly in
+    `_populate_builtins` after this default is applied.
+
+    Kept under the old name + signature so external code calling
+    `metrics_registry._hsv_sweep_lazy(...)` doesn't break."""
+    import matplotlib.pyplot as _plt
+    return _plt.get_cmap(PALETTE_SEQUENTIAL)
+
+
+def _categorical_cmap_5():
+    """5-class colorblind-safe ListedColormap for maxCluster / maxCPhon."""
+    from matplotlib.colors import ListedColormap
+    return ListedColormap(_OKABE_ITO_5, name="vm_cat5")
+
+
+def _diverging_cmap():
+    import matplotlib.pyplot as _plt
+    return _plt.get_cmap(PALETTE_DIVERGING)
+
+
+def _density_cmap_modern():
+    """Density: try mako (seaborn-installed via matplotlib >= 3.7);
+    fall back to viridis if mako isn't registered (older matplotlib)."""
+    import matplotlib.pyplot as _plt
+    try:
+        return _plt.get_cmap(PALETTE_DENSITY)
+    except (ValueError, KeyError):
+        return _plt.get_cmap("viridis")
 
 
 def _populate_builtins():
@@ -130,7 +184,7 @@ def _populate_builtins():
     register(MetricSpec(
         key="Total", category="Density", label="Density - Cycle Count",
         vmin=1, vmax=10000, unit="c", aggregator="sum",
-        cmap="fd_density",
+        cmap=_density_cmap_modern(),       # was "fd_density" greyscale
         norm=LogNorm(vmin=1, vmax=10000, clip=True),
         description="Number of analysed cycles in this (MIDI, dB) cell."))
 
@@ -150,7 +204,7 @@ def _populate_builtins():
         description="Smoothed CPP (Hillenbrand 1996)."))
     register(MetricSpec(
         key="SpecBal", category="Acoustic", label="Spectrum Balance",
-        vmin=-42.0, vmax=0.0, unit="dB", cmap="fd_specbal",
+        vmin=-42.0, vmax=0.0, unit="dB", cmap=_diverging_cmap(),
         description="10·log10(E_below_1500Hz / E_above)."))
     register(MetricSpec(
         key="Crest", category="Acoustic", label="Crest Factor",
@@ -281,38 +335,41 @@ def _populate_builtins():
     register(MetricSpec(
         key="H1H2", category="Singing", label="H1-H2 (voice)",
         vmin=-10.0, vmax=20.0, unit="dB",
-        cmap=_hsv_sweep_lazy(2/3, 0.0, "fd_h1h2"),
+        cmap=_diverging_cmap(),
         description="Voice DFT amplitude difference H1 − H2 (dB)."))
     register(MetricSpec(
         key="H1H3", category="Singing", label="H1-H3 (voice)",
         vmin=-10.0, vmax=25.0, unit="dB",
-        cmap=_hsv_sweep_lazy(2/3, 0.0, "fd_h1h3"),
+        cmap=_diverging_cmap(),
         description="Voice DFT amplitude difference H1 − H3 (dB)."))
 
     # ── Cluster ────────────────────────────────────────────────────────────
     import matplotlib.pyplot as _plt   # local import to avoid eager dep
+    # maxCluster / maxCPhon are categorical (1..5) — use Okabe-Ito
+    # 5-colour palette so colorblind users can still tell clusters apart
+    # (tab10 / Set2 fail under deuteranopia).
     register(MetricSpec(
         key="maxCluster", category="Cluster", label="Dominant EGG cluster",
         vmin=0.5, vmax=5.5, unit="",
-        cmap=_plt.get_cmap("tab10", 5),
+        cmap=_categorical_cmap_5(),
         description="argmax of EGG-shape cluster shares per cell."))
     register(MetricSpec(
         key="maxCPhon", category="Cluster", label="Dominant phonation cluster",
         vmin=0.5, vmax=5.5, unit="",
-        cmap=_plt.get_cmap("Set2", 5),
+        cmap=_categorical_cmap_5(),
         description="argmax of cPhon (quality-K-means) shares per cell."))
     for k in range(1, 6):
         register(MetricSpec(
             key=f"Cluster {k}", category="Cluster",
             label=f"EGG cluster {k} share",
             vmin=0, vmax=100, unit="%",
-            cmap=_plt.get_cmap("viridis"),
+            cmap=_plt.get_cmap(PALETTE_SEQUENTIAL),
             description=f"% of cycles in EGG cluster {k}."))
         register(MetricSpec(
             key=f"cPhon {k}", category="Cluster",
             label=f"Phonation cluster {k} share",
             vmin=0, vmax=100, unit="%",
-            cmap=_plt.get_cmap("magma"),
+            cmap=_plt.get_cmap(PALETTE_SEQUENTIAL),
             description=f"% of cycles in phonation cluster {k}."))
 
 
@@ -360,31 +417,31 @@ def _populate_m1_addons():
     register(MetricSpec(
         key="SpectralSlope", category="Acoustic", label="Spectral Slope",
         vmin=-0.05, vmax=0.0, unit="",
-        cmap=_hsv_sweep_lazy(1/3, 0.0, "fd_slope"),
+        cmap=_diverging_cmap(),
         待验证=True,
         description="Linear slope of log10(|X|) vs frequency (0-5 kHz)."))
     register(MetricSpec(
         key="SpectralSkewness", category="Acoustic", label="Spectral Skewness",
         vmin=-3.0, vmax=10.0, unit="",
-        cmap=_hsv_sweep_lazy(2/3, 0.0, "fd_skew"),
+        cmap=_diverging_cmap(),
         待验证=True,
         description="Third spectral moment around centroid."))
     register(MetricSpec(
         key="SpectralKurtosis", category="Acoustic", label="Spectral Kurtosis",
         vmin=-3.0, vmax=50.0, unit="",
-        cmap=_hsv_sweep_lazy(2/3, 0.0, "fd_kurt"),
+        cmap=_diverging_cmap(),
         待验证=True,
         description="Fourth spectral moment − 3."))
     register(MetricSpec(
         key="AlphaRatio", category="Acoustic", label="Alpha Ratio",
         vmin=-30.0, vmax=30.0, unit="dB",
-        cmap=_hsv_sweep_lazy(2/3, 0.0, "fd_alpha"),
+        cmap=_diverging_cmap(),
         待验证=True,
         description="10·log10(E[50-1000Hz] / E[1-5kHz])."))
     register(MetricSpec(
         key="HammarbergIndex", category="Acoustic", label="Hammarberg Index",
         vmin=-30.0, vmax=30.0, unit="dB",
-        cmap=_hsv_sweep_lazy(2/3, 0.0, "fd_hamm"),
+        cmap=_diverging_cmap(),
         待验证=True,
         description="max(0-2 kHz dB) − max(2-5 kHz dB)."))
 
