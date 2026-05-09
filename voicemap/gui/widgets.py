@@ -269,7 +269,9 @@ class HoverTooltip:
     """
 
     DELAY_MS = 500    # ms to wait before showing (avoids flicker on transit)
-    MAX_WIDTH = 360   # wraplength for long descriptions
+    MAX_WIDTH = 440   # wraplength for long descriptions (was 360 — bumped
+                      # so 中英混排 prose 'CPP = 倒谱在 F0 周期处...' wraps
+                      # at fewer awkward English-token boundaries)
 
     def __init__(self, widget, text_provider):
         self._widget = widget
