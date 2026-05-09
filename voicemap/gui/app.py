@@ -1245,32 +1245,18 @@ class VoiceMapApp(_TkBase):
         Top-to-bottom:
           • SCROLLABLE: metric name + description + unit + clinical bands
           • PINNED:     current value card (hover-driven, always visible)
-          • PINNED:     action buttons (导出 Excel / 生成报告 / 对比录音)
-
-        The current-value card is pinned (not in the scroll area) so the
-        user always sees the cell readout without scrolling, even at the
-        minsize window. Clinical bands above can scroll if they overflow.
+        Action buttons (导出 Excel / 生成报告 / 对比录音) used to live
+        below — REMOVED per user spec. They duplicated 文件 menu entries
+        and were eating ~150 px of Inspector vertical that's better
+        spent on parameter detail (longer descriptions / clinical bands
+        without truncation).
         """
-        # ── Bottom: action buttons (pinned, packed first with side="bottom") ─
-        actions = tk.Frame(parent, bg=PANEL)
-        actions.pack(side="bottom", fill="x", padx=14, pady=(8, 14))
-
-        self._inspect_btn_excel = ttk.Button(
-            actions, text=tr("inspector.btn.excel"),
-            style="Ghost.TButton", command=self._export_excel)
-        self._inspect_btn_excel.pack(fill="x", pady=2)
-        self._inspect_btn_report = ttk.Button(
-            actions, text=tr("inspector.btn.report"),
-            style="Ghost.TButton", command=self._export_report)
-        self._inspect_btn_report.pack(fill="x", pady=2)
-        self._inspect_btn_compare = ttk.Button(
-            actions, text=tr("inspector.btn.compare"),
-            style="Ghost.TButton", command=self._open_compare_dialog)
-        self._inspect_btn_compare.pack(fill="x", pady=2)
-
-        # 1 px BORDER divider above the actions row
-        sep_actions = tk.Frame(parent, bg=BORDER, height=1)
-        sep_actions.pack(side="bottom", fill="x", padx=8, pady=(0, 0))
+        # Stub the removed action-button widget refs as None so any
+        # _safe_text / language-switch path that referenced them
+        # silently no-ops via the existing guard in _safe_text.
+        self._inspect_btn_excel = None
+        self._inspect_btn_report = None
+        self._inspect_btn_compare = None
 
         # ── PINNED: Current-value card lives just above actions, NOT in
         # the scroll area, so it's always visible regardless of window
@@ -2085,21 +2071,20 @@ class VoiceMapApp(_TkBase):
             tk.Label(row, text=rng, bg=PANEL, fg=TEXT,
                      font=("Consolas", 9), width=14, anchor="w"
                      ).pack(side="left")
-            # No wraplength — Inspector is 360 px wide, range column eats
-            # ~75 px, leaving ~250 px for the label, which is enough for
-            # every band label in _THRESHOLDS to render on a single line.
-            # wraplength=200 was wrapping unnecessarily (200 < 250) and
-            # blowing each row to 2-3 lines = ~66 px each. One line is 36 px,
-            # cutting cards reqheight from ~330 px to ~220 px.
-            #
             # In en mode, swap the zh label for its en translation via
             # get_band_label() — the report.py CSV / Markdown writer
             # still uses zh literals; only the GUI display needs i18n.
             from voicemap.report import get_band_label
             display_label = get_band_label(label, get_language())
+            # wraplength=270: range column (width=14 ≈ 100 px) + Inspector
+            # padx leaves ~290 px for label. EN labels like 'saturated /
+            # over-compressed' / 'highly broken / breathy' fit on 1 line
+            # at 290 px on most DPI; on high-DPI Windows they wrap to 2
+            # lines instead of overflowing horizontally (was clipping the
+            # last char). Action buttons removed → vertical space plenty.
             tk.Label(row, text=display_label, bg=PANEL,
                      fg=sev_color.get(sev, TEXT), font=FONT_UI,
-                     anchor="w", justify="left"
+                     anchor="w", justify="left", wraplength=270
                      ).pack(side="left", fill="x", expand=True)
 
     def _update_inspector_value(self, midi: float | None, spl: float | None):
