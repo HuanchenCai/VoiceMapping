@@ -470,7 +470,10 @@ class VoiceMapApp(_TkBase):
 
         bar.add_menu(tr("menu.file"),   self._popup_file)
         bar.add_menu(tr("menu.edit"),   self._popup_edit)
-        bar.add_menu(tr("menu.metric"), self._popup_metric)
+        # '参数' menu removed per user spec — duplicates the metric_btn
+        # + Prev/Next buttons already on the metric bar. The metric
+        # bar is the canonical entry point. Section filtering moved
+        # to 视图 → 只看某类参数.
         bar.add_menu(tr("menu.view"),   self._popup_view)
         bar.add_menu(tr("menu.help"),   self._popup_help)
 
@@ -690,8 +693,28 @@ class VoiceMapApp(_TkBase):
     def _popup_view(self) -> "ModernPopup":
         p = ModernPopup(self)
         p.add_command(tr("view.fit"), command=self._open_fit_menu)
+        p.add_cascade(tr("view.sections"), popup_factory=self._popup_view_sections)
         p.add_separator()
         p.add_command(tr("view.log"), command=self._open_log_window)
+        return p
+
+    def _popup_view_sections(self) -> "ModernPopup":
+        """Section visibility filter — checkboxes for each metric category.
+        Unchecked sections are hidden from the metric_btn popup picker.
+        State stored in self._section_visible (initialised on first call)."""
+        if not hasattr(self, "_section_visible"):
+            self._section_visible = {sect: True for sect, _ in _METRIC_SECTIONS}
+        p = ModernPopup(self)
+        for section_name, _keys in _METRIC_SECTIONS:
+            visible = self._section_visible.get(section_name, True)
+            marker = "✓" if visible else " "
+            label = section_name
+            def _toggle(s=section_name):
+                self._section_visible[s] = not self._section_visible.get(s, True)
+                # Refresh the metric popup if it's currently visible — but
+                # since the popup chain auto-closes on click, we just
+                # update the flag and the next open will reflect it.
+            p.add_command(f"{marker}  {label}", command=_toggle)
         return p
 
     def _open_log_window(self):
@@ -2170,10 +2193,17 @@ class VoiceMapApp(_TkBase):
         """点 metric 按钮 → 弹下拉菜单。
         tk.Menu 本身不支持鼠标滚轮，所以把所有 metric 一坨平铺会显得很长
         且没法滚。改成 cascade：顶层只列分类（5 个），鼠标 hover 自动展开
-        子菜单看具体 metric。每个子菜单最长 ~43 项，竖向能放下。"""
+        子菜单看具体 metric。每个子菜单最长 ~43 项，竖向能放下。
+        视图 → 只看某类参数 里勾掉的分类在这里就不显示。"""
         if str(self.metric_btn.cget("state")) == "disabled":
             return
         sa = getattr(self, "_metric_sections_avail", None)
+        if not sa:
+            return
+        # Apply 视图 → 只看某类参数 filter
+        visible = getattr(self, "_section_visible", {})
+        sa = [(name, cols) for name, cols in sa
+              if visible.get(name, True)]
         if not sa:
             return
 
