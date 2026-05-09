@@ -200,8 +200,12 @@ class CompareDialog(tk.Toplevel):
         ttk.Button(ctrl, text=tr("compare.export_png"), style="Ghost.TButton",
                    command=self._save_png).pack(side="left", padx=(6, 0))
 
-        # Canvas
-        self._fig = Figure(figsize=(14, 4.5), dpi=110, facecolor=PANEL)
+        # Canvas — Figure aspect 12:4 keeps 3 sub-plots horizontal but
+        # leaves bottom margin for the MIDI axis label even at smallish
+        # dialog heights. matplotlib auto-resizes the figure to canvas
+        # bounds, but the figsize aspect informs the initial subplot
+        # layout and the tight_layout() pass in draw_vrp_comparison.
+        self._fig = Figure(figsize=(12, 4.0), dpi=100, facecolor=PANEL)
         self._canvas = FigureCanvasTkAgg(self._fig, master=self)
         cw = self._canvas.get_tk_widget()
         cw.configure(bg=PANEL, highlightthickness=0, bd=0)

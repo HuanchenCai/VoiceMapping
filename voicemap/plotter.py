@@ -750,8 +750,19 @@ def draw_vrp_comparison(df_a: pd.DataFrame,
         for sp in axd.spines.values():
             sp.set_edgecolor(_FG_SPINE)
 
-    fig.subplots_adjust(left=0.05, right=0.97, top=0.90,
-                         bottom=0.12, wspace=0.25)
+    # tight_layout auto-fits axes + labels into the figure rect
+    # regardless of how matplotlib's auto-resize stretches the figure
+    # to match the canvas widget. The fixed subplots_adjust margins
+    # (bottom=0.12) used to clip the MIDI axis label when canvas
+    # height was tighter than expected. tight_layout(pad=0.8) gives
+    # ~6 px breathing room around all axes.
+    try:
+        fig.tight_layout(pad=0.8)
+    except Exception:
+        # tight_layout can throw on degenerate figures (e.g. all axes
+        # empty). Fall back to manual margins.
+        fig.subplots_adjust(left=0.05, right=0.97, top=0.90,
+                             bottom=0.18, wspace=0.30)
     return True
 
 
