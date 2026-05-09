@@ -540,6 +540,7 @@ class VoiceMapApp(_TkBase):
 
         _safe_text("_header_title",   "app.title")
         _safe_text("_tracks_label",   "tracks.label")
+        _safe_text("_start_btn",      "tracks.start")
         # Inspector value pill header: "本次值" / "Current value" — was
         # set once at construction with tr() but never re-pulled, so
         # it stayed zh in en mode (user-visible bug).
