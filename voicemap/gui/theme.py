@@ -41,6 +41,24 @@ SUCCESS       = OK
 WARNING       = WARN
 ERROR         = ERR
 INFO          = "#3b82f6"
+BG_DISABLED   = BORDER_STRONG    # disabled button / muted-control bg
+BG_CODE       = "#0b1117"        # log / monospace text widget bg
+
+# ── Plot palette (matplotlib axes / overlays) ──────────────────────────
+# Separate from GUI tokens because charts have their own visual idiom
+# (white plot area + dark grid) while the GUI shell is dark + amber.
+# Centralising here so tweaks (e.g. swap chart bg) are one-line edits.
+PLOT_FG          = "#1a1a1a"     # axis text / spines on white plot bg
+PLOT_FG_SPINE    = "#444444"     # plot spine medium grey
+PLOT_FG_DIM      = "#777777"     # category tag / muted plot text
+PLOT_GRID        = "#cccccc"     # major gridlines
+PLOT_GRID_LIGHT  = "#e6e6e6"     # minor gridlines / placeholder grid
+PLOT_BG_EMPTY    = "#f2f2f2"     # masked/empty heatmap cells
+PLOT_BG_AX       = "#ffffff"     # plot axes background
+PLOT_OVERLAY_FIT = "#ff3e88"     # fit-curve overlay (pink)
+PLOT_OVERLAY_2   = "#00d9ff"     # secondary overlay (cyan)
+PLACEHOLDER_DIM  = "#888888"     # placeholder canvas tick / subtitle
+PLACEHOLDER_TXT  = "#444444"     # placeholder canvas main message
 
 # ── Fonts ───────────────────────────────────────────────────────────────
 # Microsoft YaHei UI is Windows-native, has dedicated glyphs for both
@@ -63,7 +81,9 @@ FONT_UI      = ("Microsoft YaHei UI", 11)
 FONT_UI_B    = ("Microsoft YaHei UI", 11, "bold")
 FONT_SUB     = ("Microsoft YaHei UI", 12)
 FONT_DROP    = ("Microsoft YaHei UI", 13, "bold")
-FONT_H2      = ("Microsoft YaHei UI", 15, "bold")
+FONT_H2      = ("Microsoft YaHei UI", 15, "bold")    # currently unused; reserved for section sub-headings
+FONT_BTN_INFO = ("Microsoft YaHei UI", 14)            # ⓘ glyph next to Inspector metric name
+FONT_INSPECTOR_NAME = ("Microsoft YaHei UI", 19, "bold")  # Inspector metric title (ACCENT, no overflow at 420 px)
 # Header app title — was 18pt; UI_DESIGN.md spec calls 13pt, but at
 # Windows 100% DPI 13 reads tiny next to the canvas. 14pt bold lands
 # close to spec while keeping the title legible. Visual hierarchy
