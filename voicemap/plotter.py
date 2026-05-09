@@ -87,6 +87,13 @@ def _modern_density():
     except (ValueError, KeyError):
         return plt.get_cmap("viridis")
 
+def _modern_cat5():
+    """5-class colorblind-safe Okabe-Ito (Wong 2011 Nature Methods)."""
+    from matplotlib.colors import ListedColormap
+    return ListedColormap(
+        ["#0072B2", "#E69F00", "#009E73", "#CC79A7", "#F0E442"],
+        name="vm_cat5")
+
 _CMAP = {
     # Sequential ("more = warmer end of viridis")
     "CPP":      _modern_seq(),
@@ -187,50 +194,50 @@ METRIC_CFG = {
     "Jitter": dict(
         label="Jitter (local)",
         vmin=0.0, vmax=3.0, unit="%",
-        cmap=_hsv_sweep(1/3, 0.0, "fd_jitter"),
+        cmap=_modern_seq(),
         norm=None,
     ),
     "JitterRAP": dict(
         label="Jitter RAP (3-pt)",
         vmin=0.0, vmax=3.0, unit="%",
-        cmap=_hsv_sweep(1/3, 0.0, "fd_jitter_rap"),
+        cmap=_modern_seq(),
         norm=None,
     ),
     "JitterPPQ5": dict(
         label="Jitter PPQ5 (5-pt)",
         vmin=0.0, vmax=3.0, unit="%",
-        cmap=_hsv_sweep(1/3, 0.0, "fd_jitter_ppq5"),
+        cmap=_modern_seq(),
         norm=None,
     ),
     # Shimmer family: pathological threshold ~3.8% for local shimmer.
     "Shimmer": dict(
         label="Shimmer (local)",
         vmin=0.0, vmax=10.0, unit="%",
-        cmap=_hsv_sweep(1/3, 0.0, "fd_shimmer"),
+        cmap=_modern_seq(),
         norm=None,
     ),
     "ShimmerDB": dict(
         label="Shimmer",
         vmin=0.0, vmax=1.0, unit="dB",
-        cmap=_hsv_sweep(1/3, 0.0, "fd_shimmer_db"),
+        cmap=_modern_seq(),
         norm=None,
     ),
     "ShimmerAPQ11": dict(
         label="Shimmer APQ11 (11-pt)",
         vmin=0.0, vmax=10.0, unit="%",
-        cmap=_hsv_sweep(1/3, 0.0, "fd_shimmer_apq11"),
+        cmap=_modern_seq(),
         norm=None,
     ),
     "ShimmerAPQ3": dict(
         label="Shimmer APQ3 (3-pt)",
         vmin=0.0, vmax=10.0, unit="%",
-        cmap=_hsv_sweep(1/3, 0.0, "fd_shimmer_apq3"),
+        cmap=_modern_seq(),
         norm=None,
     ),
     "ShimmerAPQ5": dict(
         label="Shimmer APQ5 (5-pt)",
         vmin=0.0, vmax=10.0, unit="%",
-        cmap=_hsv_sweep(1/3, 0.0, "fd_shimmer_apq5"),
+        cmap=_modern_seq(),
         norm=None,
     ),
     # HNR: higher = healthier voice (>20 dB normal). Use blue→red reversed
@@ -238,7 +245,7 @@ METRIC_CFG = {
     "HNR": dict(
         label="HNR",
         vmin=0.0, vmax=35.0, unit="dB",
-        cmap=_hsv_sweep(0.0, 2/3, "fd_hnr"),   # red→blue (low→high)
+        cmap=_modern_seq(),   # red→blue (low→high)
         norm=None,
     ),
     # ── Add-on voice-quality metrics (待验证) ──────────────────────────────
@@ -247,7 +254,7 @@ METRIC_CFG = {
     "NHR": dict(
         label="NHR (Noise-to-Harm)",
         vmin=0.0, vmax=0.5, unit="",
-        cmap=_hsv_sweep(1/3, 0.0, "fd_nhr"),
+        cmap=_modern_seq(),
         norm=None,
     ),
     # CPPS (smoothed CPP). Same scale as CPP, moving-averaged temporally.
@@ -262,14 +269,14 @@ METRIC_CFG = {
     "PPE": dict(
         label="Pitch Period Entropy",
         vmin=0.0, vmax=1.0, unit="",
-        cmap=_hsv_sweep(1/3, 0.0, "fd_ppe"),   # green→red (stable→noisy)
+        cmap=_modern_seq(),   # green→red (stable→noisy)
         norm=None,
     ),
     # ZCR (zero-crossing rate) per cycle. Range typically 0.01–0.2 for voice.
     "ZCR": dict(
         label="Zero-Crossing Rate",
         vmin=0.0, vmax=0.3, unit="",
-        cmap=_hsv_sweep(1/3, 0.0, "fd_zcr"),
+        cmap=_modern_seq(),
         norm=None,
     ),
     # ── P2 Singing-specific ────────────────────────────────────────────────
@@ -278,14 +285,14 @@ METRIC_CFG = {
     "VibratoRate": dict(
         label="Vibrato rate",
         vmin=3.0, vmax=9.0, unit="Hz",
-        cmap=_hsv_sweep(2/3, 0.0, "fd_vib_rate"),   # blue→red across band
+        cmap=_modern_seq(),   # blue→red across band
         norm=None,
     ),
     # Vibrato extent: 50-150 cents typical; classical Western ~80, Peking often wider.
     "VibratoExtent": dict(
         label="Vibrato extent",
         vmin=0.0, vmax=300.0, unit="cents",
-        cmap=_hsv_sweep(1/3, 0.0, "fd_vib_ext"),    # green→red (wide = dramatic)
+        cmap=_modern_seq(),
         norm=None,
     ),
     # Formants: vocal-tract resonances. Typical ranges for a mixed voice:
@@ -295,67 +302,59 @@ METRIC_CFG = {
     "F1": dict(
         label="F1 — 1st formant",
         vmin=200.0, vmax=1000.0, unit="Hz",
-        cmap=_hsv_sweep(2/3, 0.0, "fd_f1"),
+        cmap=_modern_seq(),
         norm=None,
     ),
     "F2": dict(
         label="F2 — 2nd formant",
         vmin=800.0, vmax=2800.0, unit="Hz",
-        cmap=_hsv_sweep(2/3, 0.0, "fd_f2"),
+        cmap=_modern_seq(),
         norm=None,
     ),
     "F3": dict(
         label="F3 — 3rd formant",
         vmin=2000.0, vmax=3600.0, unit="Hz",
-        cmap=_hsv_sweep(2/3, 0.0, "fd_f3"),
+        cmap=_modern_seq(),
         norm=None,
     ),
-    # Singer's Formant Energy (2.8-3.4 kHz band / total, dB).
-    # Classical trained singer: -7 to -13 dB; untrained < -13 dB; "ring" is high.
     "SingersFormant": dict(
         label="Singer's Formant Energy",
         vmin=-25.0, vmax=-5.0, unit="dB",
-        cmap=_hsv_sweep(2/3, 0.0, "fd_sfe"),   # blue→red (low→high = more ring)
+        cmap=_modern_seq(),
         norm=None,
     ),
-    # H1-H2 / H1-H3 spectral tilt from voice DFT per cycle.
-    # Breathy > 10 dB, modal ~ 2-6, pressed ≤ 0. Diverging palette so
-    # zero-crossing is visible: blue = pressed, green ≈ modal, red = breathy.
+    # H1-H2 / H1-H3 spectral tilt — diverging around 0:
+    # negative = pressed, ~0 = modal, positive = breathy.
     "H1H2": dict(
         label="H1-H2  (voice)",
         vmin=-10.0, vmax=20.0, unit="dB",
-        cmap=_hsv_sweep(2/3, 0.0, "fd_h1h2"),   # blue→red = pressed→breathy
+        cmap=_modern_div(),
         norm=None,
     ),
     "H1H3": dict(
         label="H1-H3  (voice)",
         vmin=-10.0, vmax=25.0, unit="dB",
-        cmap=_hsv_sweep(2/3, 0.0, "fd_h1h3"),
+        cmap=_modern_div(),
         norm=None,
     ),
     # ── P3 EGG timing quotients ────────────────────────────────────────────
-    # OQ (Open Quotient): fraction of cycle where vocal folds are open.
-    # Modal ~ 0.5, breathy > 0.7, pressed < 0.4.
     "OQ": dict(
         label="Open Quotient",
         vmin=0.2, vmax=0.8, unit="",
-        cmap=_hsv_sweep(1/3, 0.0, "fd_oq"),   # green → red (closed → open)
+        cmap=_modern_seq(),
         norm=None,
     ),
-    # SPQ (Speed Quotient): opening vs closing phase duration. 1.0 = symmetric;
-    # > 1 = slower opening, < 1 = faster opening.
     "SPQ": dict(
         label="Speed Quotient",
         vmin=0.3, vmax=3.0, unit="",
-        cmap=_hsv_sweep(2/3, 0.0, "fd_spq"),
+        cmap=_modern_seq(),
         norm=None,
     ),
-    # CIQ (Contact Index / asymmetry): negative = opening longer, positive =
-    # closing longer. 0 = symmetric.
+    # CIQ — diverging (signed asymmetry around 0)
     "CIQ": dict(
         label="Contact Index",
         vmin=-0.6, vmax=0.6, unit="",
-        cmap=_hsv_sweep(2/3, 0.0, "fd_ciq"),
+        cmap=_modern_div(),
         norm=None,
     ),
     # ── EGG waveform clusters ───────────────────────────────────────────────
@@ -366,13 +365,13 @@ METRIC_CFG = {
     "maxCluster": dict(
         label="Dominant EGG cluster",
         vmin=0.5, vmax=5.5, unit="",
-        cmap=plt.get_cmap("tab10", 5),
+        cmap=_modern_cat5(),
         norm=None,
     ),
     "maxCPhon": dict(
         label="Dominant phonation cluster",
         vmin=0.5, vmax=5.5, unit="",
-        cmap=plt.get_cmap("Set2", 5),
+        cmap=_modern_cat5(),
         norm=None,
     ),
     # Cluster k / cPhon k: percent of cycles in cell assigned to cluster k.
