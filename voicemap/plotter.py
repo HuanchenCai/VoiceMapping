@@ -483,14 +483,17 @@ def _draw_vrp_ax(ax, fig, df: pd.DataFrame, col: str) -> bool:
     # figures drop straight into papers/slides without inverting. Empty
     # cells are a slightly-off-white so you can still see them against
     # the plot face. All text and axis chrome is black/dark-grey for
-    # contrast.
-    _BG_AX       = "#ffffff"   # plot area
-    _BG_EMPTY    = "#f2f2f2"   # NaN / masked cells
-    _FG_TEXT     = "#1a1a1a"   # title / ticks / labels
-    _FG_SPINE    = "#444444"
-    _GRID_MAJOR  = "#cccccc"
-    _GRID_MINOR  = "#e6e6e6"
-    _CAT_TAG     = "#777777"
+    # contrast. Tokens live in voicemap.gui.theme so chart palette
+    # changes are one-line edits.
+    from voicemap.gui.theme import (
+        PLOT_BG_AX  as _BG_AX,
+        PLOT_BG_EMPTY as _BG_EMPTY,
+        PLOT_FG     as _FG_TEXT,
+        PLOT_FG_SPINE as _FG_SPINE,
+        PLOT_GRID   as _GRID_MAJOR,
+        PLOT_GRID_LIGHT as _GRID_MINOR,
+        PLOT_FG_DIM as _CAT_TAG,
+    )
     ax.set_facecolor(_BG_AX)
 
     midi_edges = np.arange(MIDI_MIN - 0.5, MIDI_MAX + 1.5)
@@ -591,7 +594,8 @@ def plot_vrp_combined(
     for idx in range(len(metrics), nrows * ncols):
         axes[idx // ncols][idx % ncols].set_visible(False)
 
-    fig.suptitle(basename, color="#1a1a1a", fontsize=13, y=1.01)
+    from voicemap.gui.theme import PLOT_FG as _FG
+    fig.suptitle(basename, color=_FG, fontsize=13, y=1.01)
     fig.tight_layout()
 
     os.makedirs(out_dir, exist_ok=True)
@@ -677,8 +681,13 @@ def draw_vrp_comparison(df_a: pd.DataFrame,
     # Comparison palette: white canvas, dark text. Matches the single-metric
     # style so an A|B|Δ export sits next to a single-metric one in a paper
     # without colour-scheme mismatch.
-    _BG_AX, _BG_EMPTY = "#ffffff", "#f2f2f2"
-    _FG_TEXT, _FG_SPINE, _GRID = "#1a1a1a", "#444444", "#cccccc"
+    from voicemap.gui.theme import (
+        PLOT_BG_AX  as _BG_AX,
+        PLOT_BG_EMPTY as _BG_EMPTY,
+        PLOT_FG     as _FG_TEXT,
+        PLOT_FG_SPINE as _FG_SPINE,
+        PLOT_GRID   as _GRID,
+    )
 
     fig.clear()
     fig.patch.set_facecolor("white")

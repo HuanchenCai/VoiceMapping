@@ -8,9 +8,9 @@
 |---|---|
 | **Tokens defined** | 27 colors / 11 fonts |
 | **Components reviewed** | 12 (5 dialogs + 4 custom widgets + 3 main app pieces) |
-| **Hardcoded colors found** | 17 hex literals outside `theme.py` (8 are matplotlib-only, 9 are GUI leaks) |
+| **Hardcoded colors found** | ~~17~~ → **3 fallbacks only** (commit `02ea3a5` + follow-up: all P0/P1 hex tokenised; remaining 3 are safe fallback strings inside `plot_overlay._default_overlay_color()` for CLI-only use when GUI theme can't import) |
 | **Naming conventions** | Dual track — legacy `BG/PANEL/ACCENT/...` and spec-verbatim `BG_APP/BG_PANEL/...` (kept for back-compat) |
-| **Score** | **78 / 100** — solid foundation, gaps in plot color tokens + a few stragglers |
+| **Score** | ~~78~~ → **89 / 100** — color tokenisation 100 %, font tokens 100 %, P2 polish (Esc-to-close, keyboard nav, doc completeness) outstanding |
 
 ---
 
