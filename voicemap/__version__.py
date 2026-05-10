@@ -6,7 +6,7 @@ and pyproject.toml all read from this file. Bump ``__version__`` here
 and nowhere else.
 """
 
-__version__ = "1.0.0-dev"
+__version__ = "1.0.0"
 __title_zh__ = "嗓音声学品质多维分析图谱"
 __title_en__ = "VoiceMap"
 __author__ = "蔡寰宸 (Huanchen Cai)"
