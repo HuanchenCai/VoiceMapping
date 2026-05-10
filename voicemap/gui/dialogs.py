@@ -20,7 +20,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from voicemap.gui.theme import (
     PANEL, PANEL_HI, BORDER, TEXT, MUTED, ACCENT,
     OK, WARN, ERR, BG_CODE,
-    FONT_UI, FONT_UI_B, FONT_MONO,
+    FONT_UI, FONT_UI_B, FONT_MONO, FONT_ABOUT_TITLE,
 )
 from voicemap.i18n import tr
 
@@ -40,6 +40,7 @@ class SettingsDialog(tk.Toplevel):
         self.title(tr("settings.title"))
         self.configure(bg=PANEL)
         self.resizable(False, False)
+        self.bind("<Escape>", lambda _e: self.destroy())
 
         pad = tk.Frame(self, bg=PANEL)
         pad.pack(padx=24, pady=20)
@@ -137,6 +138,7 @@ class CompareDialog(tk.Toplevel):
         self.transient(app)
         self.title(tr("compare.title"))
         self.configure(bg=PANEL)
+        self.bind("<Escape>", lambda _e: self.destroy())
         # Three subplots side-by-side (A | B | Δ) need a lot of horizontal
         # room. The matplotlib figure is 14 inches wide; at 150% Windows
         # DPI scaling that's ~2310 px, so a 1500 px dialog cropped the
@@ -441,6 +443,7 @@ class LogWindow(tk.Toplevel):
         self.configure(bg=PANEL)
         self.geometry("720x460")
         self.minsize(480, 240)
+        self.bind("<Escape>", lambda _e: self.destroy())
 
         pad = tk.Frame(self, bg=PANEL)
         pad.pack(fill="both", expand=True, padx=14, pady=14)
@@ -531,13 +534,14 @@ class AboutDialog(tk.Toplevel):
         self.title(tr("about.title"))
         self.configure(bg=PANEL)
         self.resizable(False, False)
+        self.bind("<Escape>", lambda _e: self.destroy())
 
         pad = tk.Frame(self, bg=PANEL)
         pad.pack(padx=32, pady=24)
 
         # 中文全称（标题）
         tk.Label(pad, text=__title_zh__, bg=PANEL, fg=TEXT,
-                 font=("Microsoft YaHei UI", 16, "bold")
+                 font=FONT_ABOUT_TITLE
                  ).pack(anchor="center")
         # 英文短名 + 版本
         tk.Label(pad, text=f"{__title_en__}  ·  {__version__}",
