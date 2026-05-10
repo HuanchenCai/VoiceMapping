@@ -34,6 +34,7 @@ _HERE = Path(__file__).resolve().parent.parent  # voicemap/
 from voicemap.config import DEFAULT_CONFIG, VoiceMapConfig
 from voicemap.logger import setup_logger
 from voicemap.plotter import draw_vrp_on_ax
+from voicemap.metrics_registry import get as get_spec
 
 # Theme tokens, custom widgets, dialogs — extracted to gui/ subpackage in A0-2.
 from voicemap.gui.theme import (
@@ -46,7 +47,7 @@ from voicemap.gui.theme import (
     FONT_BTN_INFO, FONT_INSPECTOR_NAME,
     PLOT_FG, PLOT_FG_SPINE, PLOT_GRID, PLOT_GRID_LIGHT,
     PLOT_OVERLAY_FIT, PLOT_OVERLAY_2,
-    PLACEHOLDER_DIM, PLACEHOLDER_TXT,
+    PLACEHOLDER_DIM, PLACEHOLDER_TXT, READOUT_BG,
     _METRIC_SECTIONS, _DEFAULT_METRIC_CHAIN,
 )
 from voicemap.gui.widgets import QueueHandler, HoverTooltip
@@ -1414,8 +1415,10 @@ class VoiceMapApp(_TkBase):
             highlightbackground=PANEL,
             highlightcolor=ACCENT)
         self._inspector_info_glyph.pack(side="right", padx=(4, 0), pady=(8, 0))
-        # Keyboard activation when focused — F1 / Enter / Space all
-        # show the tooltip momentarily. a11y audit O-4 (keyboard tooltip).
+        # Tab-focus visual: the ⓘ glyph turns ACCENT while focused so
+        # keyboard users see where they are. The actual tooltip surfaces
+        # via the HoverTooltip below (which also subscribes to focus
+        # events on its target). a11y audit O-4.
         self._inspector_info_glyph.bind(
             "<FocusIn>",  lambda _e: self._inspector_info_glyph.configure(fg=ACCENT))
         self._inspector_info_glyph.bind(
@@ -1428,14 +1431,13 @@ class VoiceMapApp(_TkBase):
             name = self.metric_var.get() if hasattr(self, "metric_var") else ""
             if not name:
                 return ""
-            tip_key = f"metric.tooltip.{name}"
-            tip = tr(tip_key)
-            if tip == tip_key:
-                short_key = f"metric.desc.{name}"
-                tip = tr(short_key)
-                if tip == short_key:
-                    tip = ""
-            return tip
+            # Try long prose, then short blurb; tr() returns the bare key
+            # when the entry is missing in both languages.
+            for key in (f"metric.tooltip.{name}", f"metric.desc.{name}"):
+                tip = tr(key)
+                if tip != key:
+                    return tip
+            return ""
         # Attach tooltip to BOTH the name label and the ⓘ glyph so users
         # can hover either to trigger it.
         self._inspector_metric_tip = HoverTooltip(
@@ -1731,15 +1733,16 @@ class VoiceMapApp(_TkBase):
 
     # ── 占位画面 ──
     def _show_placeholder(self, msg: str | None = None):
-        if msg is None:
-            msg = tr("drop.placeholder")
-        # Clear stale inline readout when switching to placeholder
-        self._inline_readout = None
         """
         占位画面跟分析完成后的 voice map 用同一套布局：白底、同样的
         subplots_adjust 边距、MIDI/SPL 轴范围一致。这样从"未分析"
         切到"已分析"画面尺寸/坐标系不会跳，用户体验上是平滑过渡。
         """
+        if msg is None:
+            msg = tr("drop.placeholder")
+        # Clear stale inline readout when switching to placeholder.
+        self._inline_readout = None
+        self._last_motion_cell = None
         self._showing_placeholder = True
         self._sync_fig_to_widget()
         self._fig.clear()
@@ -2095,6 +2098,8 @@ class VoiceMapApp(_TkBase):
         """
         if event.inaxes is None:
             self._clear_inline_readout()
+            self._update_inspector_value(None, None)
+            self._last_motion_cell = None
             return
         if getattr(self, "_showing_placeholder", True):
             return
@@ -2103,8 +2108,29 @@ class VoiceMapApp(_TkBase):
         x, y = event.xdata, event.ydata
         if x is None or y is None:
             return
-        self._update_inspector_value(x, y)
-        self._update_inline_readout(event, x, y)
+
+        # Change-detection: same (mi, si, metric) → no work.
+        # Was firing 60-120 times/sec on mouse drift inside one cell,
+        # each pass running df boolean-mask + draw_idle() — wasteful.
+        df = self._last_df
+        name = self.metric_var.get() if hasattr(self, "metric_var") else ""
+        if df is None or not name or name not in df.columns:
+            return
+        mi, si = int(round(x)), int(round(y))
+        cell_key = (mi, si, name)
+        if cell_key == getattr(self, "_last_motion_cell", None):
+            return
+        self._last_motion_cell = cell_key
+
+        # Single cell lookup (was doubled — once per consumer).
+        try:
+            row = df[(df["MIDI"] == mi) & (df["dB"] == si)]
+            value = float(row[name].iloc[0]) if not row.empty else None
+        except Exception:
+            value = None
+
+        self._update_inspector_value(x, y, _value=value)
+        self._update_inline_readout(event, x, y, _value=value)
 
     def _clear_inline_readout(self):
         ann = getattr(self, "_inline_readout", None)
@@ -2115,32 +2141,20 @@ class VoiceMapApp(_TkBase):
             except Exception:
                 pass
 
-    def _update_inline_readout(self, event, midi: float, spl: float):
+    def _update_inline_readout(self, event, midi: float, spl: float,
+                               _value: float | None = None):
         """Floating annotation near the cursor showing
         '音高 60 · 声压 75 dB · 18.2 dB' (or en equivalent). Cheap to
         re-position — same Annotation reused across motion events.
         """
-        df = self._last_df
-        name = self.metric_var.get() if hasattr(self, "metric_var") else ""
-        if df is None or not name or name not in df.columns:
+        if _value is None:
             self._clear_inline_readout()
             return
-        try:
-            mi, si = int(round(midi)), int(round(spl))
-            row = df[(df["MIDI"] == mi) & (df["dB"] == si)]
-            if row.empty:
-                self._clear_inline_readout()
-                return
-            value = float(row[name].iloc[0])
-        except Exception:
-            return
-
-        # Format text — language-aware via existing tr() coordinates key
-        from voicemap.metrics_registry import get as get_spec
-        spec = get_spec(name)
+        mi, si = int(round(midi)), int(round(spl))
+        spec = get_spec(self.metric_var.get())
         unit = (spec.unit if spec else "") or ""
         coords = tr("inspector.coords", mi=mi, si=si)
-        readout = f"{coords} · {value:.2f} {unit}".rstrip()
+        readout = f"{coords} · {_value:.2f} {unit}".rstrip()
 
         ax = event.inaxes
         ann = getattr(self, "_inline_readout", None)
@@ -2152,10 +2166,10 @@ class VoiceMapApp(_TkBase):
                 xytext=(14, 14),                  # offset above-right of cursor
                 textcoords="offset pixels",
                 fontsize=9,
-                color="#1a1a1a",
+                color=PLOT_FG,
                 bbox=dict(boxstyle="round,pad=0.35",
-                          fc="#fef3c7",            # warm pale-amber
-                          ec="#f59e0b",            # ACCENT
+                          fc=READOUT_BG,           # warm pale-amber tint
+                          ec=ACCENT,
                           alpha=0.95,
                           linewidth=0.8),
                 zorder=20)
@@ -2191,11 +2205,7 @@ class VoiceMapApp(_TkBase):
             self._update_inspector_value(None, None)
             return
 
-        try:
-            from voicemap.metrics_registry import get as get_spec
-            spec = get_spec(name)
-        except Exception:
-            spec = None
+        spec = get_spec(name)
         # tr(f"metric.desc.{name}") looks up the i18n table; if neither
         # zh nor en has the key, tr() returns the bare key — in that case
         # fall back to the registry's English description so an
@@ -2281,11 +2291,18 @@ class VoiceMapApp(_TkBase):
                      anchor="w", justify="left", wraplength=270
                      ).pack(side="left", fill="x", expand=True)
 
-    def _update_inspector_value(self, midi: float | None, spl: float | None):
+    def _update_inspector_value(self, midi: float | None, spl: float | None,
+                                _value: float | None = None):
         """Cheap update of the current-value pill from the cell at
         (midi, spl). Called from the matplotlib motion handler at high
         rate, so it just .configure()s existing widgets — no destroy
-        / recreate. Pass (None, None) to clear."""
+        / recreate. Pass (None, None) to clear.
+
+        ``_value`` is the metric value at (mi, si) pre-computed by the
+        motion handler so this routine can skip the df boolean-mask
+        lookup. When the caller already knows the cell is empty it
+        passes ``_value=None`` and we render the no-data pill.
+        """
         if not hasattr(self, "_inspector_value_num"):
             return
 
@@ -2307,21 +2324,15 @@ class VoiceMapApp(_TkBase):
             self._inspector_value_sev.configure(text="")
             return
 
-        # Find nearest cell in _last_df (rows are unique (MIDI, dB) pairs).
-        try:
-            df = self._last_df
-            mi = int(round(midi))
-            si = int(round(spl))
-            row = df[(df["MIDI"] == mi) & (df["dB"] == si)]
-            if row.empty:
-                self._inspector_value_coords.configure(
-                    text=tr("inspector.coords_no_data", mi=mi, si=si))
-                self._inspector_value_num.configure(text="—", fg=ACCENT_HI)
-                self._inspector_value_sev.configure(text="")
-                return
-            value = float(row[name].iloc[0])
-        except Exception:
+        mi = int(round(midi))
+        si = int(round(spl))
+        if _value is None:
+            self._inspector_value_coords.configure(
+                text=tr("inspector.coords_no_data", mi=mi, si=si))
+            self._inspector_value_num.configure(text="—", fg=ACCENT_HI)
+            self._inspector_value_sev.configure(text="")
             return
+        value = _value
 
         # Severity lookup
         try:
@@ -2335,12 +2346,8 @@ class VoiceMapApp(_TkBase):
                 if lo <= value < hi:
                     sev = s
                     break
-        try:
-            from voicemap.metrics_registry import get as get_spec
-            spec = get_spec(name)
-            unit = (spec.unit if spec else "") or ""
-        except Exception:
-            unit = ""
+        spec = get_spec(name)
+        unit = (spec.unit if spec else "") or ""
 
         color = sev_color.get(sev, ACCENT_HI)
         self._inspector_value_coords.configure(

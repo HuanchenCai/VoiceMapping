@@ -61,6 +61,7 @@ PLOT_OVERLAY_FIT = "#ff3e88"     # fit-curve overlay (pink)
 PLOT_OVERLAY_2   = "#00d9ff"     # secondary overlay (cyan)
 PLACEHOLDER_DIM  = "#888888"     # placeholder canvas tick / subtitle
 PLACEHOLDER_TXT  = "#444444"     # placeholder canvas main message
+READOUT_BG       = "#fef3c7"     # inline readout fill — pale-amber tint of ACCENT
 
 # ── Fonts ───────────────────────────────────────────────────────────────
 # Microsoft YaHei UI is Windows-native, has dedicated glyphs for both
