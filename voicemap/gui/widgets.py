@@ -18,7 +18,7 @@ from tkinter import ttk
 from typing import TYPE_CHECKING
 
 from voicemap.gui.theme import (
-    PANEL_HI, BORDER, TEXT, ACCENT, BG,
+    PANEL, PANEL_HI, BORDER, TEXT, MUTED, ACCENT, BG, FONT_UI,
 )
 
 if TYPE_CHECKING:  # avoid runtime circular import
@@ -354,6 +354,45 @@ class HoverTooltip:
             except tk.TclError:
                 pass
             self._tip = None
+
+
+def make_focusable_label(parent, text, on_click,
+                         *,
+                         bg=PANEL, fg=MUTED, font=FONT_UI,
+                         cursor="hand2",
+                         focus_color=ACCENT,
+                         hover_fg=ACCENT):
+    """Build a tk.Label that behaves like a button with proper a11y:
+
+      - Tab-reachable (takefocus=1)
+      - 2 px focus ring on Tab (highlightcolor=focus_color)
+      - <Button-1>, <Return>, <space> all invoke on_click
+      - <Enter>/<Leave> swap fg between fg and hover_fg
+      - <FocusIn>/<FocusOut> mirror that on keyboard focus
+
+    Used for the metric-bar Prev/Next labels and any other label-as-button
+    that needs WCAG 2.1.1 (keyboard) + 2.4.7 (focus visible). Pre-extract
+    this lived as a closure inside `_build_metric_bar`; lifted to widgets
+    so the ⓘ glyph and other sites can share the focus-ring config.
+    """
+    lbl = tk.Label(parent, text=text,
+                   bg=bg, fg=fg, font=font,
+                   cursor=cursor,
+                   takefocus=1,
+                   highlightthickness=2,
+                   highlightbackground=bg,
+                   highlightcolor=focus_color)
+    if on_click is not None:
+        lbl.bind("<Button-1>", lambda _e: on_click())
+        lbl.bind("<Return>",   lambda _e: on_click())
+        lbl.bind("<space>",    lambda _e: on_click())
+    lbl.bind("<Enter>",    lambda _e: lbl.configure(fg=hover_fg))
+    lbl.bind("<Leave>",
+             lambda _e: lbl.configure(
+                 fg=hover_fg if lbl.focus_get() is lbl else fg))
+    lbl.bind("<FocusIn>",  lambda _e: lbl.configure(fg=hover_fg))
+    lbl.bind("<FocusOut>", lambda _e: lbl.configure(fg=fg))
+    return lbl
 
 
 class QueueHandler(logging.Handler):

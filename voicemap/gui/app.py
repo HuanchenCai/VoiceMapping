@@ -50,7 +50,7 @@ from voicemap.gui.theme import (
     PLACEHOLDER_DIM, PLACEHOLDER_TXT, READOUT_BG,
     _METRIC_SECTIONS, _DEFAULT_METRIC_CHAIN,
 )
-from voicemap.gui.widgets import QueueHandler, HoverTooltip
+from voicemap.gui.widgets import QueueHandler, HoverTooltip, make_focusable_label
 from voicemap.gui.dialogs import (
     SettingsDialog, CompareDialog, ProgressDialog, AboutDialog, LogWindow,
 )
@@ -1285,31 +1285,14 @@ class VoiceMapApp(_TkBase):
         sep = tk.Label(inner, text="│", bg=PANEL, fg=BORDER, font=FONT_UI)
         sep.pack(side="left", padx=(16, 8))
 
-        # Helper: turn a tk.Label into a focusable button-like widget
-        # that responds to click + Enter/Space + shows an underline focus
-        # indicator on Tab. a11y audit O-3.
-        def _make_label_button(parent, text_key, on_click):
-            lbl = tk.Label(parent, text=tr(text_key),
-                           bg=PANEL, fg=MUTED, font=FONT_UI,
-                           cursor="hand2",
-                           takefocus=1,
-                           highlightthickness=2,
-                           highlightbackground=PANEL,
-                           highlightcolor=ACCENT)
-            lbl.bind("<Button-1>", lambda _e: on_click())
-            lbl.bind("<Return>",   lambda _e: on_click())
-            lbl.bind("<space>",    lambda _e: on_click())
-            lbl.bind("<Enter>",    lambda _e: lbl.configure(fg=ACCENT))
-            lbl.bind("<Leave>",    lambda _e: lbl.configure(fg=MUTED if lbl.focus_get() is not lbl else ACCENT))
-            lbl.bind("<FocusIn>",  lambda _e: lbl.configure(fg=ACCENT))
-            lbl.bind("<FocusOut>", lambda _e: lbl.configure(fg=MUTED))
-            return lbl
-
-        self._metric_prev_btn = _make_label_button(
-            inner, "metric.prev", lambda: self._cycle_metric(-1))
+        # Prev/Next labels are focusable button-likes — see
+        # widgets.make_focusable_label for the keyboard a11y wiring
+        # (Tab + Enter/Space + visible focus ring). a11y audit O-3.
+        self._metric_prev_btn = make_focusable_label(
+            inner, tr("metric.prev"), lambda: self._cycle_metric(-1))
         self._metric_prev_btn.pack(side="left", padx=(0, 12))
-        self._metric_next_btn = _make_label_button(
-            inner, "metric.next", lambda: self._cycle_metric(+1))
+        self._metric_next_btn = make_focusable_label(
+            inner, tr("metric.next"), lambda: self._cycle_metric(+1))
         self._metric_next_btn.pack(side="left")
 
         self._metric_popup = None
@@ -1405,24 +1388,13 @@ class VoiceMapApp(_TkBase):
         self._inspector_metric_name.pack(side="left", fill="x", expand=True)
         # ⓘ next to the title — small, muted; positioned to the right of
         # the metric name so users immediately know "hover for more".
-        self._inspector_info_glyph = tk.Label(
-            title_row, text="ⓘ",
-            bg=PANEL, fg=MUTED,
+        # No on_click: the actual tooltip surfaces via HoverTooltip below
+        # (which also handles keyboard focus). a11y audit O-4.
+        self._inspector_info_glyph = make_focusable_label(
+            title_row, "ⓘ", on_click=None,
             font=FONT_BTN_INFO,
-            cursor="question_arrow",
-            takefocus=1,
-            highlightthickness=2,
-            highlightbackground=PANEL,
-            highlightcolor=ACCENT)
+            cursor="question_arrow")
         self._inspector_info_glyph.pack(side="right", padx=(4, 0), pady=(8, 0))
-        # Tab-focus visual: the ⓘ glyph turns ACCENT while focused so
-        # keyboard users see where they are. The actual tooltip surfaces
-        # via the HoverTooltip below (which also subscribes to focus
-        # events on its target). a11y audit O-4.
-        self._inspector_info_glyph.bind(
-            "<FocusIn>",  lambda _e: self._inspector_info_glyph.configure(fg=ACCENT))
-        self._inspector_info_glyph.bind(
-            "<FocusOut>", lambda _e: self._inspector_info_glyph.configure(fg=MUTED))
 
         # Hover tooltip on the metric name — uses metric.tooltip.X (long
         # detailed prose) if present, falls back to metric.desc.X
