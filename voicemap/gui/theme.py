@@ -90,6 +90,8 @@ FONT_DROP    = ("Microsoft YaHei UI", 13, "bold")
 # FONT_UI_B (11 pt bold) for tighter vertical density.
 FONT_BTN_INFO = ("Microsoft YaHei UI", 14)            # ⓘ glyph next to Inspector metric name
 FONT_INSPECTOR_NAME = ("Microsoft YaHei UI", 19, "bold")  # Inspector metric title (ACCENT, no overflow at 420 px)
+FONT_ABOUT_TITLE = ("Microsoft YaHei UI", 16, "bold")     # AboutDialog 中文全称标题
+FONT_TOOLTIP = ("Microsoft YaHei UI", 10)                 # HoverTooltip body
 # Header app title — was 18pt; UI_DESIGN.md spec calls 13pt, but at
 # Windows 100% DPI 13 reads tiny next to the canvas. 14pt bold lands
 # close to spec while keeping the title legible. Visual hierarchy

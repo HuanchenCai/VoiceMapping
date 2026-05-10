@@ -18,7 +18,7 @@ from tkinter import ttk
 from typing import TYPE_CHECKING
 
 from voicemap.gui.theme import (
-    PANEL, PANEL_HI, BORDER, TEXT, MUTED, ACCENT, BG, FONT_UI,
+    PANEL, PANEL_HI, BORDER, TEXT, MUTED, ACCENT, BG, FONT_UI, FONT_TOOLTIP,
 )
 
 if TYPE_CHECKING:  # avoid runtime circular import
@@ -338,7 +338,7 @@ class HoverTooltip:
             inner,
             text=text,
             bg=PANEL_HI, fg=TEXT,
-            font=("Microsoft YaHei UI", 10),
+            font=FONT_TOOLTIP,
             justify="left", anchor="w",
             wraplength=self.MAX_WIDTH,
             padx=12, pady=10,
