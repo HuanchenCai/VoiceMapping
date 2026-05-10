@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional, Tuple
 
 import numpy as np
+import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm  # type: ignore
 
 
@@ -143,38 +144,19 @@ PALETTE_DENSITY    = "mako"
 _OKABE_ITO_5 = ["#0072B2", "#E69F00", "#009E73", "#CC79A7", "#F0E442"]
 
 
-def _hsv_sweep_lazy(h_start, h_end, name):
-    """Legacy hook: every old call site still passes (h_start, h_end,
-    name) — those are now ignored. Returns the default sequential
-    colormap (viridis) so existing specs upgrade automatically.
-    Diverging-natured metrics override their cmap explicitly in
-    `_populate_builtins` after this default is applied.
-
-    Kept under the old name + signature so external code calling
-    `metrics_registry._hsv_sweep_lazy(...)` doesn't break."""
-    import matplotlib.pyplot as _plt
-    return _plt.get_cmap(PALETTE_SEQUENTIAL)
-
-
 def _categorical_cmap_5():
     """5-class colorblind-safe ListedColormap for maxCluster / maxCPhon."""
     from matplotlib.colors import ListedColormap
     return ListedColormap(_OKABE_ITO_5, name="vm_cat5")
 
 
-def _diverging_cmap():
-    import matplotlib.pyplot as _plt
-    return _plt.get_cmap(PALETTE_DIVERGING)
-
-
 def _density_cmap_modern():
     """Density: try mako (seaborn-installed via matplotlib >= 3.7);
     fall back to viridis if mako isn't registered (older matplotlib)."""
-    import matplotlib.pyplot as _plt
     try:
-        return _plt.get_cmap(PALETTE_DENSITY)
+        return plt.get_cmap(PALETTE_DENSITY)
     except (ValueError, KeyError):
-        return _plt.get_cmap("viridis")
+        return plt.get_cmap("viridis")
 
 
 def _populate_builtins():
@@ -204,7 +186,7 @@ def _populate_builtins():
         description="Smoothed CPP (Hillenbrand 1996)."))
     register(MetricSpec(
         key="SpecBal", category="Acoustic", label="Spectrum Balance",
-        vmin=-42.0, vmax=0.0, unit="dB", cmap=_diverging_cmap(),
+        vmin=-42.0, vmax=0.0, unit="dB", cmap=PALETTE_DIVERGING,
         description="10·log10(E_below_1500Hz / E_above)."))
     register(MetricSpec(
         key="Crest", category="Acoustic", label="Crest Factor",
@@ -224,7 +206,7 @@ def _populate_builtins():
         register(MetricSpec(
             key=k, category="Acoustic", label=label,
             vmin=0.0, vmax=vmax, unit="%",
-            cmap=_hsv_sweep_lazy(1/3, 0.0, f"fd_{k.lower()}"),
+            cmap="viridis",
             description="MDVP-style period perturbation with 1.3× factor."))
     for k, label, vmax in [
         ("Shimmer",       "Shimmer (local)", 10.0),
@@ -235,35 +217,35 @@ def _populate_builtins():
         register(MetricSpec(
             key=k, category="Acoustic", label=label,
             vmin=0.0, vmax=vmax, unit="%",
-            cmap=_hsv_sweep_lazy(1/3, 0.0, f"fd_{k.lower()}"),
+            cmap="viridis",
             description="MDVP-style amplitude perturbation."))
     register(MetricSpec(
         key="ShimmerDB", category="Acoustic", label="Shimmer",
         vmin=0.0, vmax=1.0, unit="dB",
-        cmap=_hsv_sweep_lazy(1/3, 0.0, "fd_shimmer_db"),
+        cmap="viridis",
         description="dB shimmer = mean |20·log10(A[i]/A[i-1])|."))
 
     register(MetricSpec(
         key="HNR", category="Acoustic", label="HNR",
         vmin=0.0, vmax=35.0, unit="dB",
-        cmap=_hsv_sweep_lazy(0.0, 2/3, "fd_hnr"),
+        cmap="viridis",
         description="Harmonics-to-Noise Ratio (Praat autocorrelation)."))
     register(MetricSpec(
         key="NHR", category="Acoustic", label="NHR (Noise-to-Harm)",
         vmin=0.0, vmax=0.5, unit="",
-        cmap=_hsv_sweep_lazy(1/3, 0.0, "fd_nhr"),
+        cmap="viridis",
         待验证=True,
         description="Noise-to-Harmonics Ratio = 1/10^(HNR/10)."))
     register(MetricSpec(
         key="PPE", category="Acoustic", label="Pitch Period Entropy",
         vmin=0.0, vmax=1.0, unit="",
-        cmap=_hsv_sweep_lazy(1/3, 0.0, "fd_ppe"),
+        cmap="viridis",
         待验证=True,
         description="Shannon entropy of log-period in sliding window."))
     register(MetricSpec(
         key="ZCR", category="Acoustic", label="Zero-Crossing Rate",
         vmin=0.0, vmax=0.3, unit="",
-        cmap=_hsv_sweep_lazy(1/3, 0.0, "fd_zcr"),
+        cmap="viridis",
         待验证=True,
         description="Per-cycle zero-crossings / cycle length."))
 
@@ -288,59 +270,59 @@ def _populate_builtins():
     register(MetricSpec(
         key="OQ", category="EGG", label="Open Quotient",
         vmin=0.2, vmax=0.8, unit="",
-        cmap=_hsv_sweep_lazy(1/3, 0.0, "fd_oq"),
+        cmap="viridis",
         description="(T - GOI) / T from dEGG peaks."))
     register(MetricSpec(
         key="SPQ", category="EGG", label="Speed Quotient",
         vmin=0.3, vmax=3.0, unit="",
-        cmap=_hsv_sweep_lazy(2/3, 0.0, "fd_spq"),
+        cmap="viridis",
         description="T_opening / T_closing."))
     register(MetricSpec(
         key="CIQ", category="EGG", label="Contact Index",
         vmin=-0.6, vmax=0.6, unit="",
-        cmap=_hsv_sweep_lazy(2/3, 0.0, "fd_ciq"),
+        cmap="viridis",
         description="(T_closing - T_opening) / T_open."))
 
     # ── Singing ────────────────────────────────────────────────────────────
     register(MetricSpec(
         key="VibratoRate", category="Singing", label="Vibrato rate",
         vmin=3.0, vmax=9.0, unit="Hz",
-        cmap=_hsv_sweep_lazy(2/3, 0.0, "fd_vib_rate"),
+        cmap="viridis",
         description="Dominant F0 modulation in 4-8 Hz band."))
     register(MetricSpec(
         key="VibratoExtent", category="Singing", label="Vibrato extent",
         vmin=0.0, vmax=300.0, unit="cents",
-        cmap=_hsv_sweep_lazy(1/3, 0.0, "fd_vib_ext"),
+        cmap="viridis",
         description="Peak-to-peak F0 modulation amplitude."))
     register(MetricSpec(
         key="F1", category="Singing", label="F1 - 1st formant",
         vmin=200.0, vmax=1000.0, unit="Hz",
-        cmap=_hsv_sweep_lazy(2/3, 0.0, "fd_f1"),
+        cmap="viridis",
         description="LPC spectrum peak ≥ f1_floor."))
     register(MetricSpec(
         key="F2", category="Singing", label="F2 - 2nd formant",
         vmin=800.0, vmax=2800.0, unit="Hz",
-        cmap=_hsv_sweep_lazy(2/3, 0.0, "fd_f2"),
+        cmap="viridis",
         description="2nd LPC peak above F1."))
     register(MetricSpec(
         key="F3", category="Singing", label="F3 - 3rd formant",
         vmin=2000.0, vmax=3600.0, unit="Hz",
-        cmap=_hsv_sweep_lazy(2/3, 0.0, "fd_f3"),
+        cmap="viridis",
         description="3rd LPC peak."))
     register(MetricSpec(
         key="SingersFormant", category="Singing", label="Singer's Formant Energy",
         vmin=-25.0, vmax=-5.0, unit="dB",
-        cmap=_hsv_sweep_lazy(2/3, 0.0, "fd_sfe"),
+        cmap="viridis",
         description="2.8-3.4 kHz band energy / total (dB)."))
     register(MetricSpec(
         key="H1H2", category="Singing", label="H1-H2 (voice)",
         vmin=-10.0, vmax=20.0, unit="dB",
-        cmap=_diverging_cmap(),
+        cmap=PALETTE_DIVERGING,
         description="Voice DFT amplitude difference H1 − H2 (dB)."))
     register(MetricSpec(
         key="H1H3", category="Singing", label="H1-H3 (voice)",
         vmin=-10.0, vmax=25.0, unit="dB",
-        cmap=_diverging_cmap(),
+        cmap=PALETTE_DIVERGING,
         description="Voice DFT amplitude difference H1 − H3 (dB)."))
 
     # ── Cluster ────────────────────────────────────────────────────────────
@@ -381,67 +363,67 @@ def _populate_m1_addons():
     register(MetricSpec(
         key="RMS", category="Acoustic", label="RMS amplitude",
         vmin=0.0, vmax=0.5, unit="",
-        cmap=_hsv_sweep_lazy(1/3, 0.0, "fd_rms"),
+        cmap="viridis",
         待验证=True,
         description="Time-domain root-mean-square per frame."))
     register(MetricSpec(
         key="F0_Hz", category="Acoustic", label="F0",
         vmin=80.0, vmax=800.0, unit="Hz",
-        cmap=_hsv_sweep_lazy(2/3, 0.0, "fd_f0hz"),
+        cmap="viridis",
         待验证=True,
         description="Fundamental frequency in Hz (= 440·2^((MIDI-69)/12))."))
     register(MetricSpec(
         key="SpectralCentroid", category="Acoustic", label="Spectral Centroid",
         vmin=0.0, vmax=4000.0, unit="Hz",
-        cmap=_hsv_sweep_lazy(2/3, 0.0, "fd_centroid"),
+        cmap="viridis",
         待验证=True,
         description="Σ(f·|X|²)/Σ|X|² — spectral 'center of mass'."))
     register(MetricSpec(
         key="SpectralBandwidth", category="Acoustic", label="Spectral Bandwidth",
         vmin=0.0, vmax=3000.0, unit="Hz",
-        cmap=_hsv_sweep_lazy(2/3, 0.0, "fd_bw"),
+        cmap="viridis",
         待验证=True,
         description="Spectral spread around centroid."))
     register(MetricSpec(
         key="SpectralRolloff85", category="Acoustic", label="Spectral Rolloff (85%)",
         vmin=0.0, vmax=8000.0, unit="Hz",
-        cmap=_hsv_sweep_lazy(2/3, 0.0, "fd_rolloff"),
+        cmap="viridis",
         待验证=True,
         description="Frequency below which 85% of spectral energy lies."))
     register(MetricSpec(
         key="SpectralFlatness", category="Acoustic", label="Spectral Flatness",
         vmin=0.0, vmax=1.0, unit="",
-        cmap=_hsv_sweep_lazy(1/3, 0.0, "fd_flat"),
+        cmap="viridis",
         待验证=True,
         description="geomean / mean — 0 tonal, 1 noisy."))
     register(MetricSpec(
         key="SpectralSlope", category="Acoustic", label="Spectral Slope",
         vmin=-0.05, vmax=0.0, unit="",
-        cmap=_diverging_cmap(),
+        cmap=PALETTE_DIVERGING,
         待验证=True,
         description="Linear slope of log10(|X|) vs frequency (0-5 kHz)."))
     register(MetricSpec(
         key="SpectralSkewness", category="Acoustic", label="Spectral Skewness",
         vmin=-3.0, vmax=10.0, unit="",
-        cmap=_diverging_cmap(),
+        cmap=PALETTE_DIVERGING,
         待验证=True,
         description="Third spectral moment around centroid."))
     register(MetricSpec(
         key="SpectralKurtosis", category="Acoustic", label="Spectral Kurtosis",
         vmin=-3.0, vmax=50.0, unit="",
-        cmap=_diverging_cmap(),
+        cmap=PALETTE_DIVERGING,
         待验证=True,
         description="Fourth spectral moment − 3."))
     register(MetricSpec(
         key="AlphaRatio", category="Acoustic", label="Alpha Ratio",
         vmin=-30.0, vmax=30.0, unit="dB",
-        cmap=_diverging_cmap(),
+        cmap=PALETTE_DIVERGING,
         待验证=True,
         description="10·log10(E[50-1000Hz] / E[1-5kHz])."))
     register(MetricSpec(
         key="HammarbergIndex", category="Acoustic", label="Hammarberg Index",
         vmin=-30.0, vmax=30.0, unit="dB",
-        cmap=_diverging_cmap(),
+        cmap=PALETTE_DIVERGING,
         待验证=True,
         description="max(0-2 kHz dB) − max(2-5 kHz dB)."))
 
@@ -455,37 +437,37 @@ def _populate_m1_addons():
     register(MetricSpec(
         key="B1", category="Singing", label="B1 - 1st formant bandwidth",
         vmin=0.0, vmax=400.0, unit="Hz",
-        cmap=_hsv_sweep_lazy(2/3, 0.0, "fd_b1"),
+        cmap="viridis",
         待验证=True,
         description="LPC root bandwidth = -ln|z|·Fs/π."))
     register(MetricSpec(
         key="B2", category="Singing", label="B2 - 2nd formant bandwidth",
         vmin=0.0, vmax=400.0, unit="Hz",
-        cmap=_hsv_sweep_lazy(2/3, 0.0, "fd_b2"),
+        cmap="viridis",
         待验证=True,
         description="LPC root bandwidth for F2."))
     register(MetricSpec(
         key="B3", category="Singing", label="B3 - 3rd formant bandwidth",
         vmin=0.0, vmax=600.0, unit="Hz",
-        cmap=_hsv_sweep_lazy(2/3, 0.0, "fd_b3"),
+        cmap="viridis",
         待验证=True,
         description="LPC root bandwidth for F3."))
     register(MetricSpec(
         key="FormantDispersion", category="Singing", label="Formant Dispersion",
         vmin=0.0, vmax=2000.0, unit="Hz",
-        cmap=_hsv_sweep_lazy(2/3, 0.0, "fd_disp"),
+        cmap="viridis",
         待验证=True,
         description="(F3 − F1) / 2 — vocal-tract length proxy."))
     register(MetricSpec(
         key="SPR", category="Singing", label="Singing Power Ratio",
         vmin=-30.0, vmax=10.0, unit="dB",
-        cmap=_hsv_sweep_lazy(2/3, 0.0, "fd_spr"),
+        cmap="viridis",
         待验证=True,
         description="10·log10(E[2-4kHz] / E[0-2kHz])."))
     register(MetricSpec(
         key="VibratoJitter", category="Singing", label="Vibrato Jitter",
         vmin=0.0, vmax=20.0, unit="%",
-        cmap=_hsv_sweep_lazy(1/3, 0.0, "fd_vibj"),
+        cmap="viridis",
         待验证=True,
         description="CV (%) of vibrato cycle period in sliding window."))
 
@@ -493,7 +475,7 @@ def _populate_m1_addons():
     register(MetricSpec(
         key="GNE", category="Acoustic", label="GNE-like (simplified)",
         vmin=0.0, vmax=1.0, unit="",
-        cmap=_hsv_sweep_lazy(1/3, 0.0, "fd_gne"),
+        cmap="viridis",
         待验证=True,
         description="Simplified Glottal-to-Noise Excitation proxy."))
 
