@@ -869,10 +869,13 @@ class VoiceMapApp(_TkBase):
         self._tracks_list_frame: tk.Frame | None = None
 
     # ── multi-file Tracks Panel: row factory + state transitions ────────
-    # Tracks Panel viewport: caps visible height to ~5 rows × 28 px = 140 px.
+    # Tracks Panel viewport: caps visible height to ~4 rows × 28 px = 112 px.
     # Beyond that we scroll instead of growing the panel (per user spec:
     # "更多文件装不下了，可以滚动查看，不要动整个窗口的大小").
-    TRACKS_VIEWPORT_H = 145
+    # Was 145 px (5 rows). Design critique flagged that the panel was
+    # eating canvas vertical even when fewer rows were shown. 110 px
+    # buys 35 extra px for the heatmap; 5+ tracks just need 1 scroll tick.
+    TRACKS_VIEWPORT_H = 110
 
     def _tracks_render(self):
         """Render the Tracks Panel from self._tracks. Switches between
