@@ -593,7 +593,7 @@ class HRFCalculator(MetricCalculator):
 
 
 # ───────────────────────────────────────────────────────────────────────────
-# M1 ADD-ON: spectral moments + raw scalars (待验证).
+# Extended: spectral moments + raw scalars (待验证).
 # Frame-based STFT on the voice channel; everything assigned per cycle.
 # Centroid / Bandwidth / Rolloff / Flatness / Slope / Skewness / Kurtosis
 # all share one rfft pass to keep cost low.
@@ -724,7 +724,7 @@ class SpectralMomentsCalculator(MetricCalculator):
 
 
 # ───────────────────────────────────────────────────────────────────────────
-# M1 ADD-ON: F0 in Hz (raw frequency, complement to MIDI).
+# F0 in Hz (raw frequency, complement to MIDI).
 # Reuses the same NSDF result that ClarityCalculator produced; we just
 # convert MIDI back to Hz. This calculator is a no-op that takes the
 # pre-computed midi array from the analyzer.
@@ -750,7 +750,7 @@ class F0HzCalculator(MetricCalculator):
 
 
 # ───────────────────────────────────────────────────────────────────────────
-# M1 ADD-ON: MFCC 1-13 (待验证).
+# MFCC 1-13 (待验证).
 # Standard 13-coefficient mel-frequency cepstrum, computed per frame
 # (25 ms / 10 ms hop) on the voice channel. Each cycle is assigned the
 # MFCC of its enclosing frame. Self-contained — no librosa dependency.
@@ -1164,10 +1164,9 @@ class FormantCalculator(MetricCalculator):
             if len(pk) == 0:
                 continue
             pf = freqs_band[pk]
-            # Drop peaks below the F1 floor — these are subharmonic / low-
-            # frequency LPC artifacts that would hijack the F1 slot and
-            # pull the whole formant vector down (ours diverged from Praat
-            # by ~25% before this gate was added).
+            # 丢弃 F1 floor 以下的峰 —— 这些是低频 / 次谐波 LPC 伪迹，
+            # 不剔除会顶占 F1 槽位、把整条共振峰向量整体拉低（实测
+            # 跟 Praat 相差 ~25%）。
             pf = pf[pf >= self.f1_floor]
             # Already ascending because freqs_band is monotonic
             if len(pf) >= 1: f1[i] = pf[0]
@@ -1209,11 +1208,11 @@ class FormantCalculator(MetricCalculator):
 
 
 # ───────────────────────────────────────────────────────────────────────────
-# M1 ADD-ON: Formant bandwidths B1/B2/B3 + Singing Power Ratio + simplified GNE.
+# Formant bandwidths B1/B2/B3 + Singing Power Ratio + GNE (待验证).
 # Independent LPC root-finding pass — separate from FormantCalculator's
 # spectrum-peak F1/F2/F3 so the two coexist (B1/B2/B3 here may not align
-# perfectly with F1/F2/F3 over there since they come from different
-# tracker designs; documented as 待验证).
+# perfectly with F1/F2/F3 from FormantCalculator since they come from
+# different tracker designs).
 # ───────────────────────────────────────────────────────────────────────────
 class FormantExtrasCalculator(MetricCalculator):
     """B1/B2/B3 from LPC roots + Formant Dispersion + Singing Power Ratio + GNE-like."""
@@ -1391,7 +1390,7 @@ class FormantExtrasCalculator(MetricCalculator):
 
 
 # ───────────────────────────────────────────────────────────────────────────
-# M1 ADD-ON: Whole-recording integrative metrics — MPT, Voicing Ratio, DUV.
+# Whole-recording integrative metrics — MPT, Voicing Ratio, DUV.
 # These produce one scalar per recording, which we then broadcast to every
 # (MIDI, dB) cell so the metric still appears in the VRP grid (uniform
 # colour). For per-VRP-cell analytics they're less useful; for whole-
@@ -1443,7 +1442,7 @@ class IntegrativeMetricsCalculator(MetricCalculator):
 
 
 # ───────────────────────────────────────────────────────────────────────────
-# M1 ADD-ON: Vibrato Jitter — stability of the vibrato cycle period.
+# Vibrato Jitter — stability of the vibrato cycle period.
 # Computed only on cycles where VibratoCalculator detected a non-zero rate;
 # measures how regular the vibrato is. High value = irregular / wobbly.
 # ───────────────────────────────────────────────────────────────────────────

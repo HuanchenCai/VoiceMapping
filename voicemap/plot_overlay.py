@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Plot overlay primitives (M2 — drawing enhancements).
+Plot overlay primitives.
 
 Things this module provides, all platform-aware where it matters:
 

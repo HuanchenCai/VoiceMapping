@@ -261,11 +261,11 @@ STRINGS: dict[str, dict[str, str]] = {
         "about.copyright":      "版权 / Copyright",
         "about.close":          "关闭",
 
-        # ── inspector hover pill (was hardcoded "MIDI x · SPL y dB") ──
+        # ── inspector hover pill ──
         "inspector.coords":         "音高 {mi} · 声压 {si} dB",
         "inspector.coords_no_data": "音高 {mi} · 声压 {si} dB · 无数据",
 
-        # ── severity labels (was hardcoded English good/normal/watch/abnormal) ──
+        # ── severity labels ──
         "severity.good":            "优",
         "severity.normal":          "正常",
         "severity.watch":           "注意",
@@ -351,8 +351,8 @@ STRINGS: dict[str, dict[str, str]] = {
         # with the full physical / clinical context AND the math formula
         # (so analysts can verify they're computing what they think).
         # Keys missing here fall back to `metric.desc.X` (short
-        # description). User instruction: descriptions stay formula-
-        # free, tooltips include formulas.
+        # description). Descriptions stay formula-free; tooltips include
+        # the formulas.
         "metric.tooltip.Clarity":           "音高检测的可信度，由 McLeod-Wyvill NSDF 算法给出：NSDF(τ) = 2·Σ x[i]·x[i+τ] / Σ (x[i]² + x[i+τ]²)，Clarity = max NSDF。值高代表信号干净、谐波清晰；低值意味着噪声或非浊音段。VoiceMap 默认丢弃 Clarity < 0.96 的网格。",
         "metric.tooltip.CPP":               "倒谱峰显著度。把对数功率谱 log|X(f)| 再做一次 FFT 得到倒谱 c(τ)，CPP = 倒谱在 F0 周期处的峰值减去线性回归基线（dB）。峰越高代表谐波结构越规则、嗓音越浊。健康嗓音典型 CPP > 14 dB，气声/嘶哑会显著降低。",
         "metric.tooltip.CPPS":              "CPP 的平滑版本（Hillenbrand 1996）：在 quefrency 与时间两个维度上各做一次低通平滑后再求峰。CPPS = SmoothPeak(c(τ)) − Baseline。比 CPP 对短时噪声更稳，临床嗓音报告主用此指标。",
@@ -380,7 +380,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "metric.tooltip.HammarbergIndex":   "Hammarberg 指数（Hammarberg 1980）：H = max|X(f)|_{0–2kHz} − max|X(f)|_{2–5kHz} (dB)。两个频段最大值之差。值高 = 声音偏闷（抑郁倾向相关）；值低 = 紧张/焦虑/激发状态。",
         "metric.tooltip.MPT":               "最长持续发声时间（秒）。被试深吸一口气持续发 /a/，能保持的最长时间。MPT = max{ Σ_{voiced} Δt }，连续浊音段的最长持续。成年人正常 > 15 秒，专业歌手 30–40 秒，呼吸功能受损 < 10 秒。",
         "metric.tooltip.VoicingRatio":      "浊音段占比：VoicingRatio = N_voiced / N_total，浊音帧数与总帧数之比。高比例说明被试在持续发声、停顿少；低比例 = 断断续续，辅音多/气声多/喉部疲劳。和 DUV (1 − VoicingRatio) 互补。",
-        # ── batch 2: tooltips for the remaining 40 metrics ──
+        # ── tooltips for the remaining 40 metrics ──
         "metric.tooltip.Total":             "本网格内分析的发声周期数：Total = count(cycles ∈ cell)。反映采样密度。健康嗓音 VRP 中常见上千周期/格；少于 5 周期的格通常排除（噪声驱动）。",
         "metric.tooltip.SpecBal":           "频谱平衡：SpecBal = 10·log10(E[<1500 Hz] / E[≥1500 Hz]) (dB)。1.5 kHz 以下能量与以上能量的比值。值高 = 低频主导（声音偏暗），值低 = 高频主导（声音偏亮）。临床正常嗓音 ±10 dB。",
         "metric.tooltip.Crest":             "波形峰值因子：Crest = max|x[n]| / RMS(x)，时域峰值与有效值之比。值越大代表瞬态成分越强、动态范围越宽。典型语音 1.4-2.0；纯正弦 = √2 ≈ 1.41；脉冲信号 > 3。",
@@ -759,7 +759,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "metric.tooltip.HammarbergIndex":     "Hammarberg index (Hammarberg 1980): H = max|X(f)|_{0–2 kHz} − max|X(f)|_{2–5 kHz} (dB). Difference of peak energies in two bands. High = muffled (depression-correlated); low = tense / anxious / aroused state.",
         "metric.tooltip.MPT":                 "Maximum Phonation Time (seconds): MPT = max{ Σ_{voiced} Δt }, the longest contiguous voiced run. Subject takes a deep breath and sustains /a/ as long as possible. Healthy adults > 15 s, professional singers 30–40 s, impaired respiratory function < 10 s.",
         "metric.tooltip.VoicingRatio":        "Voicing fraction: VoicingRatio = N_voiced / N_total — voiced frames over total frames. High = sustained phonation, few pauses; low = stop-and-go, many consonants / breathy phonation / vocal fatigue. Complementary to DUV (1 − VoicingRatio).",
-        # ── batch 2: tooltips for the remaining 40 metrics ──
+        # ── tooltips for the remaining 40 metrics ──
         "metric.tooltip.Total":              "Cycles analysed in this cell: Total = count(cycles ∈ cell). Reflects sampling density. Healthy VRPs commonly hit 1000+ cycles per cell; cells with < 5 cycles are usually excluded (noise-driven).",
         "metric.tooltip.SpecBal":            "Spectral balance: SpecBal = 10·log10(E[<1500 Hz] / E[≥1500 Hz]) (dB). Energy below 1.5 kHz vs above. High = low-freq dominated (dark voice); low = high-freq dominated (bright voice). ±10 dB is clinically normal.",
         "metric.tooltip.Crest":              "Waveform crest factor: Crest = max|x[n]| / RMS(x), peak vs RMS in the time domain. Higher = more impulsive transients, wider dynamic range. Typical speech 1.4-2.0; pure sine = √2 ≈ 1.41; impulsive signal > 3.",

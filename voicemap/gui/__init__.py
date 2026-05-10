@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """VoiceMap GUI subpackage.
 
-Re-exports the entry points used by ``voicemap.cli`` so existing callers
-``from voicemap.gui import main`` keep working transparently across the
-A0-2 split.
+Re-exports the entry points used by ``voicemap.cli`` so callers can
+``from voicemap.gui import main`` without depending on the internal
+module layout.
 """
 
 from voicemap.gui.app import VoiceMapApp, main

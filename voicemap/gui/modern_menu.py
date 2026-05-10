@@ -175,10 +175,9 @@ class ModernPopup(tk.Toplevel):
     # Layout dimensions (8 px grid). Same for all popups.
     ROW_PADX  = 14
     ROW_PADY  = 6
-    SEP_PAD   = 0   # was 4 — user reported the 4 px PANEL_HI gap above
-                    # and below the separator looked like "黑条纹 在每个
-                    # 格子的正中间". Zero pad makes the sep a 1 px line
-                    # flush against the row, no extra dead space.
+    SEP_PAD   = 0   # zero pad keeps the separator a 1 px line flush
+                    # against the adjacent rows, with no dead space
+                    # above or below.
 
     def __init__(self, parent: tk.Misc):
         super().__init__(parent)
@@ -230,14 +229,11 @@ class ModernPopup(tk.Toplevel):
         self._items.append({"type": "command", "row": row})
 
     def add_separator(self) -> None:
-        # No-op. Earlier versions drew a 1 px BORDER hairline + 4 px
-        # PANEL_HI surround that the user repeatedly judged a "黑横线
-        # / design issue". Even after dropping to a 1 px PANEL_HI
-        # frame (bg = row bg, supposedly invisible), users still saw
-        # a faint band — likely subpixel rounding on the 1 px Frame's
-        # geometry. Truly removing the widget removes the artifact.
-        # The call stays here so existing code can keep using it as
-        # a semantic anchor for future grouping work.
+        # Intentionally renders nothing: any thin Frame at 1 px
+        # height suffers subpixel rounding on the popup's geometry
+        # and shows as a faint band against PANEL_HI. The call is
+        # kept as a semantic anchor for grouping items, but the
+        # actual visual separation comes from the row padding alone.
         self._items.append({"type": "separator", "row": None})
 
     def add_cascade(self, label: str,
@@ -444,7 +440,6 @@ class ModernPopup(tk.Toplevel):
                 pass
             _apply_rounded(self, _ROUND_RADIUS)
             # Take keyboard focus so Up/Down/Enter route to our handlers.
-            # a11y audit O-2.
             try:
                 self.focus_set()
             except tk.TclError:
@@ -478,9 +473,9 @@ class ModernPopup(tk.Toplevel):
             idx = min(targets, key=lambda i: abs(i - idx))
         prev_idx = self._kb_index
         self._kb_index = idx
-        # Only un-highlight the previously focused row — was iterating
-        # over every item firing <Leave> on each (cheap individually,
-        # but O(n) for a no-op on n-1 rows).
+        # Un-highlight only the previously focused row. Firing <Leave>
+        # on every item would be O(n) of no-ops; targeting just the
+        # outgoing row keeps the highlight transition O(1).
         if 0 <= prev_idx < len(self._items) and prev_idx != idx:
             prev_row = self._items[prev_idx].get("row")
             if prev_row is not None:

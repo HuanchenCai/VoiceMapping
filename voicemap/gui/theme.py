@@ -5,13 +5,11 @@ Centralised here so every other ``voicemap.gui.*`` module imports its
 visual constants from one place. Changing a color here propagates
 everywhere; **never hard-code a #xxxxxx in widget code**.
 
-A0-3 swap: palette is now option C (Studio, dark slate + amber) per
-``docs/UI_DESIGN.md`` §1. Pre-A0-3 it was option A (dark cyan). The
-old constant *names* are preserved (BG / PANEL / ACCENT / …) so
-existing widget code using them keeps working — only the *values*
-changed. New code may also use the more descriptive aliases (BG_APP /
-BG_PANEL / BG_ELEVATED / TEXT_SEC / TEXT_MUTED / ACCENT_HOVER) which
-match the spec verbatim.
+Palette follows option C (Studio, dark slate + amber) from
+``docs/UI_DESIGN.md`` §1. Both the short legacy names (BG / PANEL /
+ACCENT / …) and the more descriptive aliases (BG_APP / BG_PANEL /
+BG_ELEVATED / TEXT_SEC / TEXT_MUTED / ACCENT_HOVER) refer to the same
+values; widget code may use either spelling.
 """
 
 # ── Colors (option C — Studio, dark + amber) ────────────────────────────
@@ -33,9 +31,8 @@ BG_PANEL      = PANEL
 BG_ELEVATED   = PANEL_HI
 BORDER_STRONG = "#525252"
 TEXT_SEC      = MUTED
-TEXT_MUTED    = "#8a8a8a"     # disabled / placeholder — was #737373
-                              # (3.67:1 against PANEL, fails WCAG AA);
-                              # 8a8a8a measures 4.55:1 → AA pass.
+TEXT_MUTED    = "#8a8a8a"     # disabled / placeholder; 4.55:1 against
+                              # PANEL — passes WCAG AA contrast.
 TEXT_INVERSE  = "#0a0a0a"     # text on accent
 ACCENT_HOVER  = ACCENT_HI
 ACCENT_PRESS  = "#d97706"     # amber-600
@@ -68,7 +65,7 @@ READOUT_BG       = "#fef3c7"     # inline readout fill — pale-amber tint of AC
 # Latin and Han, and avoids the "some chars look bold, others don't"
 # fallback artefact that Segoe UI exhibits when mixing Chinese.
 #
-# A0-4 typography scale (consistent across the app):
+# Typography scale (consistent across the app):
 #   Caption  9pt   tiny / unit hints
 #   Small   10pt   row metadata, status bar
 #   Body    11pt   default UI body, buttons
@@ -84,18 +81,13 @@ FONT_UI      = ("Microsoft YaHei UI", 11)
 FONT_UI_B    = ("Microsoft YaHei UI", 11, "bold")
 FONT_SUB     = ("Microsoft YaHei UI", 12)
 FONT_DROP    = ("Microsoft YaHei UI", 13, "bold")
-# FONT_H2 (15 pt bold) was reserved for section sub-headings but had
-# zero callers across the entire codebase. Dropped 2026-05-10 per
-# design critique. If a sub-heading scale is needed later, prefer
-# FONT_UI_B (11 pt bold) for tighter vertical density.
 FONT_BTN_INFO = ("Microsoft YaHei UI", 14)            # ⓘ glyph next to Inspector metric name
 FONT_INSPECTOR_NAME = ("Microsoft YaHei UI", 19, "bold")  # Inspector metric title (ACCENT, no overflow at 420 px)
 FONT_ABOUT_TITLE = ("Microsoft YaHei UI", 16, "bold")     # AboutDialog 中文全称标题
 FONT_TOOLTIP = ("Microsoft YaHei UI", 10)                 # HoverTooltip body
-# Header app title — was 18pt; UI_DESIGN.md spec calls 13pt, but at
-# Windows 100% DPI 13 reads tiny next to the canvas. 14pt bold lands
-# close to spec while keeping the title legible. Visual hierarchy
-# stays correct (Inspector metric name 19 > header 14 > body 11).
+# Header app title — 14pt bold keeps the title legible at Windows
+# 100% DPI while preserving visual hierarchy (Inspector metric name
+# 19 > header 14 > body 11).
 FONT_TITLE   = ("Microsoft YaHei UI", 14, "bold")
 FONT_DISPLAY = ("Microsoft YaHei UI", 22, "bold")
 FONT_MONO    = ("Consolas", 10)
@@ -113,7 +105,6 @@ _METRIC_SECTIONS: list = [
         "ShimmerAPQ3", "ShimmerAPQ5", "ShimmerAPQ11",
         "HNR", "NHR",
         "PPE", "ZCR",
-        # M1 add-on
         "RMS", "F0_Hz",
         "SpectralCentroid", "SpectralBandwidth", "SpectralRolloff85",
         "SpectralFlatness", "SpectralSlope",

@@ -27,7 +27,7 @@ from voicemap.metrics import (
     OpenQuotientCalculator,
     # Add-on voice quality metrics (待验证)
     NHRCalculator, CPPSCalculator, PPECalculator, ZCRCalculator,
-    # M1 add-on: spectral / MFCC / formant extras / integrative / vibrato jitter
+    # Extended metrics: spectral / MFCC / formant extras / integrative / vibrato jitter
     SpectralMomentsCalculator, F0HzCalculator, MFCCCalculator,
     FormantExtrasCalculator, IntegrativeMetricsCalculator,
     VibratoJitterCalculator,
@@ -168,7 +168,7 @@ class VoiceMapAnalyzer:
         self.cpps_calculator     = CPPSCalculator(self.config)
         self.ppe_calculator      = PPECalculator(self.config)
         self.zcr_calculator      = ZCRCalculator(self.config)
-        # M1 add-on (待验证): spectral moments, MFCC, formant extras, integrative, vibrato jitter.
+        # Extended metrics (待验证): spectral moments, MFCC, formant extras, integrative, vibrato jitter.
         self.spec_moments_calculator   = SpectralMomentsCalculator(self.config)
         self.f0hz_calculator           = F0HzCalculator(self.config)
         self.mfcc_calculator           = MFCCCalculator(self.config)
@@ -474,9 +474,9 @@ class VoiceMapAnalyzer:
         entropy_values                       = self.entropy_calculator.calculate(egg_signal, cycle_triggers, dft=_dft)
         hrf_values                           = self.hrf_calculator.calculate(egg_signal, cycle_triggers, dft=_dft)
 
-        # ── Phase A complete — fire partial_cb so the GUI can render a
-        # first-pass voice map with these 11 quick metrics while we
-        # continue with the slow stuff (cluster K-means, formants, MFCC).
+        # ── First pass complete — fire partial_cb so the GUI can render
+        # a voice map with these 11 fast metrics while the slow
+        # computations (K-means clustering, formants, MFCC) continue.
         if partial_cb is not None:
             partial_cb({
                 'midi':     midi_values,
@@ -570,7 +570,7 @@ class VoiceMapAnalyzer:
             'cpps':          cpps_values,
             'ppe':           ppe_values,
             'zcr':           zcr_values,
-            # M1 add-on
+            # Extended metrics
             'rms':           spec_moments['rms'],
             'f0_hz':         f0hz_values,
             'spec_centroid':  spec_moments['spec_centroid'],
@@ -673,9 +673,9 @@ class VoiceMapAnalyzer:
                         write_disk: bool = True):
         """Build per-cell VRP DataFrame, optionally write CSV + PNGs.
 
-        Real implementation lives in :mod:`voicemap.csv_writer` (extracted
-        in A0-2 — was 253 lines on this class). This method is now a
-        thin shim so the public API and call sites stay the same.
+        The real implementation lives in :mod:`voicemap.csv_writer`;
+        this method is a thin shim that preserves the public API and
+        call sites.
         """
         from voicemap.csv_writer import write_vrp
         return write_vrp(self, metrics,

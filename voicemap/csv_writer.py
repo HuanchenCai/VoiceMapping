@@ -100,7 +100,7 @@ def write_vrp(analyzer: "VoiceMapAnalyzer",
         'CPPS':          _pad(metrics.get('cpps'),          base_n),
         'PPE':           _pad(metrics.get('ppe'),           base_n),
         'ZCR':           _pad(metrics.get('zcr'),           base_n),
-        # M1 add-on (待验证)
+        # 频谱形态 / 声压 / Vibrato / GNE / 共振峰带宽（待验证）
         'RMS':                _pad(metrics.get('rms'),               base_n),
         'F0_Hz':              _pad(metrics.get('f0_hz'),             base_n),
         'SpectralCentroid':   _pad(metrics.get('spec_centroid'),     base_n),
@@ -158,7 +158,7 @@ def write_vrp(analyzer: "VoiceMapAnalyzer",
         'ShimmerAPQ3': 'mean', 'ShimmerAPQ5': 'mean', 'ShimmerAPQ11': 'mean',
         'HNR': 'mean', 'NHR': 'mean',
         'CPPS': 'mean', 'PPE': 'mean', 'ZCR': 'mean',
-        # M1 add-on
+        # 扩展指标
         'RMS': 'mean', 'F0_Hz': 'mean',
         'SpectralCentroid': 'mean', 'SpectralBandwidth': 'mean',
         'SpectralRolloff85': 'mean', 'SpectralFlatness': 'mean',
@@ -222,7 +222,7 @@ def write_vrp(analyzer: "VoiceMapAnalyzer",
         'HNR',
         # Add-on voice-quality (待验证)
         'NHR', 'CPPS', 'PPE', 'ZCR',
-        # M1 add-on (待验证)
+        # 频谱形态 / 声压 / Vibrato / GNE / 共振峰带宽（待验证）
         'RMS', 'F0_Hz',
         'SpectralCentroid', 'SpectralBandwidth', 'SpectralRolloff85',
         'SpectralFlatness', 'SpectralSlope',
