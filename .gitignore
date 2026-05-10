@@ -138,6 +138,9 @@ custom_results/
 *.jpg
 *.pdf
 
+# 软著申请生成物（每次跑脚本重新生成，不入库）
+软著材料/源代码_*.txt
+
 # IDE
 .vscode/
 .idea/
