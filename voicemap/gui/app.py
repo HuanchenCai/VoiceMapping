@@ -377,9 +377,11 @@ class VoiceMapApp(_TkBase):
         # last horizontal strip; everything else fills above it.
         self._build_status_bar(self)
 
-        # Header (full-width PANEL strip). Already integrated with the
-        # menubar above via matching bg.
-        self._build_header(self)
+        # Header strip removed — the title row used to live here, but
+        # the window title bar already shows it; with the title gone the
+        # row was just an empty PANEL band holding the status pill.
+        # Pill moved into the tracks-panel header row (next to "开始分析"
+        # so user sees ready/分析中… right where they trigger analysis).
         self._build_tracks_panel(self)
         self._build_metric_bar(self)
 
@@ -449,13 +451,13 @@ class VoiceMapApp(_TkBase):
         self._menubar_sep = None
 
         bar = ModernMenubar(self, bg=PANEL, height=32)
-        # On first build the header frame doesn't exist yet → just pack
+        # On first build the tracks bar doesn't exist yet → just pack
         # at top. On rebuild (language switch) we MUST anchor before the
-        # FIRST top-side widget — that's the header. If we anchor before
-        # `_outer` (the canvas/inspector frame) instead, the new bar
-        # lands between the metric bar and the canvas → user sees
+        # FIRST top-side widget — that's the tracks bar. If we anchor
+        # before `_outer` (the canvas/inspector frame) instead, the new
+        # bar lands between the metric bar and the canvas → user sees
         # "menu bar fell to the bottom" (reported regression).
-        anchor = getattr(self, "_header_frame", None) \
+        anchor = getattr(self, "_tracks_bar_frame", None) \
                  or getattr(self, "_outer", None)
         if anchor is not None and anchor.winfo_exists():
             bar.pack(side="top", fill="x", before=anchor)
@@ -539,7 +541,6 @@ class VoiceMapApp(_TkBase):
             except tk.TclError:
                 pass
 
-        _safe_text("_header_title",   "app.title")
         _safe_text("_tracks_label",   "tracks.label")
         _safe_text("_start_btn",      "tracks.start")
         # Inspector value pill header: "本次值" / "Current value" — was
@@ -775,32 +776,6 @@ class VoiceMapApp(_TkBase):
         """显示关于对话框（版本/作者/版权）。"""
         AboutDialog(self)
 
-    def _build_header(self, parent):
-        # Header strip — was "title + status pill"; user removed the
-        # title (window title bar already shows it, redundant). Strip
-        # now holds ONLY the analysis-status pill (●  就绪 / 分析中… /
-        # 完成 · N 点), right-aligned and slim. Kept as a separate
-        # tk.Frame (`_header_frame`) so the menubar rebuild path can
-        # still `pack(... before=self._header_frame)` and stay at the
-        # very top after a language switch.
-        # _header_title field kept = None so any remaining _safe_text
-        # reference no-ops cleanly.
-        head = tk.Frame(parent, bg=PANEL)
-        head.pack(side="top", fill="x")
-        self._header_frame = head
-        head_inner = tk.Frame(head, bg=PANEL)
-        head_inner.pack(fill="x", padx=16, pady=(4, 4))
-        self._header_title = None
-        self.status_dot = tk.Label(head_inner, text="●", bg=PANEL, fg=MUTED,
-                                    font=("Segoe UI", 12))
-        self.status_dot.pack(side="right", padx=(0, 4))
-        self.status_lbl = tk.Label(head_inner, text=tr("status.ready"),
-                                    bg=PANEL, fg=MUTED, font=FONT_SUB)
-        self.status_lbl.pack(side="right")
-        # 默认 status 文本是固定 key；_set_status 时会换成具体 key。
-        self._status_key = "status.ready"
-        self._status_kwargs: dict = {}
-
     def _build_tracks_panel(self, parent):
         """Multi-file Tracks Panel (option-C spec).
 
@@ -813,6 +788,10 @@ class VoiceMapApp(_TkBase):
         files are loaded than fit on screen."""
         bar = tk.Frame(parent, bg=PANEL)
         bar.pack(side="top", fill="x")
+        # Menubar rebuild (language switch) re-packs itself anchored
+        # before this frame to stay at the very top — was anchored to
+        # the now-removed _header_frame.
+        self._tracks_bar_frame = bar
 
         inner = tk.Frame(bar, bg=PANEL)
         inner.pack(fill="x", padx=16, pady=(6, 6))   # was 10 — slim chrome
@@ -836,6 +815,20 @@ class VoiceMapApp(_TkBase):
             command=self._on_start_btn_click)
         self._start_btn.pack(side="right")
         self._start_btn.state(["disabled"])  # nothing queued yet
+        # Status pill — used to live in its own header strip. Moved here
+        # so the row reads "录音轨 ……… ● 就绪  [开始分析]" and the user
+        # sees the analysis state right where they trigger it.
+        # pack(side="right") order matters: start_btn first → rightmost,
+        # then status_lbl, then status_dot, so visual order = dot pill btn.
+        self.status_lbl = tk.Label(header_row, text=tr("status.ready"),
+                                    bg=PANEL, fg=MUTED, font=FONT_SUB)
+        self.status_lbl.pack(side="right", padx=(0, 12))
+        self.status_dot = tk.Label(header_row, text="●", bg=PANEL, fg=MUTED,
+                                    font=("Segoe UI", 12))
+        self.status_dot.pack(side="right", padx=(0, 4))
+        # Default status key — _set_status swaps to specific keys later.
+        self._status_key = "status.ready"
+        self._status_kwargs: dict = {}
 
         # Container that holds either the empty-state drop zone or
         # the rows-of-tracks scroll area. We swap children on first
