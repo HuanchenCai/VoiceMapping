@@ -67,8 +67,13 @@ def build_concat() -> list:
 
 
 def write_paginated(lines, dst: Path, take_first: int | None = None,
-                    take_last: int | None = None):
-    """Slice + paginate + page-header decoration."""
+                    take_last: int | None = None,
+                    mark_end: bool = False):
+    """Slice + paginate + page-header decoration.
+
+    ``mark_end=True`` 在最后一页末尾追加 ``END`` 标记。中国版权保护
+    中心要求源代码清单结尾人工注明 END，作为完整性声明。
+    """
     if take_first is not None:
         sliced = lines[:take_first]
     elif take_last is not None:
@@ -89,6 +94,10 @@ def write_paginated(lines, dst: Path, take_first: int | None = None,
         rendered.append(f"——— 第 {page_no + 1} 页 ———")
         rendered.extend(chunk)
 
+    if mark_end:
+        rendered.append("")
+        rendered.append("END")
+
     dst.write_text("\n".join(rendered) + "\n", encoding="utf-8")
     print(f"  wrote {dst.name}: {len(rendered)} lines")
 
@@ -98,11 +107,13 @@ def main():
     all_lines = build_concat()
     print(f"  total: {len(all_lines)} lines from {len(ORDER)} files")
 
-    write_paginated(all_lines, OUT_DIR / "源代码_全集.txt")
+    write_paginated(all_lines, OUT_DIR / "源代码_全集.txt",
+                    mark_end=True)
     write_paginated(all_lines, OUT_DIR / "源代码_前30页.txt",
                     take_first=LINES_PER_PAGE * PAGES)
     write_paginated(all_lines, OUT_DIR / "源代码_后30页.txt",
-                    take_last=LINES_PER_PAGE * PAGES)
+                    take_last=LINES_PER_PAGE * PAGES,
+                    mark_end=True)
 
 
 if __name__ == "__main__":
