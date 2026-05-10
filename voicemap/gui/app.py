@@ -36,7 +36,7 @@ from voicemap.logger import setup_logger
 from voicemap.plotter import draw_vrp_on_ax
 from voicemap.metrics_registry import get as get_spec
 
-# Theme tokens, custom widgets, dialogs — extracted to gui/ subpackage in A0-2.
+# Theme tokens, custom widgets, and dialogs live in the gui/ subpackage.
 from voicemap.gui.theme import (
     BG, PANEL, PANEL_HI, BORDER, TEXT, MUTED, ACCENT, ACCENT_HI,
     OK, WARN, ERR,
@@ -117,13 +117,12 @@ class VoiceMapApp(_TkBase):
         #     pinned value pill ≈ 176 px
         #     actions + sep + paddings ≈ 200 px
         #   inspector total: ≈ 800 px → window ≥ 1180 px
-        # 1500×1180 gives ~30 px of breathing room. Fits most modern
-        # monitors (1440p+); on 1080p the user gets auto-hide taskbar
-        # or has to drag the window taller. Per user spec: "标准的尺寸,
-        # 可以大一点, 但是任何信息都不能被裁掉".
-        # Min 1280×900 covers the realistic ≤4-band metrics plus
-        # pinned value pill + actions; rare 5-band overflow at min size
-        # is the failure floor we accept.
+        # 1600×1180 gives ~30 px of breathing room. Fits most modern
+        # monitors (1440p+); on 1080p the auto-hide taskbar (or a
+        # taller window) keeps all information visible.
+        # Min 1380×900 covers the realistic ≤4-band metrics plus the
+        # pinned value pill and actions; rare 5-band overflow at min
+        # size is the accepted failure floor.
         self.geometry("1600x1180")
         self.minsize(1380, 900)
         self.configure(bg=BG)
@@ -377,19 +376,17 @@ class VoiceMapApp(_TkBase):
         # last horizontal strip; everything else fills above it.
         self._build_status_bar(self)
 
-        # Header strip removed — the title row used to live here, but
-        # the window title bar already shows it; with the title gone the
-        # row was just an empty PANEL band holding the status pill.
-        # Pill moved into the tracks-panel header row (next to "开始分析"
-        # so user sees ready/分析中… right where they trigger analysis).
+        # The status pill lives in the tracks-panel header row (next
+        # to "开始分析" so the user sees ready/分析中… right where they
+        # trigger analysis); the OS title bar already shows the app
+        # title, so no separate header strip is needed.
         self._build_tracks_panel(self)
         self._build_metric_bar(self)
 
         # Main split: canvas (left, expand) + inspector (right, 420 fixed).
-        # Inspector was 360 (per docs/UI_DESIGN.md) but ZH labels in
-        # clinical bands ("开商正常 (0.4-0.7, 模态)" etc.) overflow at 360.
-        # 420 gives ~85 px more for the band-label column without
-        # squeezing the heatmap (canvas still > 1100 px wide).
+        # The 420 px Inspector width accommodates ZH clinical-band
+        # labels such as "开商正常 (0.4-0.7, 模态)" without squeezing
+        # the heatmap (the canvas still measures > 1100 px wide).
         # padx=16 matches the rest of the chrome's left/right margin.
         # pady at top is 8 px — enough breath after metric bar without
         # surfacing a BG stripe.
@@ -413,24 +410,24 @@ class VoiceMapApp(_TkBase):
                           padx=(0, 8))
         self._build_canvas_area(canvas_frame)
 
-        # Removed widgets — left panel + drop zone redesigned. Set to
-        # None so old call sites (.state(...) etc.) can be guarded.
+        # Optional widget refs kept as None so guarded call sites
+        # (.state(...) etc.) silently no-op when the widget is absent.
         self.open_csv_btn   = None
         self.open_plots_btn = None
         self.excel_btn      = None
         self.report_btn     = None
         self.progress       = None
-        # left/right kept as alias to maintain compatibility with any
-        # external code using them (none currently).
+        # left/right aliases exposed for external callers that pre-date
+        # the current layout (none currently in-tree).
         self.left = None
         self.right = canvas_frame
 
     def _build_menubar(self):
-        """5-段顶部菜单栏：文件 / 编辑 / 参数 / 视图 / 帮助。
+        """4-段顶部菜单栏：文件 / 编辑 / 视图 / 帮助。
 
-        A0-3 改为自画 ModernMenubar + ModernPopup（``voicemap.gui.modern_menu``）
-        以躲开 tk.Menu 在 Win11 上的老 Win32 USER 菜单白边（CLAUDE.md §8.4.1）。
-        A0-4 改为读 ``tr(...)`` —— 切语言时整个 menubar 重建。
+        采用自画 ModernMenubar + ModernPopup（``voicemap.gui.modern_menu``）
+        绕开 tk.Menu 在 Win11 上的老 Win32 USER 菜单白边（CLAUDE.md §8.4.1）。
+        所有 label 都走 ``tr(...)``：切语言时整个 menubar 重建。
 
         每个顶级菜单的 popup 是 lambda 工厂，每次点开重建，所以 popup
         item 的 label 在每次弹出时都按当前语言实时取。
@@ -453,10 +450,10 @@ class VoiceMapApp(_TkBase):
         bar = ModernMenubar(self, bg=PANEL, height=32)
         # On first build the tracks bar doesn't exist yet → just pack
         # at top. On rebuild (language switch) we MUST anchor before the
-        # FIRST top-side widget — that's the tracks bar. If we anchor
-        # before `_outer` (the canvas/inspector frame) instead, the new
-        # bar lands between the metric bar and the canvas → user sees
-        # "menu bar fell to the bottom" (reported regression).
+        # first top-side widget (the tracks bar). Anchoring before
+        # ``_outer`` (the canvas/inspector frame) would land the new
+        # bar between the metric bar and the canvas instead of at the
+        # window top.
         anchor = getattr(self, "_tracks_bar_frame", None) \
                  or getattr(self, "_outer", None)
         if anchor is not None and anchor.winfo_exists():
@@ -464,19 +461,17 @@ class VoiceMapApp(_TkBase):
         else:
             bar.pack(side="top", fill="x")
         # No 1 px BORDER divider — the menubar and the header both use
-        # bg=PANEL, so a divider line shows as a stray dark stripe
-        # against the otherwise continuous PANEL strip. User feedback:
-        # "菜单栏还是有黑色横条". The visual hierarchy already reads
-        # menubar → title row from the typography alone (button labels
-        # vs FONT_TITLE), no separator needed.
+        # bg=PANEL, so a divider line would show as a stray dark stripe
+        # against the otherwise continuous PANEL strip. The visual
+        # hierarchy already reads menubar → title row from the
+        # typography alone (button labels vs FONT_TITLE).
         self._menubar_sep = None
 
         bar.add_menu(tr("menu.file"),   self._popup_file)
         bar.add_menu(tr("menu.edit"),   self._popup_edit)
-        # '参数' menu removed per user spec — duplicates the metric_btn
-        # + Prev/Next buttons already on the metric bar. The metric
-        # bar is the canonical entry point. Section filtering moved
-        # to 视图 → 只看某类参数.
+        # The metric bar (metric_btn + Prev/Next) is the canonical
+        # entry point for picking a metric; section filtering lives
+        # under 视图 → 只看某类参数.
         bar.add_menu(tr("menu.view"),   self._popup_view)
         bar.add_menu(tr("menu.help"),   self._popup_help)
 
@@ -557,7 +552,7 @@ class VoiceMapApp(_TkBase):
         # drop zone — pick the right key based on whether DnD is active
         try:
             if self.drop_label.cget("text"):  # only if not analyzed yet
-                # If a wav was loaded the label shows the filename; don't clobber.
+                # 已加载文件时标签显示的是文件名，不要覆盖。
                 txt = self.drop_label.cget("text")
                 if txt in (tr("drop.title"), tr("drop.title_no_dnd")) or \
                    txt in ("拖入 .wav 文件  /  点击浏览",
@@ -569,11 +564,7 @@ class VoiceMapApp(_TkBase):
         except tk.TclError:
             pass
         _safe_text("drop_sub",        "drop.subtitle")
-        # `header.metric` resolves to 'Metric' in BOTH zh and en — that
-        # was the wrong key; the actual i18n entry for this label is
-        # `metric_bar.label` (zh: '指标'). Using header.metric meant the
-        # label switched to 'Metric' permanently after the first
-        # language-change broadcast even back in zh mode.
+        # 指标栏标签用 `metric_bar.label` 键（zh: "指标" / en: "Metric"）。
         _safe_text("_metric_label",   "metric_bar.label")
         _safe_text("_settings_btn",   "left.settings")
         _safe_text("_latest_csv_lbl", "left.latest_csv")
@@ -739,7 +730,7 @@ class VoiceMapApp(_TkBase):
         return p
 
     def _toggle_language(self) -> None:
-        """F2 hotkey: toggle zh ↔ en. a11y audit R-1."""
+        """F2 hotkey: toggle zh ↔ en (keyboard-accessible language switch)."""
         cur = get_language()
         self._switch_language("en" if cur == "zh" else "zh")
 
@@ -789,22 +780,21 @@ class VoiceMapApp(_TkBase):
         bar = tk.Frame(parent, bg=PANEL)
         bar.pack(side="top", fill="x")
         # Menubar rebuild (language switch) re-packs itself anchored
-        # before this frame to stay at the very top — was anchored to
-        # the now-removed _header_frame.
+        # before this frame so it stays at the very top of the window.
         self._tracks_bar_frame = bar
 
         inner = tk.Frame(bar, bg=PANEL)
-        inner.pack(fill="x", padx=16, pady=(6, 6))   # was 10 — slim chrome
+        inner.pack(fill="x", padx=16, pady=(6, 6))   # slim chrome
 
         # Header row: "录音轨" label on left + "开始分析" button on right.
-        # Per user spec: dropping / picking a wav no longer auto-runs
-        # analysis — user must hit this button explicitly.
+        # Picking or dropping a wav stages it for analysis; the user
+        # must press 开始分析 to actually run the pipeline.
         header_row = tk.Frame(inner, bg=PANEL)
         header_row.pack(fill="x", pady=(0, 4))
         # MUTED rather than ACCENT — section labels shouldn't compete
-        # with the canvas for first-second eye attention (design critique
-        # P0). Amber stays reserved for active state / interactive
-        # primary / focused widgets only.
+        # with the canvas for first-second eye attention. Amber stays
+        # reserved for active state / interactive primary / focused
+        # widgets only.
         self._tracks_label = tk.Label(
             header_row, text=tr("tracks.label"), bg=PANEL, fg=MUTED,
             font=FONT_UI_B)
@@ -815,9 +805,9 @@ class VoiceMapApp(_TkBase):
             command=self._on_start_btn_click)
         self._start_btn.pack(side="right")
         self._start_btn.state(["disabled"])  # nothing queued yet
-        # Status pill — used to live in its own header strip. Moved here
-        # so the row reads "录音轨 ……… ● 就绪  [开始分析]" and the user
-        # sees the analysis state right where they trigger it.
+        # Status pill sits in this header row so it reads
+        # "录音轨 ……… ● 就绪  [开始分析]" and the user sees analysis
+        # state right where they trigger it.
         # pack(side="right") order matters: start_btn first → rightmost,
         # then status_lbl, then status_dot, so visual order = dot pill btn.
         self.status_lbl = tk.Label(header_row, text=tr("status.ready"),
@@ -863,12 +853,9 @@ class VoiceMapApp(_TkBase):
         self._tracks_list_frame: tk.Frame | None = None
 
     # ── multi-file Tracks Panel: row factory + state transitions ────────
-    # Tracks Panel viewport: caps visible height to ~4 rows × 28 px = 112 px.
-    # Beyond that we scroll instead of growing the panel (per user spec:
-    # "更多文件装不下了，可以滚动查看，不要动整个窗口的大小").
-    # Was 145 px (5 rows). Design critique flagged that the panel was
-    # eating canvas vertical even when fewer rows were shown. 110 px
-    # buys 35 extra px for the heatmap; 5+ tracks just need 1 scroll tick.
+    # Tracks Panel viewport: 110 px caps visible height to ~4 rows ×
+    # 28 px. Extra tracks scroll inside the panel rather than growing
+    # it, leaving as much vertical space as possible for the heatmap.
     TRACKS_VIEWPORT_H = 110
 
     def _tracks_render(self):
@@ -981,8 +968,8 @@ class VoiceMapApp(_TkBase):
         # height fixed to ~28 px so all rows are uniform; pady inside
         # is 4 (was 6 across two lines = ~52 px tall — way too much).
         # `takefocus=1` + highlightthickness=2 makes the row reachable
-        # via Tab and shows a 2 px ACCENT outline when focused — fixes
-        # WCAG 2.1.1 (keyboard) + 2.4.7 (focus visible). a11y audit O-1.
+        # via Tab and shows a 2 px ACCENT outline when focused —
+        # satisfies WCAG 2.1.1 (keyboard) and 2.4.7 (focus visible).
         outer = tk.Frame(parent, bg=bg_row, cursor="hand2", height=28,
                          takefocus=1,
                          highlightthickness=2,
@@ -994,8 +981,8 @@ class VoiceMapApp(_TkBase):
                           width=4)
         marker.pack(side="left", fill="y")
 
-        # Right-side mini waveform (smaller — was 220×36, now 160×22 to
-        # match new compact row height).
+        # Right-side mini waveform — sized 160×22 to match the
+        # compact 28 px row height.
         wave_amps = self._track_waveform_amps(entry)
         wave_canvas = tk.Canvas(outer, width=160, height=22,
                                 bg=bg_row, highlightthickness=0, bd=0)
@@ -1026,8 +1013,8 @@ class VoiceMapApp(_TkBase):
                  width=2, anchor="w"
                  ).pack(side="left", padx=(2, 6))
 
-        # 文件名 (FONT_UI 11pt — was bold, now regular for less weight
-        # so the meta beside it doesn't feel demoted).
+        # 文件名 FONT_UI 11pt regular —— 跟同行 meta（9pt MUTED）拉开
+        # 主次但不喧宾夺主。
         tk.Label(body, text=entry.path.name,
                  bg=bg_row, fg=TEXT,
                  font=FONT_UI, anchor="w"
@@ -1058,9 +1045,9 @@ class VoiceMapApp(_TkBase):
                  font=FONT_CAPTION, anchor="w"
                  ).pack(side="left", padx=(10, 0), fill="x", expand=True)
 
-        # Whole-row click → switch active track. Same handler also runs
-        # on <Return> / <space> when the row has keyboard focus (a11y
-        # audit O-1: track rows previously click-only).
+        # Whole-row click → switch active track. The same handler
+        # also runs on <Return> / <space> so the row is keyboard-
+        # operable when focused.
         def _click(_e=None, i=idx):
             self._tracks_set_active(i)
         for w in (outer, body, marker, wave_canvas,
@@ -1139,11 +1126,6 @@ class VoiceMapApp(_TkBase):
                                      x1, midline + half,
                                      fill=color, outline="",
                                      tags="wave")
-
-    # NOTE: the old `_track_waveform_blocks` (Unicode-block sketch) was
-    # removed in favour of `_track_waveform_amps` + `_draw_waveform_canvas`
-    # — block chars rendered as sparse dashes for any audio with a few
-    # peaks and a lot of quiet, which is most voice recordings.
 
     def _tracks_add(self, path: Path) -> int:
         """Append a new TrackEntry and re-render. Returns its index."""
@@ -1249,8 +1231,8 @@ class VoiceMapApp(_TkBase):
         inner = tk.Frame(bar, bg=PANEL)
         inner.pack(fill="x", padx=16, pady=6)   # was 8 — slim chrome
 
-        # MUTED so the focal point is the metric_btn pill below, not
-        # this static "指标 / Metric" label. (design critique P0)
+        # MUTED so the focal point is the metric_btn pill, not this
+        # static "指标 / Metric" caption.
         self._metric_label = tk.Label(inner, text=tr("metric_bar.label"),
                                        bg=PANEL, fg=MUTED, font=FONT_UI_B)
         self._metric_label.pack(side="left", padx=(0, 12))
@@ -1269,18 +1251,14 @@ class VoiceMapApp(_TkBase):
         self.metric_btn.pack(side="left")
         self.metric_btn.config(state="disabled")
 
-        # Nav hint — split into two clickable buttons (Prev / Next)
-        # because users keep clicking the text expecting it to do
-        # something. Was a single muted Label saying "│  上一个ㅤ←ㅤ
-        # 下一个ㅤ→" which read as a hint but did nothing on click.
-        # Now: explicit "上一个" / "下一个" labels that cycle the metric.
-        # The "│" separator stays as a static visual divider.
+        # Nav hint: two clickable buttons (上一个 / 下一个) for cycling
+        # the metric, separated by a static "│" visual divider.
         sep = tk.Label(inner, text="│", bg=PANEL, fg=BORDER, font=FONT_UI)
         sep.pack(side="left", padx=(16, 8))
 
         # Prev/Next labels are focusable button-likes — see
         # widgets.make_focusable_label for the keyboard a11y wiring
-        # (Tab + Enter/Space + visible focus ring). a11y audit O-3.
+        # (Tab + Enter/Space + visible focus ring).
         self._metric_prev_btn = make_focusable_label(
             inner, tr("metric.prev"), lambda: self._cycle_metric(-1))
         self._metric_prev_btn.pack(side="left", padx=(0, 12))
@@ -1298,15 +1276,13 @@ class VoiceMapApp(_TkBase):
         Top-to-bottom:
           • SCROLLABLE: metric name + description + unit + clinical bands
           • PINNED:     current value card (hover-driven, always visible)
-        Action buttons (导出 Excel / 生成报告 / 对比录音) used to live
-        below — REMOVED per user spec. They duplicated 文件 menu entries
-        and were eating ~150 px of Inspector vertical that's better
-        spent on parameter detail (longer descriptions / clinical bands
-        without truncation).
+        Export / report / compare actions live in the 文件 menu rather
+        than in this column so the Inspector vertical is reserved for
+        parameter detail (long descriptions, full clinical bands).
         """
-        # Stub the removed action-button widget refs as None so any
-        # _safe_text / language-switch path that referenced them
-        # silently no-ops via the existing guard in _safe_text.
+        # The export/report/compare button refs are kept as None so
+        # _safe_text and the language-switch path silently no-op via
+        # the existing guard in _safe_text.
         self._inspect_btn_excel = None
         self._inspect_btn_report = None
         self._inspect_btn_compare = None
@@ -1327,8 +1303,8 @@ class VoiceMapApp(_TkBase):
         # while keeping total height ≤ ~190 px.
         vc_inner = tk.Frame(self._inspector_value_card, bg=PANEL_HI)
         vc_inner.pack(fill="x", padx=12, pady=8)
-        # "本次值" / "Current value" header — MUTED bold (was ACCENT) so
-        # the big number below is the only ACCENT_HI element on the pill.
+        # "本次值" / "Current value" 标题 —— MUTED bold，让下方大号数字
+        # 成为 Inspector pill 上唯一的 ACCENT_HI 元素。
         self._inspector_value_header = tk.Label(
             vc_inner, text=tr("inspector.current"),
             bg=PANEL_HI, fg=MUTED, font=FONT_UI_B)
@@ -1381,8 +1357,8 @@ class VoiceMapApp(_TkBase):
         self._inspector_metric_name.pack(side="left", fill="x", expand=True)
         # ⓘ next to the title — small, muted; positioned to the right of
         # the metric name so users immediately know "hover for more".
-        # No on_click: the actual tooltip surfaces via HoverTooltip below
-        # (which also handles keyboard focus). a11y audit O-4.
+        # No on_click: the actual tooltip surfaces via HoverTooltip
+        # below, which also handles keyboard focus.
         self._inspector_info_glyph = make_focusable_label(
             title_row, "ⓘ", on_click=None,
             font=FONT_BTN_INFO,
@@ -1521,7 +1497,6 @@ class VoiceMapApp(_TkBase):
 
         # 大号纯字体箭头，放在导航带正中；hover + focus 有强对比。
         # takefocus=1 让 Tab 能停在这里，highlightcolor 给键盘焦点环。
-        # a11y audit O-3.
         self.prev_btn = tk.Label(self.nav_left, text="◀",
                                  bg=PANEL, fg=ACCENT,
                                  font=("Segoe UI", 24, "bold"),
@@ -1604,10 +1579,10 @@ class VoiceMapApp(_TkBase):
         self.bind_all("<Control-c>", _shortcut_guard(self._copy_canvas))
         self.bind_all("<Control-comma>", _shortcut_guard(self._open_settings))
         self.bind_all("<Control-l>", _shortcut_guard(self._open_log_window))
-        # a11y audit R-1: ModernPopup is opaque to screen readers
-        # (custom-drawn). Compensate by exposing ALL menu actions via
-        # global keyboard shortcuts so blind users can drive the app
-        # without needing to navigate the visual menu hierarchy.
+        # ModernPopup is opaque to screen readers (custom-drawn), so
+        # every menu action is also exposed as a global keyboard
+        # shortcut. Blind users can drive the entire app without
+        # navigating the visual menu hierarchy.
         self.bind_all("<Control-O>", _shortcut_guard(self._pick_audio_folder))   # Ctrl+Shift+O = add folder
         self.bind_all("<Control-e>", _shortcut_guard(self._export_excel))
         self.bind_all("<Control-r>", _shortcut_guard(self._export_report))
@@ -1734,9 +1709,9 @@ class VoiceMapApp(_TkBase):
         ax.text(0.5, 0.40, msg, transform=ax.transAxes,
                 ha="center", va="center",
                 color=PLACEHOLDER_TXT, fontsize=15, weight="bold")
-        # Subtitle was hardcoded English; goes through tr() now so
-        # zh mode shows zh, en mode shows en — matches the new
-        # placeholder title 'Open a file or folder to start' tone.
+        # Subtitle goes through tr() so it switches with the rest of
+        # the UI — matches the placeholder title 'Open a file or
+        # folder to start'.
         ax.text(0.5, 0.32, tr("drop.subtitle"),
                 transform=ax.transAxes,
                 ha="center", va="center",
@@ -1918,8 +1893,9 @@ class VoiceMapApp(_TkBase):
         self._worker.start()
 
     def _on_partial_ready(self, partial_df):
-        """Phase A done — show first heatmap with fast metrics. Phase B
-        is still running on the worker thread; full df arrives via 'done'."""
+        """First pass done — show the heatmap built from the fast
+        metrics. The slow metrics keep running on the worker thread;
+        the full DataFrame arrives via the 'done' message."""
         self._last_df = partial_df
         # Refresh dropdown sections to whatever's non-zero in the partial set
         self._refresh_metric_dropdown()
@@ -2052,9 +2028,9 @@ class VoiceMapApp(_TkBase):
     def _on_canvas_motion(self, event):
         """matplotlib motion handler — live-update Inspector's
         current-value pill with the cell under the cursor, AND draw
-        an inline readout floating near the cursor (per design critique:
-        the eye shouldn't have to dart 700 px from cursor → Inspector
-        pill to read the value).
+        an inline readout floating near the cursor so the eye doesn't
+        have to dart 700 px from cursor → Inspector pill to read the
+        value.
 
         Skip when:
           - mouse is outside the data axes
@@ -2074,9 +2050,9 @@ class VoiceMapApp(_TkBase):
         if x is None or y is None:
             return
 
-        # Change-detection: same (mi, si, metric) → no work.
-        # Was firing 60-120 times/sec on mouse drift inside one cell,
-        # each pass running df boolean-mask + draw_idle() — wasteful.
+        # Change-detection: same (mi, si, metric) → 直接返回。
+        # 鼠标在同一格里漂移会触发每秒 60-120 次 motion 事件，
+        # 不做去重的话每次都会重新跑 df 布尔掩码 + draw_idle()。
         df = self._last_df
         name = self.metric_var.get() if hasattr(self, "metric_var") else ""
         if df is None or not name or name not in df.columns:
@@ -2087,7 +2063,7 @@ class VoiceMapApp(_TkBase):
             return
         self._last_motion_cell = cell_key
 
-        # Single cell lookup (was doubled — once per consumer).
+        # 单次 cell 查找，结果共享给 Inspector pill 和 inline readout。
         try:
             row = df[(df["MIDI"] == mi) & (df["dB"] == si)]
             value = float(row[name].iloc[0]) if not row.empty else None
@@ -2182,7 +2158,7 @@ class VoiceMapApp(_TkBase):
         unit = (spec.unit if spec else "") or ""
         self._inspector_metric_name.configure(text=name)
         self._inspector_metric_desc.configure(text=desc)
-        # Unit on its own row (per spec mockup)
+        # Unit on its own row.
         if unit:
             self._inspector_unit_lbl.configure(
                 text=f"{tr('inspector.unit')}: {unit}")
@@ -2217,10 +2193,9 @@ class VoiceMapApp(_TkBase):
 
         if not bands:
             return
-        # "参考范围" / "Reference range" — MUTED bold (was ACCENT) for
-        # consistency with the other section labels (录音轨, 指标, 本次值)
-        # that all cooled down. Severity colours on each band are still
-        # the only chromatic encoding here.
+        # "参考范围" / "Reference range" 段落标题 —— MUTED bold，跟
+        # 其他段落标题（录音轨、指标、本次值）的样式保持一致。每个
+        # 区间的严重度色才是这一段唯一的色彩编码。
         tk.Label(self._inspector_cards, text=tr("inspector.clinical"),
                  bg=PANEL, fg=MUTED, font=FONT_UI_B
                  ).pack(anchor="w", pady=(8, 4))
@@ -2245,12 +2220,12 @@ class VoiceMapApp(_TkBase):
             # still uses zh literals; only the GUI display needs i18n.
             from voicemap.report import get_band_label
             display_label = get_band_label(label, get_language())
-            # wraplength=270: range column (width=14 ≈ 100 px) + Inspector
-            # padx leaves ~290 px for label. EN labels like 'saturated /
-            # over-compressed' / 'highly broken / breathy' fit on 1 line
-            # at 290 px on most DPI; on high-DPI Windows they wrap to 2
-            # lines instead of overflowing horizontally (was clipping the
-            # last char). Action buttons removed → vertical space plenty.
+            # wraplength=270: range column (width=14 ≈ 100 px) +
+            # Inspector padx leaves ~290 px for the label. EN strings
+            # such as 'saturated / over-compressed' and 'highly broken
+            # / breathy' fit on one line at standard DPI; on high-DPI
+            # Windows they wrap to two lines instead of overflowing
+            # horizontally.
             tk.Label(row, text=display_label, bg=PANEL,
                      fg=sev_color.get(sev, TEXT), font=FONT_UI,
                      anchor="w", justify="left", wraplength=270
@@ -2329,8 +2304,8 @@ class VoiceMapApp(_TkBase):
 
     def _popup_metric_menu(self):
         """点 metric 按钮 → 弹下拉菜单。
-        tk.Menu 本身不支持鼠标滚轮，所以把所有 metric 一坨平铺会显得很长
-        且没法滚。改成 cascade：顶层只列分类（5 个），鼠标 hover 自动展开
+        tk.Menu 不支持鼠标滚轮；为了把所有 metric 都装下又不出现长得没法
+        滚的列表，采用 cascade：顶层只列分类（5 个），鼠标 hover 自动展开
         子菜单看具体 metric。每个子菜单最长 ~43 项，竖向能放下。
         视图 → 只看某类参数 里勾掉的分类在这里就不显示。"""
         if str(self.metric_btn.cget("state")) == "disabled":
@@ -2391,8 +2366,8 @@ class VoiceMapApp(_TkBase):
         # (calling .remove() later would error). Clear bookkeeping now.
         if hasattr(self, "_overlay_mgr"):
             self._overlay_mgr.clear()
-        # If user was in annotation mode, exit it (cursor + binding) so
-        # the next click on a fresh heatmap doesn't trigger a stale prompt.
+        # 若当前处于标注模式，切 metric 时退出（恢复光标 + 解绑），
+        # 避免下次点击新热图时触发已过时的弹窗。
         if getattr(self, "_annot_mode_on", False):
             self._toggle_annotation_mode()
         self._sync_fig_to_widget()
@@ -2700,10 +2675,9 @@ class VoiceMapApp(_TkBase):
         self._status_color = color
 
     def _enable_plot_toolbar(self):
-        """No-op since A0-3: plot toolbar is removed in favour of the
-        menubar entries (编辑 + 视图). Kept as a method so existing
-        callers don't error out; can be deleted entirely after one
-        more pass."""
+        """No-op: the plot toolbar's actions live on the 编辑 and 视图
+        menus. The method is retained so any external caller still
+        works."""
         return
 
     def _clear_overlays(self):
@@ -2781,12 +2755,12 @@ class VoiceMapApp(_TkBase):
                 pass
             self._annot_canvas_cid = None
             self._annot_mode_on = False
-            pass  # annot_btn removed; menu reflects state via 编辑→标注 (TODO: checkmark)
+            # Menu state reflects this via 编辑→标注
             cw.configure(cursor="")
         else:
             # Turn on — next plot click prompts for text
             self._annot_mode_on = True
-            pass  # annot_btn removed; annotation mode is tracked via self._annot_mode_on
+            # Annotation mode is tracked via self._annot_mode_on
             cw.configure(cursor="cross")
             self._annot_canvas_cid = self._canvas.mpl_connect(
                 "button_press_event", self._on_canvas_click_for_annotation)
@@ -2901,9 +2875,10 @@ class VoiceMapApp(_TkBase):
 
     def _post_export_prompt(self, path: str):
         """After a successful export, ask the user what to do with the
-        file: open it / show in folder / dismiss. A small modal Toplevel
-        that mirrors ModernPopup styling. Per user spec — auto-opening
-        is too aggressive when the user just wanted the file saved."""
+        file: open it / show in folder / dismiss. A small modal
+        Toplevel that mirrors ModernPopup styling. Letting the user
+        decide keeps the export non-disruptive — auto-opening would
+        interrupt anyone who just wanted the file saved."""
         from voicemap.gui.theme import (
             BG, PANEL, PANEL_HI, BORDER, TEXT, ACCENT, ACCENT_HI, MUTED,
             FONT_UI, FONT_UI_B,

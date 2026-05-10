@@ -4,7 +4,7 @@
   * SettingsDialog  — analysis params (clarity / cluster / output dir).
   * CompareDialog   — pick 2 VRP CSVs, render A | B | A−B per metric.
   * ProgressDialog  — modal progress shown while analysis runs.
-  * AboutDialog     — version + author + copyright (added in A0-2).
+  * AboutDialog     — version + author + copyright.
 """
 
 from __future__ import annotations
@@ -141,11 +141,10 @@ class CompareDialog(tk.Toplevel):
         self.bind("<Escape>", lambda _e: self.destroy())
         # Three subplots side-by-side (A | B | Δ) need a lot of horizontal
         # room. The matplotlib figure is 14 inches wide; at 150% Windows
-        # DPI scaling that's ~2310 px, so a 1500 px dialog cropped the
-        # third (Δ) subplot off the right edge — user reported this.
-        # Default to 90 % of screen width capped at 1900 px, so we use
-        # almost the full monitor on 1080p / 1440p screens but never
-        # overflow on smaller displays.
+        # DPI scaling that's ~2310 px. We default to 90 % of screen
+        # width capped at 1900 px so the dialog uses almost the full
+        # monitor on 1080p / 1440p screens without overflowing on
+        # smaller displays.
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
         dlg_w = min(1900, max(1400, int(sw * 0.90)))
@@ -162,11 +161,9 @@ class CompareDialog(tk.Toplevel):
         self._df_a = None
         self._df_b = None
 
-        # Path display: show *just the filename* in a Label. Showing
-        # full paths in an Entry truncated to whatever fits and looked
-        # broken (user couldn't tell which file was loaded). The full
-        # path stays in csv_a/_b StringVars for the analyzer; the Label
-        # below the filename shows the parent dir for context.
+        # 路径展示：Label 只显示文件名；完整路径存在 csv_a / csv_b
+        # 的 StringVar 里供分析器使用，文件名下方的小 Label 显示父
+        # 目录作为上下文。
         self._csv_name_lbls = {}
         self._csv_dir_lbls  = {}
         for label, var, slot in (("A", self.csv_a, "a"), ("B", self.csv_b, "b")):
@@ -303,12 +300,10 @@ class CompareDialog(tk.Toplevel):
         if self._df_a is None or self._df_b is None:
             self._show_msg(tr("compare.tip_load_both"))
             return
-        # CRITICAL: sync fig→canvas size BEFORE drawing. Otherwise the
-        # first render right after picking files happens at the
-        # initial figsize(12,4); the <Configure> auto-resize fired
-        # earlier (during dialog mount) but the figure was overwritten
-        # by _show_msg which kept the small default. Result: MIDI axis
-        # falls outside visible canvas until the user manually resizes.
+        # 必须在 draw 之前先 sync figure→canvas 尺寸。否则首次渲染
+        # 用的还是初始 figsize(12,4)（_show_msg 占位会覆盖 mount 期间
+        # 的 <Configure> 自动 resize），MIDI 轴会跑出可视区域，
+        # 直到用户手动改窗口大小。
         self._sync_fig_to_canvas()
         from voicemap.plotter import draw_vrp_comparison
         ok = draw_vrp_comparison(
@@ -467,9 +462,9 @@ class LogWindow(tk.Toplevel):
         sb = ttk.Scrollbar(wrap, command=self.text.yview)
         sb.pack(side="right", fill="y")
         self.text.configure(yscrollcommand=sb.set)
-        # Severity colors map to existing tokens (was hardcoded hex
-        # bypassing theme.py — design audit P0). WARN/ERR/OK live in
-        # theme.py and stay aligned with the Inspector severity legend.
+        # Severity colors map to existing theme tokens (WARN / ERR /
+        # OK live in theme.py) so the log stays visually aligned with
+        # the Inspector severity legend.
         for tag, color in (("INFO", TEXT), ("DEBUG", MUTED),
                            ("WARNING", WARN), ("ERROR", ERR),
                            ("OK", OK), ("META", ACCENT)):
@@ -516,13 +511,10 @@ class LogWindow(tk.Toplevel):
         self.destroy()
 
 
-# ─── 关于对话框（A0-2 新增） ────────────────────────────────────────────────
+# ─── 关于对话框 ────────────────────────────────────────────────────────────
 class AboutDialog(tk.Toplevel):
-    """版本 / 作者 / 版权信息。软著申请截图里要有这一张。
-
-    A0-2 阶段先用现有色板把信息摆出来；A0-3 / A0-4 视觉打磨时会按
-    docs/UI_DESIGN.md 的 option-C 设计语言重新排版（accent button +
-    card layout）。"""
+    """版本 / 作者 / 版权信息。按 docs/UI_DESIGN.md option-C 设计语言
+    布局：card layout + accent button。"""
 
     def __init__(self, app: "VoiceMapApp"):
         super().__init__(app)

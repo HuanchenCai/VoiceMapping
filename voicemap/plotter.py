@@ -373,9 +373,9 @@ METRIC_CATEGORY = {
 
 
 # ── Merge any keys from metrics_registry that aren't already in our
-# hand-crafted METRIC_CFG / METRIC_CATEGORY. This lets new metrics
-# (M1 add-ons, future user plugins) appear in plots automatically by
-# just calling register(MetricSpec(...)) — no plotter edit needed.
+# hand-crafted METRIC_CFG / METRIC_CATEGORY. New metrics appear in
+# plots automatically just by calling register(MetricSpec(...)) — no
+# plotter edit needed.
 def _merge_registry_into_plotter():
     try:
         from voicemap.metrics_registry import REGISTRY
@@ -703,10 +703,9 @@ def draw_vrp_comparison(df_a: pd.DataFrame,
 
     # tight_layout auto-fits axes + labels into the figure rect
     # regardless of how matplotlib's auto-resize stretches the figure
-    # to match the canvas widget. The fixed subplots_adjust margins
-    # (bottom=0.12) used to clip the MIDI axis label when canvas
-    # height was tighter than expected. tight_layout(pad=0.8) gives
-    # ~6 px breathing room around all axes.
+    # to match the canvas widget. pad=0.8 leaves ~6 px breathing room
+    # around all axes and keeps the MIDI axis label fully visible even
+    # when the canvas height is on the small side.
     try:
         fig.tight_layout(pad=0.8)
     except Exception:

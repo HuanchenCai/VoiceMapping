@@ -44,10 +44,9 @@ class MetricSpec:
     aggregator: str = "mean"           # "mean" | "max" | "sum"
     description: str = ""              # 1-line description for docs
 
-    # M1.a doesn't yet move calculator function references in here; that
-    # would need a second-pass refactor of analyzer.calculate_all_metrics.
-    # For now the spec is a pure metadata layer — the calculator is still
-    # invoked the old way and writes the same column name.
+    # The spec is a pure metadata layer; the calculator hook is
+    # optional. Built-in metrics are computed via analyzer.calculate_
+    # all_metrics() and share the column name declared here.
     calculator: Optional[Callable] = None
     requires: Tuple[str, ...] = ()     # input deps if calculator is provided
 
@@ -114,26 +113,20 @@ def to_metric_category() -> dict:
 # analyzer's groupby aggregator. When a new metric is added, append to
 # this block (or call register() from elsewhere).
 
-# ─── Modern colormap policy (2026 refactor) ─────────────────────────────
-# Old: every metric had a custom HSV rainbow sweep (blue→red, green→red...).
-# Pretty in 2010, but: not perceptually uniform, breaks colorblind users
-# (red-green confusion), and prints to almost-identical greys on B&W.
-#
-# New: sweeping default to 3 modern matplotlib palettes, one per metric
-# kind. All three are perceptually uniform, monotonic in luminance
-# (so they print as a clean grey ramp), and validated colorblind-safe
-# (deuteranopia / protanopia).
+# ─── Colormap policy ─────────────────────────────────────────────────────
+# 全部 metric 使用三套感知均匀（perceptually uniform）调色板之一，
+# 都是 luminance 单调（B&W 打印为干净灰度渐变）且通过红绿色盲安全
+# 测试（deuteranopia / protanopia）。
 #
 #   PALETTE_SEQUENTIAL — 'viridis': blue → green → yellow.
-#       Default for all "more is more" metrics (CPP, HNR, F1, etc.).
+#       默认调色板，用于所有"越大越显著"的指标（CPP / HNR / F1 等）。
 #   PALETTE_DIVERGING  — 'coolwarm': red ← white → blue.
-#       For metrics centred on a meaningful midpoint (SpecBal=0,
-#       AlphaRatio=0, H1H2/H1H3=0, MFCCs=0).
+#       适用于有自然中点的指标（SpecBal=0、AlphaRatio=0、
+#       H1H2 / H1H3=0、MFCCs=0）。
 #   PALETTE_DENSITY    — 'mako': dark plum → bright green-blue.
-#       For Total / cycle-count where log-scale + huge dynamic range.
+#       适用于 Total / cycle count 等动态范围极大的对数轴。
 #
-# Categorical (maxCluster, maxCPhon) → Okabe-Ito 7-colour set, tested
-# colorblind-safe. Built on demand below.
+# 类别型（maxCluster / maxCPhon）→ Okabe-Ito 5 色集，色盲安全。
 PALETTE_SEQUENTIAL = "viridis"
 PALETTE_DIVERGING  = "coolwarm"
 PALETTE_DENSITY    = "mako"
@@ -166,7 +159,7 @@ def _populate_builtins():
     register(MetricSpec(
         key="Total", category="Density", label="Density - Cycle Count",
         vmin=1, vmax=10000, unit="c", aggregator="sum",
-        cmap=_density_cmap_modern(),       # was "fd_density" greyscale
+        cmap=_density_cmap_modern(),
         norm=LogNorm(vmin=1, vmax=10000, clip=True),
         description="Number of analysed cycles in this (MIDI, dB) cell."))
 
@@ -356,7 +349,7 @@ def _populate_builtins():
 
 
 def _populate_m1_addons():
-    """Register the M1 add-on metrics (待验证)."""
+    """Register the extended metric set (待验证)."""
     import matplotlib.pyplot as _plt
 
     # ── Acoustic — spectral moments + RMS + F0_Hz + Alpha + Hammarberg ────
@@ -427,11 +420,11 @@ def _populate_m1_addons():
         待验证=True,
         description="max(0-2 kHz dB) − max(2-5 kHz dB)."))
 
-    # MFCC 1-13: removed from the registry per user spec — 13 entries
-    # cluttered the metric menu without clinical actionability for end
-    # users. Analyzer still computes the columns and writes them to CSV
-    # for power users who need them; they're just hidden from the GUI
-    # metric selector.
+    # MFCC 1-13 are intentionally absent from the registry: 13 entries
+    # without clinical actionability would clutter the metric menu.
+    # The analyzer still computes the columns and writes them to CSV
+    # for power users; they are just hidden from the GUI metric
+    # selector.
 
     # ── Singing — Formant bandwidths / dispersion / SPR / Vibrato Jitter ──
     register(MetricSpec(

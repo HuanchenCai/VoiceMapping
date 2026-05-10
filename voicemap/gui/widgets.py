@@ -269,9 +269,9 @@ class HoverTooltip:
     """
 
     DELAY_MS = 500    # ms to wait before showing (avoids flicker on transit)
-    MAX_WIDTH = 440   # wraplength for long descriptions (was 360 — bumped
-                      # so 中英混排 prose 'CPP = 倒谱在 F0 周期处...' wraps
-                      # at fewer awkward English-token boundaries)
+    MAX_WIDTH = 440   # wraplength for long descriptions — width chosen so
+                      # 中英混排 prose 'CPP = 倒谱在 F0 周期处...' wraps at
+                      # fewer awkward English-token boundaries
 
     def __init__(self, widget, text_provider):
         self._widget = widget
@@ -371,9 +371,8 @@ def make_focusable_label(parent, text, on_click,
       - <FocusIn>/<FocusOut> mirror that on keyboard focus
 
     Used for the metric-bar Prev/Next labels and any other label-as-button
-    that needs WCAG 2.1.1 (keyboard) + 2.4.7 (focus visible). Pre-extract
-    this lived as a closure inside `_build_metric_bar`; lifted to widgets
-    so the ⓘ glyph and other sites can share the focus-ring config.
+    that needs WCAG 2.1.1 (keyboard) + 2.4.7 (focus visible). Centralised
+    here so the ⓘ glyph and other sites share one focus-ring config.
     """
     lbl = tk.Label(parent, text=text,
                    bg=bg, fg=fg, font=font,
