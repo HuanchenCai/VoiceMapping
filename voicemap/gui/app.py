@@ -824,8 +824,12 @@ class VoiceMapApp(_TkBase):
         # analysis — user must hit this button explicitly.
         header_row = tk.Frame(inner, bg=PANEL)
         header_row.pack(fill="x", pady=(0, 4))
+        # MUTED rather than ACCENT — section labels shouldn't compete
+        # with the canvas for first-second eye attention (design critique
+        # P0). Amber stays reserved for active state / interactive
+        # primary / focused widgets only.
         self._tracks_label = tk.Label(
-            header_row, text=tr("tracks.label"), bg=PANEL, fg=ACCENT,
+            header_row, text=tr("tracks.label"), bg=PANEL, fg=MUTED,
             font=FONT_UI_B)
         self._tracks_label.pack(side="left", anchor="w")
         self._start_btn = ttk.Button(
@@ -1251,8 +1255,10 @@ class VoiceMapApp(_TkBase):
         inner = tk.Frame(bar, bg=PANEL)
         inner.pack(fill="x", padx=16, pady=6)   # was 8 — slim chrome
 
+        # MUTED so the focal point is the metric_btn pill below, not
+        # this static "指标 / Metric" label. (design critique P0)
         self._metric_label = tk.Label(inner, text=tr("metric_bar.label"),
-                                       bg=PANEL, fg=ACCENT, font=FONT_UI_B)
+                                       bg=PANEL, fg=MUTED, font=FONT_UI_B)
         self._metric_label.pack(side="left", padx=(0, 12))
 
         # Current-metric pill — flat label-style button. Kept as widget
@@ -1344,9 +1350,11 @@ class VoiceMapApp(_TkBase):
         # while keeping total height ≤ ~190 px.
         vc_inner = tk.Frame(self._inspector_value_card, bg=PANEL_HI)
         vc_inner.pack(fill="x", padx=12, pady=8)
+        # "本次值" / "Current value" header — MUTED bold (was ACCENT) so
+        # the big number below is the only ACCENT_HI element on the pill.
         self._inspector_value_header = tk.Label(
             vc_inner, text=tr("inspector.current"),
-            bg=PANEL_HI, fg=ACCENT, font=FONT_UI_B)
+            bg=PANEL_HI, fg=MUTED, font=FONT_UI_B)
         self._inspector_value_header.pack(anchor="w", pady=(0, 2))
         self._inspector_value_coords = tk.Label(
             vc_inner, text="—",
@@ -2234,8 +2242,12 @@ class VoiceMapApp(_TkBase):
 
         if not bands:
             return
+        # "参考范围" / "Reference range" — MUTED bold (was ACCENT) for
+        # consistency with the other section labels (录音轨, 指标, 本次值)
+        # that all cooled down. Severity colours on each band are still
+        # the only chromatic encoding here.
         tk.Label(self._inspector_cards, text=tr("inspector.clinical"),
-                 bg=PANEL, fg=ACCENT, font=FONT_UI_B
+                 bg=PANEL, fg=MUTED, font=FONT_UI_B
                  ).pack(anchor="w", pady=(8, 4))
         for lo, hi, label, sev in bands:
             row = tk.Frame(self._inspector_cards, bg=PANEL)
