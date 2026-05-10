@@ -775,24 +775,21 @@ class VoiceMapApp(_TkBase):
         AboutDialog(self)
 
     def _build_header(self, parent):
-        # bg=PANEL (same as the menubar) so the title row reads as a
-        # natural continuation of the bar instead of having a BG-coloured
-        # gap show as a 'black stripe'. Internal padding gives the title
-        # breathing room while staying visually attached to the menubar.
-        # Saved as self._header_frame so the menubar rebuild path can
-        # `pack(... before=self._header_frame)` and stay at the very top
-        # after a language switch (otherwise the new bar lands between
-        # the metric bar and the canvas, which the user reported as
-        # "menu bar fell to the bottom").
+        # Header strip — was "title + status pill"; user removed the
+        # title (window title bar already shows it, redundant). Strip
+        # now holds ONLY the analysis-status pill (●  就绪 / 分析中… /
+        # 完成 · N 点), right-aligned and slim. Kept as a separate
+        # tk.Frame (`_header_frame`) so the menubar rebuild path can
+        # still `pack(... before=self._header_frame)` and stay at the
+        # very top after a language switch.
+        # _header_title field kept = None so any remaining _safe_text
+        # reference no-ops cleanly.
         head = tk.Frame(parent, bg=PANEL)
         head.pack(side="top", fill="x")
         self._header_frame = head
-        # padx=16 matches outer.padx so title aligns with content below
         head_inner = tk.Frame(head, bg=PANEL)
-        head_inner.pack(fill="x", padx=16, pady=(6, 8))   # was (8, 12) — slim
-        self._header_title = tk.Label(head_inner, text=tr("app.title"),
-                                       bg=PANEL, fg=TEXT, font=FONT_TITLE)
-        self._header_title.pack(side="left")
+        head_inner.pack(fill="x", padx=16, pady=(4, 4))
+        self._header_title = None
         self.status_dot = tk.Label(head_inner, text="●", bg=PANEL, fg=MUTED,
                                     font=("Segoe UI", 12))
         self.status_dot.pack(side="right", padx=(0, 4))
