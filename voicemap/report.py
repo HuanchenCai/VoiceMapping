@@ -279,6 +279,23 @@ def _safe_mean(s: pd.Series) -> float:
     return float(arr.mean())
 
 
+def _emit_section(lines: list, title: str, df: pd.DataFrame,
+                  cols, fallback: str | None = None) -> None:
+    """Render one '## section\\n\\nbody\\n' block. body is the
+    `_summary_row` for each column that exists with finite data.
+    If no rows produce output, write `fallback` (or skip body when
+    fallback is None). Cuts ~10 lines × 4 sections of repetition."""
+    a = lines.append
+    a(f"## {title}")
+    a("")
+    out = [r for r in (_summary_row(df, c) for c in cols) if r]
+    if out:
+        lines.extend(out)
+    elif fallback is not None:
+        a(fallback)
+    a("")
+
+
 def _summary_row(df: pd.DataFrame, col: str, prefer_max: bool = False) -> str:
     if col not in df.columns:
         return ""
@@ -329,64 +346,21 @@ def generate_report(grouped_df: pd.DataFrame,
       "受限于自动算法和录音质量，本报告**不构成诊断**，仅供研究 / 筛查参考。")
     a("")
 
-    # ── 总览 ────
-    a("## 一、总览")
-    a("")
-    overall_lines = []
-    for col in ("F0_Hz", "MPT", "VoicingRatio"):
-        line = _summary_row(df, col)
-        if line:
-            overall_lines.append(line)
-    if overall_lines:
-        lines.extend(overall_lines)
-        a("")
-
-    # ── 嗓音质量（声学，最关键临床指标） ────
-    a("## 二、嗓音质量（声学）")
-    a("")
-    quality_cols = ("HNR", "NHR", "CPP", "CPPS",
-                     "Jitter", "JitterRAP", "JitterPPQ5",
-                     "Shimmer", "ShimmerDB", "ShimmerAPQ11")
-    out = []
-    for col in quality_cols:
-        line = _summary_row(df, col)
-        if line:
-            out.append(line)
-    if out:
-        lines.extend(out)
-    else:
-        a("_无可用数据_")
-    a("")
-
-    # ── EGG ────
-    a("## 三、EGG · 声门接触特征")
-    a("")
-    egg_cols = ("Qcontact", "Icontact", "dEGGmax", "HRFegg",
-                 "OQ", "SPQ", "CIQ")
-    out = []
-    for col in egg_cols:
-        line = _summary_row(df, col)
-        if line:
-            out.append(line)
-    if out:
-        lines.extend(out)
-    a("")
-
-    # ── 唱歌特征 ────
-    a("## 四、唱歌特征")
-    a("")
-    singing_cols = ("VibratoRate", "VibratoExtent", "VibratoJitter",
-                     "F1", "F2", "F3", "B1", "B2", "B3",
-                     "FormantDispersion", "SingersFormant", "SPR",
-                     "H1H2", "H1H3")
-    out = []
-    for col in singing_cols:
-        line = _summary_row(df, col)
-        if line:
-            out.append(line)
-    if out:
-        lines.extend(out)
-    a("")
+    _emit_section(lines, "一、总览", df,
+                  ("F0_Hz", "MPT", "VoicingRatio"))
+    _emit_section(lines, "二、嗓音质量（声学）", df,
+                  ("HNR", "NHR", "CPP", "CPPS",
+                   "Jitter", "JitterRAP", "JitterPPQ5",
+                   "Shimmer", "ShimmerDB", "ShimmerAPQ11"),
+                  fallback="_无可用数据_")
+    _emit_section(lines, "三、EGG · 声门接触特征", df,
+                  ("Qcontact", "Icontact", "dEGGmax", "HRFegg",
+                   "OQ", "SPQ", "CIQ"))
+    _emit_section(lines, "四、唱歌特征", df,
+                  ("VibratoRate", "VibratoExtent", "VibratoJitter",
+                   "F1", "F2", "F3", "B1", "B2", "B3",
+                   "FormantDispersion", "SingersFormant", "SPR",
+                   "H1H2", "H1H3"))
 
     # ── 频谱特征（M1） ────
     spec_cols = ("RMS", "SpectralCentroid", "SpectralBandwidth",

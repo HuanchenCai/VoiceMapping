@@ -32,39 +32,27 @@ SPL_MIN,  SPL_MAX  = 40, 120
 # perceptually-uniform palettes — see metrics_registry.PALETTE_*.
 # Sequential metrics → viridis. Diverging (SpecBal, etc.) → coolwarm.
 # Density (cycle count, log axis) → mako (or viridis fallback).
-def _modern_seq():
-    return plt.get_cmap("viridis")
+# Palette factories live in metrics_registry; we just resolve the strings.
+from voicemap.metrics_registry import (
+    PALETTE_SEQUENTIAL, PALETTE_DIVERGING,
+    _density_cmap_modern as _modern_density,
+    _categorical_cmap_5 as _modern_cat5,
+)
 
-def _modern_div():
-    return plt.get_cmap("coolwarm")
-
-def _modern_density():
-    try:
-        return plt.get_cmap("mako")
-    except (ValueError, KeyError):
-        return plt.get_cmap("viridis")
-
-def _modern_cat5():
-    """5-class colorblind-safe Okabe-Ito (Wong 2011 Nature Methods)."""
-    from matplotlib.colors import ListedColormap
-    return ListedColormap(
-        ["#0072B2", "#E69F00", "#009E73", "#CC79A7", "#F0E442"],
-        name="vm_cat5")
-
+# Legacy hand-built _CMAP table — every entry just resolves to one of the
+# three palettes. New metrics get the same palette via spec.cmap when
+# the registry-merge runs below; no need to add rows here for them.
 _CMAP = {
-    # Sequential ("more = warmer end of viridis")
-    "CPP":      _modern_seq(),
-    "Crest":    _modern_seq(),
-    "dEGGmax":  _modern_seq(),
-    "Icontact": _modern_seq(),
-    "Qcontact": _modern_seq(),
-    "HRFegg":   _modern_seq(),
-    "Clarity":  _modern_seq(),
-    "Entropy":  _modern_seq(),
-    # Diverging — natural midpoint or symmetric range
-    "SpecBal":  _modern_div(),
-    # Density — log-scale cycle count
-    "Total":    _modern_density(),
+    "CPP":      PALETTE_SEQUENTIAL,
+    "Crest":    PALETTE_SEQUENTIAL,
+    "dEGGmax":  PALETTE_SEQUENTIAL,
+    "Icontact": PALETTE_SEQUENTIAL,
+    "Qcontact": PALETTE_SEQUENTIAL,
+    "HRFegg":   PALETTE_SEQUENTIAL,
+    "Clarity":  PALETTE_SEQUENTIAL,
+    "Entropy":  PALETTE_SEQUENTIAL,
+    "SpecBal":  PALETTE_DIVERGING,
+    "Total":    _modern_density(),     # mako with viridis fallback
 }
 
 # ---------------------------------------------------------------------------
@@ -151,50 +139,50 @@ METRIC_CFG = {
     "Jitter": dict(
         label="Jitter (local)",
         vmin=0.0, vmax=3.0, unit="%",
-        cmap=_modern_seq(),
+        cmap=PALETTE_SEQUENTIAL,
         norm=None,
     ),
     "JitterRAP": dict(
         label="Jitter RAP (3-pt)",
         vmin=0.0, vmax=3.0, unit="%",
-        cmap=_modern_seq(),
+        cmap=PALETTE_SEQUENTIAL,
         norm=None,
     ),
     "JitterPPQ5": dict(
         label="Jitter PPQ5 (5-pt)",
         vmin=0.0, vmax=3.0, unit="%",
-        cmap=_modern_seq(),
+        cmap=PALETTE_SEQUENTIAL,
         norm=None,
     ),
     # Shimmer family: pathological threshold ~3.8% for local shimmer.
     "Shimmer": dict(
         label="Shimmer (local)",
         vmin=0.0, vmax=10.0, unit="%",
-        cmap=_modern_seq(),
+        cmap=PALETTE_SEQUENTIAL,
         norm=None,
     ),
     "ShimmerDB": dict(
         label="Shimmer",
         vmin=0.0, vmax=1.0, unit="dB",
-        cmap=_modern_seq(),
+        cmap=PALETTE_SEQUENTIAL,
         norm=None,
     ),
     "ShimmerAPQ11": dict(
         label="Shimmer APQ11 (11-pt)",
         vmin=0.0, vmax=10.0, unit="%",
-        cmap=_modern_seq(),
+        cmap=PALETTE_SEQUENTIAL,
         norm=None,
     ),
     "ShimmerAPQ3": dict(
         label="Shimmer APQ3 (3-pt)",
         vmin=0.0, vmax=10.0, unit="%",
-        cmap=_modern_seq(),
+        cmap=PALETTE_SEQUENTIAL,
         norm=None,
     ),
     "ShimmerAPQ5": dict(
         label="Shimmer APQ5 (5-pt)",
         vmin=0.0, vmax=10.0, unit="%",
-        cmap=_modern_seq(),
+        cmap=PALETTE_SEQUENTIAL,
         norm=None,
     ),
     # HNR: higher = healthier voice (>20 dB normal). Use blue→red reversed
@@ -202,7 +190,7 @@ METRIC_CFG = {
     "HNR": dict(
         label="HNR",
         vmin=0.0, vmax=35.0, unit="dB",
-        cmap=_modern_seq(),   # red→blue (low→high)
+        cmap=PALETTE_SEQUENTIAL,   # red→blue (low→high)
         norm=None,
     ),
     # ── Add-on voice-quality metrics (待验证) ──────────────────────────────
@@ -211,7 +199,7 @@ METRIC_CFG = {
     "NHR": dict(
         label="NHR (Noise-to-Harm)",
         vmin=0.0, vmax=0.5, unit="",
-        cmap=_modern_seq(),
+        cmap=PALETTE_SEQUENTIAL,
         norm=None,
     ),
     # CPPS (smoothed CPP). Same scale as CPP, moving-averaged temporally.
@@ -226,14 +214,14 @@ METRIC_CFG = {
     "PPE": dict(
         label="Pitch Period Entropy",
         vmin=0.0, vmax=1.0, unit="",
-        cmap=_modern_seq(),   # green→red (stable→noisy)
+        cmap=PALETTE_SEQUENTIAL,   # green→red (stable→noisy)
         norm=None,
     ),
     # ZCR (zero-crossing rate) per cycle. Range typically 0.01–0.2 for voice.
     "ZCR": dict(
         label="Zero-Crossing Rate",
         vmin=0.0, vmax=0.3, unit="",
-        cmap=_modern_seq(),
+        cmap=PALETTE_SEQUENTIAL,
         norm=None,
     ),
     # ── P2 Singing-specific ────────────────────────────────────────────────
@@ -242,14 +230,14 @@ METRIC_CFG = {
     "VibratoRate": dict(
         label="Vibrato rate",
         vmin=3.0, vmax=9.0, unit="Hz",
-        cmap=_modern_seq(),   # blue→red across band
+        cmap=PALETTE_SEQUENTIAL,   # blue→red across band
         norm=None,
     ),
     # Vibrato extent: 50-150 cents typical; classical Western ~80, Peking often wider.
     "VibratoExtent": dict(
         label="Vibrato extent",
         vmin=0.0, vmax=300.0, unit="cents",
-        cmap=_modern_seq(),
+        cmap=PALETTE_SEQUENTIAL,
         norm=None,
     ),
     # Formants: vocal-tract resonances. Typical ranges for a mixed voice:
@@ -259,25 +247,25 @@ METRIC_CFG = {
     "F1": dict(
         label="F1 — 1st formant",
         vmin=200.0, vmax=1000.0, unit="Hz",
-        cmap=_modern_seq(),
+        cmap=PALETTE_SEQUENTIAL,
         norm=None,
     ),
     "F2": dict(
         label="F2 — 2nd formant",
         vmin=800.0, vmax=2800.0, unit="Hz",
-        cmap=_modern_seq(),
+        cmap=PALETTE_SEQUENTIAL,
         norm=None,
     ),
     "F3": dict(
         label="F3 — 3rd formant",
         vmin=2000.0, vmax=3600.0, unit="Hz",
-        cmap=_modern_seq(),
+        cmap=PALETTE_SEQUENTIAL,
         norm=None,
     ),
     "SingersFormant": dict(
         label="Singer's Formant Energy",
         vmin=-25.0, vmax=-5.0, unit="dB",
-        cmap=_modern_seq(),
+        cmap=PALETTE_SEQUENTIAL,
         norm=None,
     ),
     # H1-H2 / H1-H3 spectral tilt — diverging around 0:
@@ -285,33 +273,33 @@ METRIC_CFG = {
     "H1H2": dict(
         label="H1-H2  (voice)",
         vmin=-10.0, vmax=20.0, unit="dB",
-        cmap=_modern_div(),
+        cmap=PALETTE_DIVERGING,
         norm=None,
     ),
     "H1H3": dict(
         label="H1-H3  (voice)",
         vmin=-10.0, vmax=25.0, unit="dB",
-        cmap=_modern_div(),
+        cmap=PALETTE_DIVERGING,
         norm=None,
     ),
     # ── P3 EGG timing quotients ────────────────────────────────────────────
     "OQ": dict(
         label="Open Quotient",
         vmin=0.2, vmax=0.8, unit="",
-        cmap=_modern_seq(),
+        cmap=PALETTE_SEQUENTIAL,
         norm=None,
     ),
     "SPQ": dict(
         label="Speed Quotient",
         vmin=0.3, vmax=3.0, unit="",
-        cmap=_modern_seq(),
+        cmap=PALETTE_SEQUENTIAL,
         norm=None,
     ),
     # CIQ — diverging (signed asymmetry around 0)
     "CIQ": dict(
         label="Contact Index",
         vmin=-0.6, vmax=0.6, unit="",
-        cmap=_modern_div(),
+        cmap=PALETTE_DIVERGING,
         norm=None,
     ),
     # ── EGG waveform clusters ───────────────────────────────────────────────
@@ -344,11 +332,6 @@ METRIC_CFG = {
         cmap=plt.get_cmap("magma"),
         norm=None) for k in range(1, 6)},
 }
-
-# Now that clustering is implemented, these columns can have real values.
-# Keep the set around so any future legacy "always-zero" metrics can be
-# listed here without code changes elsewhere.
-_SKIP_ZERO_METRICS: set = set()
 
 # Metrics excluded from the combined overview figure (too many sub-metrics,
 # clutters the grid). Cluster breakdowns are still rendered individually.
@@ -576,34 +559,8 @@ def plot_vrp_combined(
 def _active_metrics(df: pd.DataFrame, requested: Optional[list]) -> list:
     if requested is not None:
         return requested
-    candidates = [c for c in df.columns if c not in {"MIDI", "dB"} and c not in _SKIP_ZERO_METRICS]
+    candidates = [c for c in df.columns if c not in {"MIDI", "dB"}]
     return [c for c in candidates if df[c].sum() != 0]
-
-
-def plot_vrp_csv(
-    csv_path: str,
-    out_dir: Optional[str] = None,
-    metrics: Optional[list] = None,
-) -> list:
-    """Load a semicolon-delimited _VRP.csv and save one PNG per non-empty metric."""
-    df = pd.read_csv(csv_path, sep=";")
-    if out_dir is None:
-        out_dir = os.path.dirname(csv_path)
-    os.makedirs(out_dir, exist_ok=True)
-    basename = os.path.splitext(os.path.basename(csv_path))[0]
-
-    saved = []
-    for col in _active_metrics(df, metrics):
-        if col not in df.columns:
-            continue
-        _plot_one(df, col, out_dir, basename)
-        fpath = os.path.join(out_dir, f"{basename}_{col}.png")
-        if os.path.exists(fpath):
-            saved.append(fpath)
-    return saved
-
-
-draw_vrp_on_ax = _draw_vrp_ax
 
 
 def plot_vrp_dataframe(
@@ -612,9 +569,10 @@ def plot_vrp_dataframe(
     out_dir: str,
     metrics: Optional[list] = None,
 ) -> list:
-    """Plot directly from the grouped DataFrame returned by the analyser."""
+    """Plot directly from the grouped DataFrame returned by the analyser.
+    Saves one PNG per non-empty metric column; returns the list of paths
+    that were actually written."""
     os.makedirs(out_dir, exist_ok=True)
-
     saved = []
     for col in _active_metrics(df, metrics):
         if col not in df.columns:
@@ -624,6 +582,22 @@ def plot_vrp_dataframe(
         if os.path.exists(fpath):
             saved.append(fpath)
     return saved
+
+
+def plot_vrp_csv(
+    csv_path: str,
+    out_dir: Optional[str] = None,
+    metrics: Optional[list] = None,
+) -> list:
+    """Load a semicolon-delimited _VRP.csv then delegate to plot_vrp_dataframe."""
+    df = pd.read_csv(csv_path, sep=";")
+    if out_dir is None:
+        out_dir = os.path.dirname(csv_path)
+    basename = os.path.splitext(os.path.basename(csv_path))[0]
+    return plot_vrp_dataframe(df, basename, out_dir, metrics)
+
+
+draw_vrp_on_ax = _draw_vrp_ax
 
 
 # ───────────────────────────────────────────────────────────────────────────
