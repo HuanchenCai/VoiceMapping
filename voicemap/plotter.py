@@ -7,14 +7,13 @@ Colour scales reproduce the exact HSV/RGB formulas from FonaDyn's Metric*.sc fil
 """
 
 import os
-import colorsys
 import numpy as np
 import pandas as pd
 import matplotlib
 matplotlib.use("Agg")           # headless – no display needed
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
-from matplotlib.colors import Normalize, LogNorm, LinearSegmentedColormap
+from matplotlib.colors import Normalize, LogNorm
 from typing import Optional
 
 matplotlib.rcParams["font.family"] = ["Microsoft YaHei", "DejaVu Sans"]
@@ -27,48 +26,6 @@ MIDI_MIN, MIDI_MAX = 30, 96
 SPL_MIN,  SPL_MAX  = 40, 120
 
 # ---------------------------------------------------------------------------
-# Custom colourmaps that exactly reproduce the SC Color.hsv() palette funcs
-# ---------------------------------------------------------------------------
-
-def _hsv_sweep(h_start: float, h_end: float, name: str, n: int = 256):
-    """Full-saturation, full-brightness linear hue sweep h_start→h_end."""
-    cols = [colorsys.hsv_to_rgb(h_start + (h_end - h_start) * i / (n - 1), 1.0, 1.0)
-            for i in range(n)]
-    return LinearSegmentedColormap.from_list(name, cols, N=n)
-
-
-def _clarity_cmap(n: int = 256):
-    # SC: Color.green(v.linlin(0.96, 1.0, 0.5, 1.0))
-    # = RGB(0, brightness, 0) with brightness 0.5→1.0
-    cols = [(0.0, 0.5 + 0.5 * i / (n - 1), 0.0) for i in range(n)]
-    return LinearSegmentedColormap.from_list("fd_clarity", cols, N=n)
-
-
-def _entropy_cmap(n: int = 256):
-    # SC: colorZeroEntropy = Color.hsv(0.33, 0.1, 1)   (very pale green)
-    # For v > 0.1: Color.white.blend(Color.new255(165,42,42), sat)
-    #   sat = v.linlin(0, 10, 0.1, 0.95)
-    # Approximated as a continuous sweep from pale-green to brown.
-    pale = colorsys.hsv_to_rgb(0.33, 0.1, 1.0)     # ≈ (0.90, 1.00, 0.90)
-    brown = (165 / 255, 42 / 255, 42 / 255)
-    cols = []
-    for i in range(n):
-        sat = 0.1 + 0.85 * i / (n - 1)             # linlin(0,1, 0.1, 0.95)
-        r = (1 - sat) * pale[0] + sat * brown[0]
-        g = (1 - sat) * pale[1] + sat * brown[1]
-        b = (1 - sat) * pale[2] + sat * brown[2]
-        cols.append((r, g, b))
-    return LinearSegmentedColormap.from_list("fd_entropy", cols, N=n)
-
-
-def _density_cmap(n: int = 256):
-    # SC: cSat = v.explin(1, 10000, 0.95, 0.25); Color.grey(cSat, 1)
-    # explin with LogNorm handles the exp axis externally;
-    # the cmap itself covers brightness 0.95 (low) → 0.25 (high).
-    cols = [(0.95 - 0.70 * i / (n - 1),) * 3 for i in range(n)]
-    return LinearSegmentedColormap.from_list("fd_density", cols, N=n)
-
-
 # Modern color policy (2026 refactor):
 # the legacy SC HSV rainbow sweeps were colorblind-unfriendly and printed
 # to nearly identical greys on B&W. All metrics now use one of three

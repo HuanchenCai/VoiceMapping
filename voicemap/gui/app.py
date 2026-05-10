@@ -33,7 +33,7 @@ _HERE = Path(__file__).resolve().parent.parent  # voicemap/
 
 from voicemap.config import DEFAULT_CONFIG, VoiceMapConfig
 from voicemap.logger import setup_logger
-from voicemap.plotter import draw_vrp_on_ax, METRIC_CFG, _SKIP_ZERO_METRICS
+from voicemap.plotter import draw_vrp_on_ax
 
 # Theme tokens, custom widgets, dialogs — extracted to gui/ subpackage in A0-2.
 from voicemap.gui.theme import (
@@ -49,7 +49,7 @@ from voicemap.gui.theme import (
     PLACEHOLDER_DIM, PLACEHOLDER_TXT,
     _METRIC_SECTIONS, _DEFAULT_METRIC_CHAIN,
 )
-from voicemap.gui.widgets import MetricPopup, QueueHandler, HoverTooltip
+from voicemap.gui.widgets import QueueHandler, HoverTooltip
 from voicemap.gui.dialogs import (
     SettingsDialog, CompareDialog, ProgressDialog, AboutDialog, LogWindow,
 )
