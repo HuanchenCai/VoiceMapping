@@ -18,7 +18,6 @@ import logging
 
 from voicemap.config import VoiceMapConfig, DEFAULT_CONFIG
 from voicemap.logger import setup_logger, get_logger
-from voicemap.plotter import plot_vrp_dataframe, plot_vrp_combined
 from voicemap.metrics import (
     SPLCalculator, ClarityCalculator, CPPCalculator, SpecBalCalculator,
     CrestCalculator, QcontactCalculator, EntropyCalculator, HRFCalculator,
