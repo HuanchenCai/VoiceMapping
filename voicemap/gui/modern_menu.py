@@ -476,15 +476,18 @@ class ModernPopup(tk.Toplevel):
         # Clamp to nearest activatable
         if idx not in targets:
             idx = min(targets, key=lambda i: abs(i - idx))
+        prev_idx = self._kb_index
         self._kb_index = idx
-        for i, it in enumerate(self._items):
-            row = it.get("row")
-            if row is None:
-                continue
-            try:
-                row.event_generate("<Leave>")
-            except tk.TclError:
-                pass
+        # Only un-highlight the previously focused row — was iterating
+        # over every item firing <Leave> on each (cheap individually,
+        # but O(n) for a no-op on n-1 rows).
+        if 0 <= prev_idx < len(self._items) and prev_idx != idx:
+            prev_row = self._items[prev_idx].get("row")
+            if prev_row is not None:
+                try:
+                    prev_row.event_generate("<Leave>")
+                except tk.TclError:
+                    pass
         # Fire Enter on the new target so existing _hover_in handler
         # paints ACCENT and we get free 颜色一致性 with mouse hover.
         target_row = self._items[idx]["row"]
@@ -493,23 +496,21 @@ class ModernPopup(tk.Toplevel):
         except tk.TclError:
             pass
 
-    def _kb_prev(self, _e=None) -> None:
+    def _kb_step(self, delta: int) -> None:
+        """Move keyboard highlight ±delta items, wrapping around the
+        activatable list."""
         targets = self._activatable_indices()
         if not targets:
             return
         cur = self._kb_index if self._kb_index in targets else targets[0]
-        pos = targets.index(cur) if cur in targets else 0
-        new = targets[(pos - 1) % len(targets)]
-        self._kb_highlight(new)
+        pos = targets.index(cur)
+        self._kb_highlight(targets[(pos + delta) % len(targets)])
+
+    def _kb_prev(self, _e=None) -> None:
+        self._kb_step(-1)
 
     def _kb_next(self, _e=None) -> None:
-        targets = self._activatable_indices()
-        if not targets:
-            return
-        cur = self._kb_index if self._kb_index in targets else targets[0]
-        pos = targets.index(cur) if cur in targets else -1
-        new = targets[(pos + 1) % len(targets)]
-        self._kb_highlight(new)
+        self._kb_step(+1)
 
     def _kb_activate(self, _e=None) -> None:
         if self._kb_index < 0 or self._kb_index >= len(self._items):
