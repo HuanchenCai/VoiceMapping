@@ -230,11 +230,6 @@ def fit_overlay(ax: Axes, xs, ys,
                      zorder=8, solid_capstyle="round",
                      label=label or method_label)
     artists.append(line)
-
-    # Faint dot scatter of the input points so users see what was fitted
-    pts = ax.scatter(xs_, ys_, s=14, color=color, alpha=0.55,
-                      edgecolors="white", linewidths=0.5, zorder=7)
-    artists.append(pts)
     return artists
 
 
