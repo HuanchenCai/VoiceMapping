@@ -38,22 +38,26 @@ CROPS = {
 }
 
 
-def main(save_backup: bool = False) -> None:
+def main(save_backup: bool = True) -> None:
+    """裁切前自动把原图入 `_original/`，可重跑且不丢原始素材。"""
+    bak = SHOTS / "_original"
     if save_backup:
-        bak = SHOTS / "_crop_backup"
         bak.mkdir(exist_ok=True)
     for name, box in CROPS.items():
         path = SHOTS / name
         if not path.exists():
             print(f"  [SKIP] {name} not found")
             continue
+        if save_backup:
+            orig = bak / name
+            # 只在备份不存在或大小不同（说明仍是裁切版）时写入
+            if not orig.exists():
+                orig.write_bytes(path.read_bytes())
         with Image.open(path) as im:
             left, top, right, bottom = box
             right = min(right, im.size[0])
             bottom = min(bottom, im.size[1])
             cropped = im.crop((left, top, right, bottom))
-        if save_backup:
-            (bak / name).write_bytes(path.read_bytes())
         cropped.save(path)
         print(f"  cropped {name} → {cropped.size[0]}×{cropped.size[1]}")
 
