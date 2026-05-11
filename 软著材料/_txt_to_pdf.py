@@ -4,10 +4,12 @@
 每张 A4 一页源代码（50 行），等宽字体，底部页码。
 """
 
+import re
 from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
+import matplotlib.image as mpimg
 # 字体回退链：Consolas 等宽渲 ASCII / 代码，SimSun / 微软雅黑兜底
 # 中文字符（注释里的汉字）。matplotlib >= 3.6 PDF backend 按 glyph
 # 逐字符回退，单条 text() 调用混排中英完全没问题。
@@ -100,28 +102,81 @@ def convert(src: Path, dst: Path) -> None:
             _render_page(pdf, page_lines, i, total)
 
 
-def convert_markdown(src: Path, dst: Path, title: str) -> None:
-    """Render a markdown source file as a paginated A4 PDF.
+_IMG_RE = re.compile(r"^\s*!\[[^\]]*\]\(([^)]+)\)\s*$")
 
-    Bare-bones: monospace font, 50 lines/page, no Markdown rendering
-    (headings stay literal `## ...` etc). Goal is to satisfy 软著
-    requirement for a printable "软件说明书" attachment, not produce
-    a polished typeset document.
+
+def _render_image_page(pdf: PdfPages, img_path: Path,
+                       page_no: int, total: int) -> None:
+    """Render an embedded image as a dedicated A4 page."""
+    fig = plt.figure(figsize=(PAGE_W_IN, PAGE_H_IN))
+    body_w = (PAGE_W_IN - MARGIN_L - MARGIN_R) / PAGE_W_IN
+    body_h = (PAGE_H_IN - MARGIN_T - MARGIN_B) / PAGE_H_IN
+    body_x = MARGIN_L / PAGE_W_IN
+    body_y = MARGIN_B / PAGE_H_IN
+    ax = fig.add_axes([body_x, body_y, body_w, body_h])
+    ax.set_axis_off()
+    try:
+        img = mpimg.imread(str(img_path))
+        ax.imshow(img)
+    except Exception as e:
+        ax.text(0.5, 0.5, f"[图片加载失败: {img_path.name} — {e}]",
+                ha="center", va="center", color="red")
+
+    fig.text(MARGIN_L / PAGE_W_IN, MARGIN_B * 0.4 / PAGE_H_IN,
+             HEADER_TEXT, size=7, color="#555555")
+    fig.text(1 - MARGIN_R / PAGE_W_IN, MARGIN_B * 0.4 / PAGE_H_IN,
+             f"第 {page_no} / {total} 页", size=7, color="#555555",
+             ha="right")
+    pdf.savefig(fig)
+    plt.close(fig)
+
+
+def _split_markdown_into_blocks(lines: list, base_dir: Path) -> list:
+    """Walk markdown lines, splitting into a sequence of blocks where
+    each block is either:
+      - ("text", [50-line page]) — regular text
+      - ("image", Path)          — markdown ![](...) line → own page
+
+    Image lines break the current text accumulator so they always
+    land on their own dedicated PDF page (previous text page may be
+    shorter than 50 lines).
+    """
+    blocks = []
+    buf = []
+    for line in lines:
+        m = _IMG_RE.match(line)
+        if m:
+            # Flush any pending text buffer
+            for i in range(0, len(buf), LINES_PER_PAGE):
+                blocks.append(("text", buf[i:i + LINES_PER_PAGE]))
+            buf = []
+            blocks.append(("image", (base_dir / m.group(1)).resolve()))
+        else:
+            buf.append(line)
+    for i in range(0, len(buf), LINES_PER_PAGE):
+        blocks.append(("text", buf[i:i + LINES_PER_PAGE]))
+    return blocks
+
+
+def convert_markdown(src: Path, dst: Path, title: str) -> None:
+    """Render a markdown source as A4 PDF: monospace text, 50 lines/page,
+    with `![](path)` image lines materialised as full-page figures.
     """
     text = src.read_text(encoding="utf-8")
     lines = text.splitlines()
-    pages = []
-    for i in range(0, len(lines), LINES_PER_PAGE):
-        pages.append(lines[i:i + LINES_PER_PAGE])
-    total = len(pages)
+    blocks = _split_markdown_into_blocks(lines, src.parent)
+    total = len(blocks)
     print(f"  {src.name} → {dst.name}: {total} pages")
     global HEADER_TEXT
     saved = HEADER_TEXT
     HEADER_TEXT = title
     try:
         with PdfPages(dst) as pdf:
-            for i, page_lines in enumerate(pages, start=1):
-                _render_page(pdf, page_lines, i, total)
+            for i, (kind, content) in enumerate(blocks, start=1):
+                if kind == "image":
+                    _render_image_page(pdf, content, i, total)
+                else:
+                    _render_page(pdf, content, i, total)
     finally:
         HEADER_TEXT = saved
 
