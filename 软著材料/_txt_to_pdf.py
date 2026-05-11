@@ -44,9 +44,30 @@ WIN_FONTS = Path("C:/Windows/Fonts")
 _FONT_REG = "ZH"
 _FONT_BOLD = "ZHB"
 _FONT_MONO = "Mono"
+_FONT_SYM = "SYM"
 pdfmetrics.registerFont(TTFont(_FONT_REG,  str(WIN_FONTS / "msyh.ttc")))
 pdfmetrics.registerFont(TTFont(_FONT_BOLD, str(WIN_FONTS / "msyhbd.ttc")))
 pdfmetrics.registerFont(TTFont(_FONT_MONO, str(WIN_FONTS / "consola.ttf")))
+# Segoe UI Symbol：补齐微软雅黑里没有的 Unicode 字形（如 ▶ ◀ 等几何形状）
+pdfmetrics.registerFont(TTFont(_FONT_SYM,  str(WIN_FONTS / "seguisym.ttf")))
+
+# 微软雅黑里缺字形的字符（用 fontTools 实测）；这些字符要回退到 SYM 字体，
+# 否则 PDF 里渲染成 □ 缺字框。如发现新的缺字符号，加到此集合即可。
+_MSYH_MISSING = frozenset("▶◀")
+
+
+def _wrap_missing_glyphs(escaped_text: str) -> str:
+    """对 _MSYH_MISSING 里的字符包 <font face="SYM"> 标签。
+    入参必须已通过 _PDFRenderer._escape() 转义过；本函数不再做转义。"""
+    if not any(ch in escaped_text for ch in _MSYH_MISSING):
+        return escaped_text
+    out = []
+    for ch in escaped_text:
+        if ch in _MSYH_MISSING:
+            out.append(f'<font face="{_FONT_SYM}">{ch}</font>')
+        else:
+            out.append(ch)
+    return "".join(out)
 
 # ── 段落 / 标题 / 代码风格 ─────────────────────────────────────────────
 ACCENT = "#b8860b"      # 暖色（暗 amber 印在白底）
@@ -112,7 +133,8 @@ class _PDFRenderer:
         for c in children or []:
             t = c.get("type")
             if t == "text":
-                out.append(self._escape(c.get("raw", c.get("text", ""))))
+                out.append(_wrap_missing_glyphs(
+                    self._escape(c.get("raw", c.get("text", "")))))
             elif t == "strong":
                 out.append(f"<b>{self._inline(c.get('children'))}</b>")
             elif t == "emphasis":
@@ -185,6 +207,7 @@ class _PDFRenderer:
                 return
             text = self._escape("".join(buf))
             if in_cjk:
+                text = _wrap_missing_glyphs(text)
                 out.append(f'<font face="{_FONT_REG}">{text}</font>')
             else:
                 out.append(text)
