@@ -52,7 +52,7 @@ ACCENT = "#b8860b"      # 暖色（暗 amber 印在白底）
 
 def _style(name, size, bold=False, leading=None, space_before=0,
            space_after=4, left=0, color="#111111", mono=False,
-           align=0):
+           align=0, word_wrap="CJK"):
     return ParagraphStyle(
         name=name,
         fontName=(_FONT_MONO if mono else (_FONT_BOLD if bold else _FONT_REG)),
@@ -63,6 +63,7 @@ def _style(name, size, bold=False, leading=None, space_before=0,
         leftIndent=left,
         textColor=colors.HexColor(color),
         alignment=align,
+        wordWrap=word_wrap,
     )
 
 S_H1   = _style("H1",    20, bold=True, space_before=14, space_after=12)
@@ -71,7 +72,8 @@ S_H2   = _style("H2",    15, bold=True, space_before=14, space_after=8,
 S_H3   = _style("H3",    12, bold=True, space_before=10, space_after=4)
 S_BODY = _style("Body",  10, leading=15)
 S_LI   = _style("LI",    10, leading=15, left=14, space_after=2)
-S_CODE = _style("Code",   9, mono=True, leading=12, space_after=4)
+S_CODE = _style("Code",   9, mono=True, leading=12, space_after=4,
+                word_wrap=None)
 S_CELL = _style("Cell",   9, leading=12, space_after=0)
 S_CELL_HEAD = _style("CellH", 9, bold=True, leading=12, space_after=0)
 
