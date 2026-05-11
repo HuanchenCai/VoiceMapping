@@ -121,7 +121,11 @@ class _PDFRenderer:
             elif t == "linebreak":
                 out.append("<br/>")
             elif t == "softbreak":
-                out.append(" ")
+                # 中文为主的文档不希望软换行被插一个空格变成
+                # "时域波形 在每次..."。直接吃掉换行，ReportLab
+                # 自己会按字宽断行。英文文档若因此粘连，作者改
+                # 用显式空格即可。
+                out.append("")
             elif t == "link":
                 text = self._inline(c.get("children"))
                 href = c.get("attrs", {}).get("url", "")
@@ -196,23 +200,35 @@ class _PDFRenderer:
             idx += 1
 
     def _n_table(self, node):
-        # mistune v3 table 节点：children = [table_head, table_body]
+        # mistune v3 table AST:
+        #   table.children = [table_head, table_body]
+        #   table_head.children = list of table_cell  (一行 header，
+        #     不再外套 table_row —— 这是 mistune 的特殊处理)
+        #   table_body.children = list of table_row,
+        #     table_row.children = list of table_cell
         rows = []
         styles = []
-        col_widths = None
         for section in node.get("children", []):
-            section_type = section.get("type")
-            for row in section.get("children", []):
-                row_cells = []
-                for cell in row.get("children", []):
-                    cell_text = self._inline(cell.get("children"))
-                    style = S_CELL_HEAD if section_type == "table_head" else S_CELL
-                    row_cells.append(Paragraph(cell_text, style))
-                rows.append(row_cells)
-                if section_type == "table_head":
-                    styles.append(("BACKGROUND", (0, len(rows) - 1),
-                                   (-1, len(rows) - 1),
-                                   colors.HexColor("#f5f5f5")))
+            stype = section.get("type")
+            if stype == "table_head":
+                # 直接把 head 的 cells 作为一行 header
+                row_cells = [
+                    Paragraph(self._inline(c.get("children")), S_CELL_HEAD)
+                    for c in section.get("children", [])
+                ]
+                if row_cells:
+                    rows.append(row_cells)
+                    styles.append((
+                        "BACKGROUND", (0, len(rows) - 1),
+                        (-1, len(rows) - 1),
+                        colors.HexColor("#f5f5f5")))
+            elif stype == "table_body":
+                for row in section.get("children", []):
+                    row_cells = [
+                        Paragraph(self._inline(c.get("children")), S_CELL)
+                        for c in row.get("children", [])
+                    ]
+                    rows.append(row_cells)
 
         if not rows:
             return
@@ -291,7 +307,10 @@ def _make_page_decorator(title: str):
 # ─── 主 .md → PDF 入口 ─────────────────────────────────────────────────
 def convert_markdown(src: Path, dst: Path, title: str) -> None:
     text = src.read_text(encoding="utf-8")
-    ast = mistune.create_markdown(renderer=None)(text)
+    # plugins=['table'] 让 GFM 风格的 | a | b | 表格被识别为 table 节点，
+    # 否则 mistune 默认只把它当 paragraph 文本。
+    md = mistune.create_markdown(renderer=None, plugins=["table"])
+    ast = md(text)
 
     flow = _PDFRenderer(src.parent).render(ast)
 
