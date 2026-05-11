@@ -115,9 +115,16 @@ class _PDFRenderer:
             elif t == "emphasis":
                 out.append(f"<i>{self._inline(c.get('children'))}</i>")
             elif t == "codespan":
+                # Consolas 不含 CJK 字形：纯 ASCII 才用等宽，含中文则
+                # 回到正文字体 + 暖色 + 9pt 模拟"代码"质感；否则
+                # `用户手册.md` 这种里面的"用户手册"会渲染成空白宽度，
+                # 导致看上去 ".md" 漂在长空格后面。
+                raw = c.get("raw", "")
+                font_name = (_FONT_MONO if all(ord(ch) < 128 for ch in raw)
+                             else _FONT_REG)
                 out.append(
-                    f'<font face="{_FONT_MONO}" size="9" color="#5b3a00">'
-                    f'{self._escape(c.get("raw", ""))}</font>')
+                    f'<font face="{font_name}" size="9" color="#5b3a00">'
+                    f'{self._escape(raw)}</font>')
             elif t == "linebreak":
                 out.append("<br/>")
             elif t == "softbreak":
