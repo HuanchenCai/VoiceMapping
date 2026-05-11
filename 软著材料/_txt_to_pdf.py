@@ -32,7 +32,8 @@ from reportlab.platypus import (
     BaseDocTemplate, Frame, PageTemplate, Paragraph, Spacer,
     Image, Table, TableStyle, PageBreak, KeepTogether,
 )
-from reportlab.platypus.flowables import HRFlowable, Preformatted
+from reportlab.platypus.flowables import HRFlowable
+from reportlab.platypus.xpreformatted import XPreformatted
 
 from PIL import Image as PILImage
 
@@ -171,8 +172,33 @@ class _PDFRenderer:
 
     def _n_block_code(self, node):
         code = node.get("raw", "")
-        # Preformatted 保留每个空格 / 换行
-        self.flow.append(Preformatted(code, S_CODE))
+        # Consolas 不含 CJK 字形：把 ASCII 段保留等宽（Consolas），CJK
+        # 段回退到 _FONT_REG（雅黑），否则代码块里的中文注释会渲染成
+        # 空白，导致 ASCII 之间出现"巨型空格"的视觉错位。
+        # Preformatted 接受 XML markup 同时保留换行/空格。
+        out: list[str] = []
+        buf: list[str] = []
+        in_cjk = False
+
+        def _flush():
+            if not buf:
+                return
+            text = self._escape("".join(buf))
+            if in_cjk:
+                out.append(f'<font face="{_FONT_REG}">{text}</font>')
+            else:
+                out.append(text)
+            buf.clear()
+
+        for ch in code:
+            cjk = ord(ch) >= 128
+            if cjk != in_cjk:
+                _flush()
+                in_cjk = cjk
+            buf.append(ch)
+        _flush()
+        # XPreformatted 解析 XML 标记同时保留换行 / 空格
+        self.flow.append(XPreformatted("".join(out), S_CODE))
 
     def _n_block_quote(self, node):
         for child in node.get("children", []):
