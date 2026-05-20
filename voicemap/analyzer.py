@@ -450,13 +450,17 @@ class VoiceMapAnalyzer:
         # Precompute per-cycle EGG DFT once and share it across HRF, Entropy,
         # and ClusterCalculator — saves two passes over the Python-loop DFT.
         _step(4)   # "EGG DFT (每周期)"
+        # 单声道模式：egg_signal 为 None — 跳过 EGG DFT 与所有 EGG 类指标，
+        # 改为输出长度对齐的全零数组。
+        mono   = egg_signal is None
         _dft_n = max(self.config.n_harmonics,
                      self.cluster_calculator.n_harmonics,
                      self.config.sampen_amplitude_harmonics,
                      self.config.sampen_phase_harmonics)
-        _idx   = np.where(cycle_triggers > 0.5)[0]
-        _dft   = None
-        if len(_idx) >= 2:
+        _idx     = np.where(cycle_triggers > 0.5)[0]
+        n_cycles = max(len(_idx) - 1, 0)
+        _dft     = None
+        if len(_idx) >= 2 and not mono:
             from voicemap.metrics import _compute_cycle_dft
             _dft = _compute_cycle_dft(egg_signal, _idx, _dft_n)
 
@@ -470,9 +474,16 @@ class VoiceMapAnalyzer:
         crest_values                         = self.crest_calculator.calculate(voice_signal, cycle_triggers)
 
         _step(7)   # "Qcontact / Entropy / HRFegg"
-        qcontact_values, deggmax_v, ic_v     = self.qcontact_calculator.calculate(egg_signal, cycle_triggers)
-        entropy_values                       = self.entropy_calculator.calculate(egg_signal, cycle_triggers, dft=_dft)
-        hrf_values                           = self.hrf_calculator.calculate(egg_signal, cycle_triggers, dft=_dft)
+        if mono:
+            qcontact_values = np.zeros(n_cycles)
+            deggmax_v       = np.zeros(n_cycles)
+            ic_v            = np.zeros(n_cycles)
+            entropy_values  = np.zeros(n_cycles)
+            hrf_values      = np.zeros(n_cycles)
+        else:
+            qcontact_values, deggmax_v, ic_v = self.qcontact_calculator.calculate(egg_signal, cycle_triggers)
+            entropy_values                   = self.entropy_calculator.calculate(egg_signal, cycle_triggers, dft=_dft)
+            hrf_values                       = self.hrf_calculator.calculate(egg_signal, cycle_triggers, dft=_dft)
 
         # ── First pass complete — fire partial_cb so the GUI can render
         # a voice map with these 11 fast metrics while the slow
@@ -493,19 +504,23 @@ class VoiceMapAnalyzer:
             })
 
         _step(8)   # "EGG 波形聚类"
-        # Tell the user which path the calculator is taking. centroids_
-        # being non-None means load_centroids() / train_cluster_centroids()
-        # already populated them, so calculate() classifies-only and
-        # skips K-means fitting.
-        _preset = getattr(self.cluster_calculator, "centroids_", None)
-        if _preset is not None and len(_preset) > 0:
-            logger.info("Classified against %d preloaded centroids "
-                        "(k=%d, dim=%d) — K-means fitting skipped",
-                        len(_preset), len(_preset),
-                        _preset.shape[1] if _preset.ndim == 2 else 0)
+        if mono:
+            logger.info("单声道模式 — 跳过 EGG 波形聚类")
+            cluster_values = np.zeros(n_cycles)
         else:
-            logger.info("No preloaded centroids — fitting K-means on this recording")
-        cluster_values                       = self.cluster_calculator.calculate(egg_signal, cycle_triggers, dft=_dft)
+            # Tell the user which path the calculator is taking. centroids_
+            # being non-None means load_centroids() / train_cluster_centroids()
+            # already populated them, so calculate() classifies-only and
+            # skips K-means fitting.
+            _preset = getattr(self.cluster_calculator, "centroids_", None)
+            if _preset is not None and len(_preset) > 0:
+                logger.info("Classified against %d preloaded centroids "
+                            "(k=%d, dim=%d) — K-means fitting skipped",
+                            len(_preset), len(_preset),
+                            _preset.shape[1] if _preset.ndim == 2 else 0)
+            else:
+                logger.info("No preloaded centroids — fitting K-means on this recording")
+            cluster_values = self.cluster_calculator.calculate(egg_signal, cycle_triggers, dft=_dft)
 
         _step(9)   # "Jitter / Shimmer"
         perturb_values                       = self.perturb_calculator.calculate(voice_signal, cycle_triggers)
@@ -520,7 +535,12 @@ class VoiceMapAnalyzer:
         _step(13)  # "H1-H2 / H1-H3"
         harmdiff_values                      = self.harmdiff_calculator.calculate(voice_signal, cycle_triggers)
         _step(14)  # "OQ / SPQ / CIQ"
-        oq_values                            = self.oq_calculator.calculate(egg_signal, cycle_triggers)
+        if mono:
+            oq_values = {'oq':  np.zeros(n_cycles),
+                         'spq': np.zeros(n_cycles),
+                         'ciq': np.zeros(n_cycles)}
+        else:
+            oq_values = self.oq_calculator.calculate(egg_signal, cycle_triggers)
         _step(15)  # "CPPS / PPE / ZCR"
         cpps_values                          = self.cpps_calculator.calculate(cpp_values)
         ppe_values                           = self.ppe_calculator.calculate(cycle_triggers)
@@ -753,19 +773,23 @@ class VoiceMapAnalyzer:
         _cb(1)   # "加载音频"
         voice, egg, sr, duration = self.load_audio(audio_file)
 
-        if egg is None:
-            raise ValueError(
-                f"音频文件只有单声道，缺少 EGG 通道，无法进行 VRP 分析。\n"
-                f"VoiceMap 需要双声道文件：声道 0 = 嗓音，声道 1 = EGG。\n"
-                f"文件：{audio_file}")
+        # 单声道模式：文件没有 EGG 通道。周期检测改用嗓音通道，
+        # 所有依赖 EGG 的指标输出为 0（GUI 会自动隐藏全零 metric）。
+        mono = egg is None
+        if mono:
+            logger.warning("单声道文件：无 EGG 通道 — 进入单声道模式。"
+                           "周期检测改用嗓音通道；EGG 类指标"
+                           "(Qcontact/OQ/SPQ/CIQ/EGG聚类/Entropy/HRFegg)将输出为 0")
 
         _cb(2)   # "预处理 (HPF / 带通滤波)"
         voice_p = self.preprocess_voice(voice)
-        egg_p   = self.preprocess_egg(egg)
+        egg_p   = None if mono else self.preprocess_egg(egg)
 
         _cb(3)   # "周期检测 (phase-portrait)"
-        logger.info("Cycle detection...")
-        cycle_triggers = self.phase_portrait_cycle_detection(egg_p)
+        logger.info("Cycle detection on %s channel...",
+                    "voice" if mono else "EGG")
+        cycle_triggers = self.phase_portrait_cycle_detection(
+            voice_p if mono else egg_p)
         cycle_count = int(np.sum(cycle_triggers > 0.5))
         logger.info("Detected cycles: %d", cycle_count)
 
