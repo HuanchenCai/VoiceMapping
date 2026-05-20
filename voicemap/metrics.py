@@ -1062,34 +1062,177 @@ class VibratoCalculator(MetricCalculator):
 # total power, in dB. Classical / trained singers show –7…–13 dB; untrained
 # speakers usually < –13 dB.
 # ---------------------------------------------------------------------------
+# ───────────────────────────────────────────────────────────────────────────
+# Praat-style formant extraction — reimplements "Sound: To Formant (burg)":
+#   resample → pre-emphasis → Gaussian window → Burg LPC → polynomial roots.
+# F1/F2/F3 and B1/B2/B3 then come from pole angles / radii, exactly as Praat
+# does, instead of the old LPC-spectrum peak-picking (which ran 20-25 % off
+# Praat). Both FormantCalculator and FormantExtrasCalculator share this.
+# ───────────────────────────────────────────────────────────────────────────
+def _burg_lpc_batch(frames: np.ndarray, order: int) -> np.ndarray:
+    """Batched Burg-method LPC.
+
+    frames : (M, N) real analysis frames (already windowed).
+    Returns (M, order+1) coefficients with A(z) = 1 + a1·z⁻¹ + … + ap·z⁻ᵖ
+    (column 0 is always 1.0). The Burg recursion below is the standard
+    forward/backward least-squares form, vectorised across the M frames.
+    """
+    M, N = frames.shape
+    f = frames.astype(np.float64, copy=True)      # forward prediction error
+    b = frames.astype(np.float64, copy=True)      # backward prediction error
+    a = np.zeros((M, order + 1), dtype=np.float64)
+    a[:, 0] = 1.0
+    s   = np.sum(frames * frames, axis=1)
+    den = 2.0 * s - frames[:, 0] ** 2 - frames[:, -1] ** 2     # (M,)
+    for k in range(order):
+        fn = f[:, k + 1:N]                        # f[n],   n = k+1 … N-1
+        bn = b[:, k:N - 1]                        # b[n-1], n = k+1 … N-1
+        num  = 2.0 * np.sum(fn * bn, axis=1)
+        safe = np.where(den > 1e-300, den, 1.0)
+        kref = np.where(den > 1e-300, -num / safe, 0.0)
+        kref = np.clip(kref, -0.999999, 0.999999)              # keep stable
+        # Levinson update of the LPC vector (uses the pre-update a)
+        a_old = a.copy()
+        a[:, 1:k + 2] += kref[:, None] * a_old[:, k::-1]
+        # Forward/backward error update (both from the pre-update f, b)
+        kc = kref[:, None]
+        fn_new = fn + kc * bn
+        bn_new = bn + kc * fn
+        f[:, k + 1:N] = fn_new
+        b[:, k + 1:N] = bn_new
+        if k < order - 1:
+            den = (1.0 - kref ** 2) * den - f[:, k + 1] ** 2 - b[:, N - 1] ** 2
+    return a
+
+
+def _lpc_to_formants(a: np.ndarray, fs: float, n_formants: int,
+                     f_lo: float = 50.0,
+                     f_hi: Optional[float] = None
+                     ) -> Tuple[np.ndarray, np.ndarray]:
+    """Roots of each LPC polynomial → per-frame sorted formant Hz & bandwidth Hz.
+
+    For a pole z:  freq = |∠z|·fs/2π,  bandwidth = -ln|z|·fs/π.
+    Returns (F, B) each (M, n_formants), zero-padded where a frame yields
+    fewer than n_formants in-band poles.
+    """
+    M, pp1 = a.shape
+    p = pp1 - 1
+    if f_hi is None:
+        f_hi = fs / 2.0
+    # Companion matrix of the monic polynomial [1, a1, …, ap] (a[:,0] == 1).
+    C = np.zeros((M, p, p), dtype=np.float64)
+    C[:, 0, :] = -a[:, 1:]
+    if p > 1:
+        di = np.arange(1, p)
+        C[:, di, di - 1] = 1.0
+    roots = np.linalg.eigvals(C)                  # (M, p) complex
+    ang  = np.angle(roots)
+    freq = np.abs(ang) * (fs / (2.0 * np.pi))
+    bw   = -np.log(np.maximum(np.abs(roots), 1e-12)) * (fs / np.pi)
+    # Keep one pole per conjugate pair (∠ > 0) that sits in the formant band.
+    keep = (ang > 0.0) & (freq >= f_lo) & (freq <= f_hi)
+    sortkey = np.where(keep, freq, np.inf)
+    ix = np.argsort(sortkey, axis=1)
+    freq_s = np.take_along_axis(sortkey, ix, axis=1)
+    bw_s   = np.take_along_axis(bw,      ix, axis=1)
+    F = np.zeros((M, n_formants))
+    B = np.zeros((M, n_formants))
+    take = min(n_formants, p)
+    blk_f = freq_s[:, :take]
+    valid = np.isfinite(blk_f)
+    F[:, :take] = np.where(valid, blk_f, 0.0)
+    B[:, :take] = np.where(valid, bw_s[:, :take], 0.0)
+    return F, B
+
+
+def _praat_burg_formant_frames(voice: np.ndarray, sr: int,
+                               n_formants: int = 5,
+                               max_formant: float = 5500.0,
+                               win_ms: float = 25.0, hop_ms: float = 10.0,
+                               pre_emph_hz: float = 50.0):
+    """Praat-style "To Formant (burg)".
+
+    Returns (F, B, n_frames, hop_orig):
+      F, B      per-frame formant Hz & bandwidth Hz, each (n_frames, n_formants)
+      hop_orig  the 10 ms frame hop expressed in ORIGINAL-sr samples, used to
+                map per-cycle indices onto the frame grid.
+    """
+    from scipy.signal import resample_poly
+    from math import gcd
+
+    hop_orig = max(1, int(round(hop_ms * 0.001 * sr)))
+    voice = np.asarray(voice, dtype=np.float64)
+
+    # 1) Resample to 2·max_formant so a Burg order of 2·n_formants spans
+    #    exactly the formant band — same trick Praat uses.
+    target = int(round(2.0 * max_formant))
+    g = gcd(target, int(sr))
+    up, down = target // g, int(sr) // g
+    v = voice if (up == down) else resample_poly(voice, up, down)
+    fs_r = sr * up / down
+
+    # 2) Pre-emphasis  y[n] = x[n] - exp(-2π·f/fs)·x[n-1]
+    alpha = float(np.exp(-2.0 * np.pi * pre_emph_hz / fs_r))
+    v_pe = v.astype(np.float64, copy=True)
+    v_pe[1:] -= alpha * v[:-1]
+
+    # 3) Framing — Praat's physical analysis window is 2× window_length.
+    win = max(8, int(round(2.0 * win_ms * 0.001 * fs_r)))
+    hop = max(1, int(round(hop_ms * 0.001 * fs_r)))
+    if len(v_pe) < win:
+        z = np.zeros((0, n_formants))
+        return z, z, 0, hop_orig
+    n_frames = 1 + (len(v_pe) - win) // hop
+
+    # Praat's Gaussian analysis window (the −12 form used in its LPC stage).
+    t = np.arange(win) / (win - 1) - 0.5
+    gwin = (np.exp(-12.0 * t * t) - np.exp(-12.0)) / (1.0 - np.exp(-12.0))
+
+    order = 2 * n_formants
+    F = np.zeros((n_frames, n_formants))
+    B = np.zeros((n_frames, n_formants))
+
+    # Chunk the per-frame Burg so the (chunk, win) work arrays stay small
+    # even on 25-min recordings (≈150 k frames).
+    view  = sliding_window_view(v_pe, win)
+    CHUNK = 8192
+    for c0 in range(0, n_frames, CHUNK):
+        starts = np.arange(c0, min(c0 + CHUNK, n_frames)) * hop
+        frames = view[starts].astype(np.float64)
+        frames = (frames - frames.mean(axis=1, keepdims=True)) * gwin
+        lpc = _burg_lpc_batch(frames, order)
+        Fc, Bc = _lpc_to_formants(lpc, fs_r, n_formants,
+                                  f_lo=50.0, f_hi=max_formant)
+        F[c0:c0 + len(starts)] = Fc
+        B[c0:c0 + len(starts)] = Bc
+    return F, B, n_frames, hop_orig
+
+
 class FormantCalculator(MetricCalculator):
-    """Per-cycle F1, F2, F3 (Hz) + Singer's Formant Energy (dB)."""
+    """Per-cycle F1, F2, F3 (Hz) + Singer's Formant Energy (dB).
+
+    F1/F2/F3 come from the Praat-style Burg + polynomial-root extractor
+    (`_praat_burg_formant_frames`). SFE is an independent FFT power ratio
+    on the singer's-formant band, unchanged.
+    """
 
     def __init__(self, config: VoiceMapConfig,
-                 lpc_order: Optional[int] = None,
+                 n_formants: int = 5,
                  win_ms: float = 25.0, hop_ms: float = 10.0,
-                 f_min: float = 90.0, f_max: float = 5500.0,
-                 f1_floor: float = 250.0,
+                 max_formant: float = 5500.0,
                  singer_band: Tuple[float, float] = (2800.0, 3400.0),
-                 pre_emphasis: float = 0.97):
+                 pre_emphasis_hz: float = 50.0,
+                 lpc_order: Optional[int] = None):   # accepted, no longer used
         super().__init__(config)
+        self.n_formants  = int(n_formants)
         self.win_ms, self.hop_ms = float(win_ms), float(hop_ms)
-        self.f_min,  self.f_max  = float(f_min),  float(f_max)
-        self.f1_floor     = float(f1_floor)
-        self.singer_band  = (float(singer_band[0]), float(singer_band[1]))
-        self.pre_emphasis = float(pre_emphasis)
-        # LPC order: Praat's classical autocorrelation/Burg formula
-        #   order ≈ 2 + 2·Fs/1000   (→ 22 @ 44.1 kHz)
-        # captures the right amount of spectral detail for our peak-picking
-        # tracker. We DO need to gate sub-F1 peaks (pitch harmonics) with
-        # `f1_floor` below, or the first low LPC peak gets mislabelled as F1
-        # and drags F2/F3 with it.
-        self.lpc_order    = int(lpc_order or (2 + 2 * config.sample_rate // 1000))
+        self.max_formant = float(max_formant)
+        self.singer_band = (float(singer_band[0]), float(singer_band[1]))
+        self.pre_emphasis_hz = float(pre_emphasis_hz)
 
     def calculate(self, voice: np.ndarray,
                   cycle_triggers: np.ndarray) -> Dict[str, np.ndarray]:
-        from scipy.signal import find_peaks
-        logger.info("Calculating formants (LPC order=%d) + SFE...", self.lpc_order)
+        logger.info("Calculating formants (Praat-style Burg + roots) + SFE...")
 
         idx = np.where(cycle_triggers > 0.5)[0]
         n_cycles = max(len(idx) - 1, 0)
@@ -1098,107 +1241,46 @@ class FormantCalculator(MetricCalculator):
         if n_cycles == 0:
             return {k: z() for k in keys}
 
-        sr  = self.sample_rate
-        win = int(self.win_ms * 0.001 * sr)
-        hop = int(self.hop_ms * 0.001 * sr)
-        if len(voice) < win or hop < 1:
+        sr = self.sample_rate
+
+        # --- F1/F2/F3 via Praat-style Burg LPC + polynomial roots ---
+        F, B, n_frames, hop = _praat_burg_formant_frames(
+            voice, sr, n_formants=self.n_formants,
+            max_formant=self.max_formant,
+            win_ms=self.win_ms, hop_ms=self.hop_ms,
+            pre_emph_hz=self.pre_emphasis_hz)
+        if n_frames == 0:
             return {k: z() for k in keys}
+        f1, f2, f3 = F[:, 0], F[:, 1], F[:, 2]
 
-        # Pre-emphasis (HPF boost; matters a lot for LPC accuracy)
-        voice_pe = np.empty_like(voice)
-        voice_pe[0]  = voice[0]
-        voice_pe[1:] = voice[1:] - self.pre_emphasis * voice[:-1]
-
-        # Frame up
-        n_frames = 1 + (len(voice_pe) - win) // hop
-        starts   = np.arange(n_frames) * hop
-        frames   = sliding_window_view(voice_pe, win)[starts]    # (n_frames, win)
-        hamm     = np.hamming(win)
-        frames_w = (frames - frames.mean(axis=1, keepdims=True)) * hamm
-
-        # --- LPC via batched autocorrelation + Levinson-Durbin (np.linalg.solve) ---
-        p = self.lpc_order
-        nfft_ac = 1
-        while nfft_ac < 2 * win:
-            nfft_ac *= 2
-        X_ac = np.fft.rfft(frames_w, nfft_ac, axis=1)
-        acf  = np.fft.irfft(X_ac * np.conj(X_ac), nfft_ac, axis=1)[:, :p + 1]
-
-        valid = acf[:, 0] > 1e-12
-        lpc = np.zeros((n_frames, p + 1))
-        lpc[:, 0] = 1.0
-        if valid.any():
-            # Toeplitz 索引图 |i-j| — 每帧的 R 即 acf[f, ij]。
-            ij       = np.abs(np.arange(p)[:, None] - np.arange(p)[None, :])
-            valid_ix = np.where(valid)[0]
-            # 分块求解：一次性构造 (m, p, p) 的 Toeplitz 大数组在长音频下
-            # 会爆内存（25 min 音频 m≈15 万、p=90 → 整块约 10 GB → 卡死）。
-            # 分块把峰值内存压到每块 ~0.3 GB，结果与整块求解完全一致。
-            CHUNK = 4096
-            for c0 in range(0, len(valid_ix), CHUNK):
-                fr  = valid_ix[c0:c0 + CHUNK]
-                R   = acf[fr][:, ij]                             # (chunk, p, p)
-                rhs = -acf[fr, 1:p + 1, None]
-                try:
-                    lpc[fr, 1:] = np.linalg.solve(R, rhs)[..., 0]
-                except np.linalg.LinAlgError:
-                    logger.warning("  LPC chunk solve singular; falling back per-frame")
-                    for f in fr:
-                        try:
-                            lpc[f, 1:] = np.linalg.solve(acf[f, ij],
-                                                          -acf[f, 1:p + 1])
-                        except np.linalg.LinAlgError:
-                            pass
-
-        # --- LPC spectrum magnitude → per-frame peaks → F1/F2/F3 ---
-        nfft_sp  = 1024
-        A        = np.fft.rfft(lpc, nfft_sp, axis=1)
-        H        = 1.0 / np.maximum(np.abs(A), 1e-12)
-        freqs_sp = np.fft.rfftfreq(nfft_sp, 1.0 / sr)
-        band     = (freqs_sp >= self.f_min) & (freqs_sp <= self.f_max)
-        freqs_band = freqs_sp[band]
-        min_peak_gap = max(1, int(150.0 / (sr / nfft_sp)))   # ≥ 150 Hz between peaks
-
-        f1 = np.zeros(n_frames)
-        f2 = np.zeros(n_frames)
-        f3 = np.zeros(n_frames)
-        for i in range(n_frames):
-            if not valid[i]:
-                continue
-            spec = H[i, band]
-            pk, _ = find_peaks(spec, distance=min_peak_gap)
-            if len(pk) == 0:
-                continue
-            pf = freqs_band[pk]
-            # 丢弃 F1 floor 以下的峰 —— 这些是低频 / 次谐波 LPC 伪迹，
-            # 不剔除会顶占 F1 槽位、把整条共振峰向量整体拉低（实测
-            # 跟 Praat 相差 ~25%）。
-            pf = pf[pf >= self.f1_floor]
-            # Already ascending because freqs_band is monotonic
-            if len(pf) >= 1: f1[i] = pf[0]
-            if len(pf) >= 2: f2[i] = pf[1]
-            if len(pf) >= 3: f3[i] = pf[2]
-
-        # --- Singer's Formant Energy: signal-FFT power ratio (dB) ---
-        nfft_sfe   = 2048
-        X_sfe      = np.fft.rfft(frames_w, nfft_sfe, axis=1)
-        power      = (np.abs(X_sfe)) ** 2
-        freqs_sfe  = np.fft.rfftfreq(nfft_sfe, 1.0 / sr)
-        sfe_mask   = (freqs_sfe >= self.singer_band[0]) & (freqs_sfe <= self.singer_band[1])
-        total_pow  = power.sum(axis=1)
-        band_pow   = power[:, sfe_mask].sum(axis=1)
-        ratio      = band_pow / np.maximum(total_pow, 1e-15)
-        sfe_db     = 10.0 * np.log10(np.maximum(ratio, 1e-6))
+        # --- Singer's Formant Energy: FFT power ratio (dB), original sr ---
+        win = int(self.win_ms * 0.001 * sr)
+        sfe_db = np.zeros(n_frames)
+        if len(voice) >= win:
+            v = np.asarray(voice, dtype=np.float64)
+            v_pe = v.copy()
+            v_pe[1:] -= 0.97 * v[:-1]
+            nf       = 1 + (len(v_pe) - win) // hop
+            starts   = np.arange(nf) * hop
+            frames   = sliding_window_view(v_pe, win)[starts]
+            frames_w = (frames - frames.mean(axis=1, keepdims=True)) * np.hamming(win)
+            power     = np.abs(np.fft.rfft(frames_w, 2048, axis=1)) ** 2
+            freqs_sfe = np.fft.rfftfreq(2048, 1.0 / sr)
+            mask      = (freqs_sfe >= self.singer_band[0]) & \
+                        (freqs_sfe <= self.singer_band[1])
+            ratio  = power[:, mask].sum(axis=1) / np.maximum(power.sum(axis=1), 1e-15)
+            sfe_db = 10.0 * np.log10(np.maximum(ratio, 1e-6))
 
         # Assign each cycle to its enclosing frame
         cycle_starts = idx[:-1]
-        frame_idx    = np.clip(cycle_starts // hop, 0, n_frames - 1)
+        fi_fmt = np.clip(cycle_starts // hop, 0, n_frames - 1)
+        fi_sfe = np.clip(cycle_starts // hop, 0, max(len(sfe_db) - 1, 0))
 
         out = {
-            "f1":  f1[frame_idx],
-            "f2":  f2[frame_idx],
-            "f3":  f3[frame_idx],
-            "sfe": sfe_db[frame_idx],
+            "f1":  f1[fi_fmt],
+            "f2":  f2[fi_fmt],
+            "f3":  f3[fi_fmt],
+            "sfe": sfe_db[fi_sfe] if len(sfe_db) else z(),
         }
 
         def _report(name, arr, unit):
@@ -1227,177 +1309,84 @@ class FormantExtrasCalculator(MetricCalculator):
 
     def __init__(self, config: VoiceMapConfig,
                  win_ms: float = 25.0, hop_ms: float = 10.0,
-                 lpc_order: Optional[int] = None,
+                 n_formants: int = 5, max_formant: float = 5500.0,
+                 pre_emphasis_hz: float = 50.0,
                  spr_lo_band: Tuple[float, float] = (0.0, 2000.0),
-                 spr_hi_band: Tuple[float, float] = (2000.0, 4000.0)):
+                 spr_hi_band: Tuple[float, float] = (2000.0, 4000.0),
+                 lpc_order: Optional[int] = None):   # accepted, no longer used
         super().__init__(config)
         self.win_ms, self.hop_ms = float(win_ms), float(hop_ms)
-        self.lpc_order = int(lpc_order or (2 + 2 * config.sample_rate // 1000))
+        self.n_formants  = int(n_formants)
+        self.max_formant = float(max_formant)
+        self.pre_emphasis_hz = float(pre_emphasis_hz)
         self.spr_lo = spr_lo_band
         self.spr_hi = spr_hi_band
 
     def calculate(self, voice: np.ndarray,
                   cycle_triggers: np.ndarray) -> Dict[str, np.ndarray]:
-        logger.info("Calculating B1/B2/B3 + Formant Dispersion + SPR + GNE-like...")
+        logger.info("Calculating B1/B2/B3 (Burg poles) + Dispersion + SPR + GNE...")
         idx = np.where(cycle_triggers > 0.5)[0]
         n_cycles = max(len(idx) - 1, 0)
         z = lambda: np.zeros(n_cycles)
         if n_cycles == 0:
             return {k: z() for k in self.KEYS}
 
-        sr  = self.sample_rate
-        win = int(self.win_ms * 0.001 * sr)
-        hop = int(self.hop_ms * 0.001 * sr)
-        if len(voice) < win or hop < 1:
+        sr = self.sample_rate
+
+        # --- B1/B2/B3 + dispersion from Praat-style Burg poles ---
+        F, B, n_frames, hop = _praat_burg_formant_frames(
+            voice, sr, n_formants=self.n_formants, max_formant=self.max_formant,
+            win_ms=self.win_ms, hop_ms=self.hop_ms,
+            pre_emph_hz=self.pre_emphasis_hz)
+        if n_frames == 0:
             return {k: z() for k in self.KEYS}
 
-        # Pre-emphasis
-        v_pe = np.empty_like(voice)
-        v_pe[0]  = voice[0]
-        v_pe[1:] = voice[1:] - 0.97 * voice[:-1]
+        b1, b2, b3 = B[:, 0].copy(), B[:, 1].copy(), B[:, 2].copy()
+        # Physiological ceiling — FWHM > 800 Hz is implausible for speech
+        # formants; drop to 0 (the NA-as-0 convention used elsewhere).
+        for bb in (b1, b2, b3):
+            bb[bb > 800.0] = 0.0
+        f_disp = np.where((F[:, 0] > 0) & (F[:, 2] > 0),
+                          (F[:, 2] - F[:, 0]) / 2.0, 0.0)
 
-        n_frames = 1 + (len(v_pe) - win) // hop
-        starts   = np.arange(n_frames) * hop
-        frames   = sliding_window_view(v_pe, win)[starts]
-        frames_w = (frames - frames.mean(axis=1, keepdims=True)) * np.hamming(win)
+        # --- SPR + GNE: FFT power ratios on original-sr frames (unchanged) ---
+        win = int(self.win_ms * 0.001 * sr)
+        spr = np.zeros(n_frames)
+        gne_proxy = np.zeros(n_frames)
+        if len(voice) >= win:
+            v = np.asarray(voice, dtype=np.float64)
+            v_pe = v.copy()
+            v_pe[1:] -= 0.97 * v[:-1]
+            nf       = 1 + (len(v_pe) - win) // hop
+            starts   = np.arange(nf) * hop
+            frames   = sliding_window_view(v_pe, win)[starts]
+            frames_w = (frames - frames.mean(axis=1, keepdims=True)) * np.hamming(win)
+            psd   = np.abs(np.fft.rfft(frames_w, 2048, axis=1)) ** 2
+            freqs = np.fft.rfftfreq(2048, 1.0 / sr)
+            m_lo = (freqs >= self.spr_lo[0]) & (freqs < self.spr_lo[1])
+            m_hi = (freqs >= self.spr_hi[0]) & (freqs <= self.spr_hi[1])
+            spr  = 10.0 * np.log10(
+                np.maximum(psd[:, m_hi].sum(axis=1), 1e-15) /
+                np.maximum(psd[:, m_lo].sum(axis=1), 1e-15))
+            # GNE-like: normalised cross-power of two adjacent bands (待验证).
+            m_g1 = (freqs >= 500.0)  & (freqs < 1500.0)
+            m_g2 = (freqs >= 1500.0) & (freqs <= 2500.0)
+            e_g1 = psd[:, m_g1].sum(axis=1)
+            e_g2 = psd[:, m_g2].sum(axis=1)
+            gne_proxy = np.minimum(e_g1, e_g2) / np.maximum(
+                np.maximum(e_g1, e_g2), 1e-15)
 
-        # Batched autocorr → Levinson-Durbin via np.linalg.solve
-        nfft_ac = 1
-        while nfft_ac < 2 * win:
-            nfft_ac *= 2
-        X_ac = np.fft.rfft(frames_w, nfft_ac, axis=1)
-        acf  = np.fft.irfft(X_ac * np.conj(X_ac), nfft_ac, axis=1)[:, :self.lpc_order + 1]
-
-        valid = acf[:, 0] > 1e-12
-        p = self.lpc_order
-        lpc = np.zeros((n_frames, p + 1))
-        lpc[:, 0] = 1.0
-        if valid.any():
-            # 分块求解，避免长音频下 (m, p, p) Toeplitz 大数组爆内存
-            # （见 FormantCalculator 同处注释）。结果与整块求解一致。
-            ij       = np.abs(np.arange(p)[:, None] - np.arange(p)[None, :])
-            valid_ix = np.where(valid)[0]
-            CHUNK = 4096
-            for c0 in range(0, len(valid_ix), CHUNK):
-                fr  = valid_ix[c0:c0 + CHUNK]
-                R   = acf[fr][:, ij]
-                rhs = -acf[fr, 1:p + 1, None]
-                try:
-                    lpc[fr, 1:] = np.linalg.solve(R, rhs)[..., 0]
-                except np.linalg.LinAlgError:
-                    pass
-
-        # ── Bandwidths from LPC spectrum -3 dB width (fast) ──────────────
-        # Original implementation used np.roots in a Python loop (27 s on
-        # 3 k frames) and the batched eigvals replacement turned out to
-        # also be serial under the hood (LAPACK dispatches per-batch).
-        # Switching to LPC-spectrum peak picking + -3 dB FWHM matches the
-        # speed of the existing FormantCalculator (~3 s) and is the same
-        # method most clinical tools (Praat alternative track) use anyway.
-        from scipy.signal import find_peaks
-        nfft_sp  = 1024
-        A_sp     = np.fft.rfft(lpc, nfft_sp, axis=1)
-        H        = 1.0 / np.maximum(np.abs(A_sp), 1e-12)
-        log_H    = 20.0 * np.log10(np.maximum(H, 1e-12))
-        freqs_sp = np.fft.rfftfreq(nfft_sp, 1.0 / sr)
-        band_m   = (freqs_sp >= 90.0) & (freqs_sp <= 5500.0)
-        freqs_band = freqs_sp[band_m]
-        # Min peak distance in bins ~ 150 Hz
-        min_gap = max(1, int(150.0 / (sr / nfft_sp)))
-
-        b1 = np.zeros(n_frames)
-        b2 = np.zeros(n_frames)
-        b3 = np.zeros(n_frames)
-        f_disp = np.zeros(n_frames)
-
-        for i in range(n_frames):
-            if not valid[i]:
-                continue
-            spec_db = log_H[i, band_m]
-            pk, _ = find_peaks(spec_db, distance=min_gap)
-            if len(pk) == 0:
-                continue
-            pf = freqs_band[pk]
-            keep = pf >= 200.0   # F1 floor (skip pitch artefacts)
-            pk, pf = pk[keep], pf[keep]
-            if len(pk) == 0:
-                continue
-            bws = np.empty(len(pk))
-            for j, p in enumerate(pk):
-                peak_db = spec_db[p]
-                thr     = peak_db - 3.0
-                # Bound the walk by the neighbouring peaks: never let the
-                # FWHM cross into another formant's territory. Without
-                # this clamp, two close formants share a shallow valley
-                # that doesn't dip below -3 dB and the bandwidth blows
-                # out to several kHz (validation observed max 5 kHz).
-                left_limit  = pk[j - 1] if j > 0          else 0
-                right_limit = pk[j + 1] if j < len(pk)-1 else len(spec_db) - 1
-                # Walk left to first sample below thr (or until we hit
-                # the local minimum between this and the previous peak).
-                lo = p
-                while lo > left_limit and spec_db[lo] > thr:
-                    lo -= 1
-                hi = p
-                while hi < right_limit and spec_db[hi] > thr:
-                    hi += 1
-                # Inside [left_limit, right_limit], if -3 dB never crossed,
-                # fall back to the local minimum between the two peaks
-                # (best estimator we have without crossing into neighbours).
-                if lo == left_limit and lo != 0:
-                    lo = left_limit + int(np.argmin(spec_db[left_limit:p+1]))
-                if hi == right_limit and hi != len(spec_db) - 1:
-                    hi = p + int(np.argmin(spec_db[p:right_limit+1]))
-                bws[j] = freqs_band[hi] - freqs_band[lo]
-            # Hard ceiling: FWHM > 800 Hz is physiologically implausible
-            # for typical speech formants (literature F1: 50-150, F2:
-            # 60-200, F3: 100-400 Hz; even abnormal voices stay under
-            # ~500). Anything wider is a method artefact (peak merger
-            # the local-min clamp above couldn't catch). Drop to 0
-            # to follow the same NA-as-0 convention used by the other
-            # per-frame metrics.
-            bws = np.where(bws > 800.0, 0.0, bws)
-            # pf already ascending from find_peaks
-            if len(bws) >= 1: b1[i] = bws[0]
-            if len(bws) >= 2: b2[i] = bws[1]
-            if len(bws) >= 3: b3[i] = bws[2]
-            if len(pf) >= 3:
-                f_disp[i] = (pf[2] - pf[0]) / 2.0
-
-        # SPR (singing power ratio): hi-band / lo-band (dB)
-        nfft_sp = 2048
-        Xsp     = np.fft.rfft(frames_w, nfft_sp, axis=1)
-        psd     = (np.abs(Xsp)) ** 2
-        freqs   = np.fft.rfftfreq(nfft_sp, 1.0 / sr)
-        m_lo = (freqs >= self.spr_lo[0]) & (freqs < self.spr_lo[1])
-        m_hi = (freqs >= self.spr_hi[0]) & (freqs <= self.spr_hi[1])
-        e_lo = psd[:, m_lo].sum(axis=1)
-        e_hi = psd[:, m_hi].sum(axis=1)
-        spr  = 10.0 * np.log10(np.maximum(e_hi, 1e-15) /
-                                np.maximum(e_lo, 1e-15))
-
-        # GNE-like: simplified Michaelis-style coherence between two
-        # adjacent frequency bands of the LPC residual envelope. Real
-        # GNE bandpasses + Hilbert envelopes; we approximate with two
-        # frequency bands from the spectrum and take their normalised
-        # cross-power. Marked 待验证.
-        m_g1 = (freqs >= 500.0)  & (freqs < 1500.0)
-        m_g2 = (freqs >= 1500.0) & (freqs <= 2500.0)
-        e_g1 = psd[:, m_g1].sum(axis=1)
-        e_g2 = psd[:, m_g2].sum(axis=1)
-        gne_proxy = np.minimum(e_g1, e_g2) / np.maximum(np.maximum(e_g1, e_g2), 1e-15)
-
-        # Cycle assignment
         cycle_starts = idx[:-1]
-        frame_idx    = np.clip(cycle_starts // hop, 0, n_frames - 1)
+        fi    = np.clip(cycle_starts // hop, 0, n_frames - 1)
+        fi_sp = np.clip(cycle_starts // hop, 0, max(len(spr) - 1, 0))
 
         return {
-            "b1":                  b1[frame_idx],
-            "b2":                  b2[frame_idx],
-            "b3":                  b3[frame_idx],
-            "formant_dispersion":  f_disp[frame_idx],
-            "spr":                 spr[frame_idx],
-            "gne":                 gne_proxy[frame_idx],
+            "b1":                  b1[fi],
+            "b2":                  b2[fi],
+            "b3":                  b3[fi],
+            "formant_dispersion":  f_disp[fi],
+            "spr":                 spr[fi_sp] if len(spr) else z(),
+            "gne":                 gne_proxy[fi_sp] if len(gne_proxy) else z(),
         }
 
 
