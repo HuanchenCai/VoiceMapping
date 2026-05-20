@@ -1128,21 +1128,27 @@ class FormantCalculator(MetricCalculator):
         lpc = np.zeros((n_frames, p + 1))
         lpc[:, 0] = 1.0
         if valid.any():
-            # Toeplitz matrix per valid frame, then batched solve
-            ij   = np.arange(p)[:, None] - np.arange(p)[None, :]
-            R    = acf[valid][:, np.abs(ij)]                     # (m, p, p)
-            rhs  = -acf[valid, 1:p + 1, None]
-            try:
-                a_sol = np.linalg.solve(R, rhs)[..., 0]          # (m, p)
-                lpc[valid, 1:] = a_sol
-            except np.linalg.LinAlgError:
-                logger.warning("  LPC batch solve singular; falling back per-frame")
-                for f in np.where(valid)[0]:
-                    try:
-                        R_f = acf[f, np.abs(ij)]
-                        lpc[f, 1:] = np.linalg.solve(R_f, -acf[f, 1:p + 1])
-                    except np.linalg.LinAlgError:
-                        pass
+            # Toeplitz 索引图 |i-j| — 每帧的 R 即 acf[f, ij]。
+            ij       = np.abs(np.arange(p)[:, None] - np.arange(p)[None, :])
+            valid_ix = np.where(valid)[0]
+            # 分块求解：一次性构造 (m, p, p) 的 Toeplitz 大数组在长音频下
+            # 会爆内存（25 min 音频 m≈15 万、p=90 → 整块约 10 GB → 卡死）。
+            # 分块把峰值内存压到每块 ~0.3 GB，结果与整块求解完全一致。
+            CHUNK = 4096
+            for c0 in range(0, len(valid_ix), CHUNK):
+                fr  = valid_ix[c0:c0 + CHUNK]
+                R   = acf[fr][:, ij]                             # (chunk, p, p)
+                rhs = -acf[fr, 1:p + 1, None]
+                try:
+                    lpc[fr, 1:] = np.linalg.solve(R, rhs)[..., 0]
+                except np.linalg.LinAlgError:
+                    logger.warning("  LPC chunk solve singular; falling back per-frame")
+                    for f in fr:
+                        try:
+                            lpc[f, 1:] = np.linalg.solve(acf[f, ij],
+                                                          -acf[f, 1:p + 1])
+                        except np.linalg.LinAlgError:
+                            pass
 
         # --- LPC spectrum magnitude → per-frame peaks → F1/F2/F3 ---
         nfft_sp  = 1024
@@ -1267,13 +1273,19 @@ class FormantExtrasCalculator(MetricCalculator):
         lpc = np.zeros((n_frames, p + 1))
         lpc[:, 0] = 1.0
         if valid.any():
-            ij  = np.arange(p)[:, None] - np.arange(p)[None, :]
-            R   = acf[valid][:, np.abs(ij)]
-            rhs = -acf[valid, 1:p + 1, None]
-            try:
-                lpc[valid, 1:] = np.linalg.solve(R, rhs)[..., 0]
-            except np.linalg.LinAlgError:
-                pass
+            # 分块求解，避免长音频下 (m, p, p) Toeplitz 大数组爆内存
+            # （见 FormantCalculator 同处注释）。结果与整块求解一致。
+            ij       = np.abs(np.arange(p)[:, None] - np.arange(p)[None, :])
+            valid_ix = np.where(valid)[0]
+            CHUNK = 4096
+            for c0 in range(0, len(valid_ix), CHUNK):
+                fr  = valid_ix[c0:c0 + CHUNK]
+                R   = acf[fr][:, ij]
+                rhs = -acf[fr, 1:p + 1, None]
+                try:
+                    lpc[fr, 1:] = np.linalg.solve(R, rhs)[..., 0]
+                except np.linalg.LinAlgError:
+                    pass
 
         # ── Bandwidths from LPC spectrum -3 dB width (fast) ──────────────
         # Original implementation used np.roots in a Python loop (27 s on
