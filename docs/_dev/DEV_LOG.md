@@ -400,7 +400,8 @@ metric metadata 集中管理 + 一次性加 22 个常见学术 / 临床声学指
 - GNE-like 与原版 Michaelis 1997 的相关性（当前是简化代理）
 - Spectral Skewness/Kurtosis 与 Praat 的 spectrum moment 定义对齐
 - VibratoJitter 与歌手实际感受到的"颤音不稳"的相关性
-- B1/B2/B3 LPC 根法 vs Praat Burg 根法的差异（应在 ±20% 内）
+
+（B1/B2/B3 已验证：共振峰提取重写为 Praat 式 Burg+求根后，与 Praat 中位误差 3-4%，见下方 known issues，commit `a111162`）
 
 Commits: M1 系列（多个 commit 滚动到 push）
 
@@ -463,7 +464,7 @@ Commit: `f34fa1f` (validate script extension)
 - **聚类保证非空** — 三层防线（UI 不过滤 / 聚类救援 / 后过滤救援），k=5 永远 12 项 (`67bb985`)
 - **P1：Jitter / Shimmer / HNR** 结果与 Praat 对齐（MDVP 1.3× 周期因子过滤后）(`ab54398`, `0908a2b`)
 - **P2a：Vibrato rate / extent**，5-7 Hz 范围 (`6a92951`)
-- **P2b：Formants F1/F2/F3 + Singer's Formant Energy**（f1_floor=250 Hz 后 F1 与 Praat 偏差 <10%）(`d85882b`, `0908a2b`)
+- **P2b：Formants F1/F2/F3 + Singer's Formant Energy**（Praat 式 Burg+求根，F1/F2/F3 与 Praat 中位误差 <0.5%）(`d85882b`, `0908a2b`, `a111162`)
 - **P2c：H1-H2 / H1-H3** 频谱倾斜 (`be30870`)
 - **P3：OQ / SPQ / CIQ** 基于 dEGG 事件 (`e9753c8`)
 - **Praat 交叉验证脚本** `tests/validate_params.py` (`0908a2b`)
@@ -515,7 +516,7 @@ Commit: `f34fa1f` (validate script extension)
 
 - **Jitter 约为 Praat 的 3×** — 不是 bug，是方法学差异：我们基于 EGG 检测周期，Praat 基于语音自相关。EGG 对真实声门脉冲更敏感，更多微周期被算入。文档已注明。
 - **HNR 比 Praat 高 ~29%** — 我们排除纯静音帧，Praat 把 -200 dB 静音折入平均。帧级 HNR 差异 ±1 dB。
-- **F2 / F3 偏差 20-25%** — LPC spectrum peak-picking vs Praat Burg + root-finding 的方法差。F1 在加了 `f1_floor=250 Hz` 后已 <10%。
+- **共振峰 F1/F2/F3 + 带宽 B1/B2/B3 已对齐 Praat** — 共振峰提取重写为 Praat `To Formant (burg)` 的等价实现（重采样到 2×max_formant → 50 Hz 预加重 → 高斯窗 → 批量 Burg 法 LPC → 多项式求根，从极点角度/半径取频率与带宽）。逐帧 vs Praat：F1/F2/F3 中位误差 0.1-0.3%、94-99% 帧在 ±20% 内；B1/B2/B3 中位误差 3-4%。旧的「全频带 LPC 频谱峰值拾取」（与 Praat 差 20-25%、靠 `f1_floor=250 Hz` 门控）已废弃 (`a111162`)。
 - **cPhon 一簇经常为空** — sklearn KMeans 在 9 维 z-score 空间偶尔产空簇；已加三层救援（包括 post-filter 抢 1 个点填入），保证每簇至少 1 个 cell。
 - **PNG 导出慢** — 22 个 metric 每个 savefig dpi=150 约 0.4s，全量导出 +8s。GUI 默认关闭，开启需要在 Settings 勾。
 - **SC centroid CSV 格式可能不兼容** — 我们写的 CSV 有 `# VoiceMap cluster centroids k=… n_harm=… dim=…` 头（commit 之前是 `# FonaDyn cluster centroids …`，loader 同时兼容两种）+ `cluster;f0;f1;…` 行；SuperCollider 原版的 `cEGG.csv` 字段顺序和分隔符可能不同，导入 SC 到 Python 或反向时需核对。
