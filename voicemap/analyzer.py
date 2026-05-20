@@ -753,6 +753,12 @@ class VoiceMapAnalyzer:
         _cb(1)   # "加载音频"
         voice, egg, sr, duration = self.load_audio(audio_file)
 
+        if egg is None:
+            raise ValueError(
+                f"音频文件只有单声道，缺少 EGG 通道，无法进行 VRP 分析。\n"
+                f"VoiceMap 需要双声道文件：声道 0 = 嗓音，声道 1 = EGG。\n"
+                f"文件：{audio_file}")
+
         _cb(2)   # "预处理 (HPF / 带通滤波)"
         voice_p = self.preprocess_voice(voice)
         egg_p   = self.preprocess_egg(egg)

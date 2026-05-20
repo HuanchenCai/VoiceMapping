@@ -1779,6 +1779,70 @@ class VoiceMapApp(_TkBase):
         if path:
             self.output_dir_var.set(path)
 
+    def _check_audio_channels(self, path: Path):
+        """运行前校验音频通道。VoiceMap 约定双声道 WAV：
+        声道 1 = 嗓音(mic)，声道 2 = EGG。
+
+        返回 (ok, error, warnings)：
+          ok=False   → 致命问题，应中止分析
+          error      → 致命问题的中文说明
+          warnings   → 非致命提示列表，仅记录到日志
+        """
+        import soundfile as sf
+        import numpy as np
+        warnings: list[str] = []
+
+        try:
+            info = sf.info(str(path))
+        except Exception as e:
+            return False, f"无法读取音频文件头：{e}", warnings
+
+        if info.channels < 2:
+            return (False,
+                    f"文件是单声道（{info.channels} ch），缺少 EGG 通道，无法分析。"
+                    f"VoiceMap 需要双声道 WAV：声道 1 = 嗓音(mic)，声道 2 = EGG。",
+                    warnings)
+        if info.channels > 2:
+            warnings.append(
+                f"文件有 {info.channels} 个声道，仅使用声道 1(嗓音) 与声道 2(EGG)。")
+
+        # 启发式校验通道顺序与 EGG 是否有效。读中段约 20s 样本即可。
+        try:
+            sr = info.samplerate
+            n = min(info.frames, sr * 20)
+            start = max(0, (info.frames - n) // 2)   # 取中段，避开首尾静音
+            data, _ = sf.read(str(path), start=start, frames=n,
+                              dtype="float64", always_2d=True)
+            ch_voice, ch_egg = data[:, 0], data[:, 1]
+
+            def _hf_ratio(x):
+                x = x - x.mean()
+                if not np.any(x):
+                    return 0.0
+                spec = np.abs(np.fft.rfft(x)) ** 2
+                freqs = np.fft.rfftfreq(len(x), 1.0 / sr)
+                total = spec.sum()
+                return float(spec[freqs > 2000.0].sum() / total) if total else 0.0
+
+            rms_egg = float(np.sqrt(np.mean(ch_egg ** 2)))
+            if rms_egg < 1e-4:
+                warnings.append(
+                    f"声道 2(EGG) 几乎是静音（RMS={rms_egg:.2e}），"
+                    f"可能录音时没接 EGG 设备——分析结果会不可靠。")
+            else:
+                # 嗓音通道含辅音/气声/噪声，高频能量占比明显高于 EGG
+                # （EGG 近乎只有低频周期波）。若反过来，通道顺序可能接反。
+                r_voice, r_egg = _hf_ratio(ch_voice), _hf_ratio(ch_egg)
+                if r_egg > r_voice * 1.5:
+                    warnings.append(
+                        f"通道顺序可能接反：声道 2 高频能量占比({r_egg:.1%})"
+                        f"高于声道 1({r_voice:.1%})——按约定声道 1 应是嗓音(mic)、"
+                        f"声道 2 应是 EGG。若结果异常请检查录音的左右声道。")
+        except Exception as e:
+            warnings.append(f"通道顺序启发式检查已跳过：{e}")
+
+        return True, "", warnings
+
     def _start_analysis(self, audio_path: str):
         if self._worker and self._worker.is_alive():
             return
@@ -1799,6 +1863,20 @@ class VoiceMapApp(_TkBase):
         self.log_text.delete("1.0", "end")
         self.log_text.configure(state="disabled")
         self._log_count = 0
+
+        # 运行前校验：必须是双声道，且声道 1=嗓音 / 声道 2=EGG
+        ok, err, warns = self._check_audio_channels(p)
+        for w in warns:
+            self._append_log("WARNING", w)
+        if not ok:
+            self._append_log("ERROR", err)
+            self._set_status(tr("status.failed"), ERR, key="status.failed")
+            entry = self._track_for_path(p)
+            if entry is not None:
+                entry.state = "failed"
+                self._tracks_render()
+            self._update_start_btn()
+            return
 
         self.audio_path = p
         # The drop_zone label updates only matter for the empty-state
