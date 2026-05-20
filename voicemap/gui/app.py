@@ -1784,9 +1784,12 @@ class VoiceMapApp(_TkBase):
         声道 1 = 嗓音(mic)，声道 2 = EGG。
 
         返回 (ok, error, warnings)：
-          ok=False   → 致命问题，应中止分析
+          ok=False   → 致命问题（文件无法读取），应中止分析
           error      → 致命问题的中文说明
           warnings   → 非致命提示列表，仅记录到日志
+
+        单声道文件不再视为致命错误：会进入单声道模式（周期检测改用
+        嗓音通道，EGG 类指标不可用），仅给出警告。
         """
         import soundfile as sf
         import numpy as np
@@ -1798,10 +1801,11 @@ class VoiceMapApp(_TkBase):
             return False, f"无法读取音频文件头：{e}", warnings
 
         if info.channels < 2:
-            return (False,
-                    f"文件是单声道（{info.channels} ch），缺少 EGG 通道，无法分析。"
-                    f"VoiceMap 需要双声道 WAV：声道 1 = 嗓音(mic)，声道 2 = EGG。",
-                    warnings)
+            warnings.append(
+                f"文件是单声道（{info.channels} ch），无 EGG 通道 — 进入单声道模式："
+                f"周期检测改用嗓音通道；EGG 类指标"
+                f"(Qcontact/OQ/SPQ/CIQ/EGG聚类/Entropy/HRFegg)不可用，不会出现在结果中。")
+            return True, "", warnings
         if info.channels > 2:
             warnings.append(
                 f"文件有 {info.channels} 个声道，仅使用声道 1(嗓音) 与声道 2(EGG)。")
