@@ -450,6 +450,7 @@ class VoiceMapApp(_TkBase):
         # Exclude all three from the curve picker.
         exclude = {"Total", "maxCluster", "maxCPhon"}
         self._f0_vars = {}                          # metric key -> BooleanVar
+        self._f0_band_var = tk.BooleanVar(value=True)
 
         # ── Left: control column ──────────────────────────────────────
         ctrl = tk.Frame(parent, bg=PANEL, width=250,
@@ -463,6 +464,14 @@ class VoiceMapApp(_TkBase):
                  bg=PANEL, fg=MUTED, font=FONT_CAPTION,
                  wraplength=220, justify="left").pack(
                      anchor="w", padx=12, pady=(0, 8))
+
+        tk.Checkbutton(ctrl, text="显示 ±1SD 离散带",
+                       variable=self._f0_band_var,
+                       command=self._refresh_f0_tab,
+                       bg=PANEL, fg=TEXT, selectcolor=PANEL_HI,
+                       activebackground=PANEL, activeforeground=TEXT,
+                       font=FONT_SMALL, anchor="w",
+                       takefocus=0).pack(fill="x", padx=10, pady=(0, 4))
 
         tk.Button(ctrl, text="清空选择", command=self._f0_clear_all,
                   bg=PANEL_HI, fg=TEXT, activebackground=BORDER,
@@ -518,6 +527,7 @@ class VoiceMapApp(_TkBase):
         cw = self._f0_plot_canvas.get_tk_widget()
         cw.configure(bg="white", highlightthickness=0, bd=0)
         cw.pack(fill="both", expand=True, padx=6, pady=6)
+        cw.bind("<Configure>", self._on_f0_configure, add="+")
 
         self._refresh_f0_tab()
 
@@ -536,6 +546,17 @@ class VoiceMapApp(_TkBase):
             sc.yview_scroll(-1 if event.delta > 0 else 1, "units")
         except tk.TclError:
             pass
+
+    def _on_f0_configure(self, _event=None):
+        """Debounced redraw so the F0 figure tracks the widget size on
+        first layout and window resize (else it stays clipped at the
+        created figsize)."""
+        try:
+            if getattr(self, "_f0_resize_after", None):
+                self.after_cancel(self._f0_resize_after)
+        except Exception:
+            pass
+        self._f0_resize_after = self.after(80, self._refresh_f0_tab)
 
     def _on_tab_changed(self, _event=None):
         """Redraw the F0 tab when it becomes visible so it picks up the
@@ -575,11 +596,24 @@ class VoiceMapApp(_TkBase):
         currently-ticked metrics. Safe to call before the tab exists."""
         if not hasattr(self, "_f0_fig"):
             return
+        # Match the figure to the current widget size — matplotlib's own
+        # <Configure> handler may not have run yet on first layout / tab
+        # switch, leaving the figure at its created figsize (clipped).
+        cw = self._f0_plot_canvas.get_tk_widget()
+        try:
+            cw.update_idletasks()
+            w, h = cw.winfo_width(), cw.winfo_height()
+            if w > 1 and h > 1:
+                dpi = self._f0_fig.get_dpi()
+                self._f0_fig.set_size_inches(w / dpi, h / dpi, forward=False)
+        except tk.TclError:
+            pass
         from voicemap.f0_profile import draw_f0_scatter
         keys = [k for k, v in self._f0_vars.items() if v.get()]
         try:
             draw_f0_scatter(self._f0_fig, self._load_cycle_log(), keys,
-                            show_trend=True)
+                            show_trend=True,
+                            show_band=bool(self._f0_band_var.get()))
             self._f0_plot_canvas.draw_idle()
         except Exception:
             logging.exception("F0 trend redraw failed")
