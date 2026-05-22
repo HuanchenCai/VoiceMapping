@@ -400,45 +400,18 @@ def draw_f0_scatter(fig, cycle_df, metric_keys, show_trend=True,
         if show_scatter:
             ax.scatter(midi, vals, s=5, color=color, alpha=0.10,
                        edgecolors="none", rasterized=True, zorder=2)
-        ax.plot([], [], color=color, lw=2.6, label=key)   # legend proxy
         if not show_trend or len(tx) < 2:
+            ax.plot([], [], color=color, lw=2.4, label=key)
             drawn += 1
             continue
         # SPL-balanced kernel trend: each F0 estimated as if sung at the
         # global SPL mix, so a quietly-sung pitch is not read as low.
         ty, tsd = _weighted_kernel_trend(midi, vals, w_spl, tx)
-        rgb = mcolors.to_rgb(color)
-        # Opacity per segment tracks local cycle density — sparse F0
-        # fade, so the eye weights the trend by how much data backs it.
-        w = _coverage_weight(midi, tx)
-        seg_w = 0.5 * (w[:-1] + w[1:])
-
         if show_band:
-            blo = np.clip(ty - tsd, 0.0, 1.0)
-            bhi = np.clip(ty + tsd, 0.0, 1.0)
-            ok_b = np.isfinite(blo) & np.isfinite(bhi)
-            quads, qcols = [], []
-            for i in range(len(tx) - 1):
-                if not (ok_b[i] and ok_b[i + 1]):
-                    continue
-                quads.append([(tx[i], blo[i]), (tx[i + 1], blo[i + 1]),
-                              (tx[i + 1], bhi[i + 1]), (tx[i], bhi[i])])
-                qcols.append((*rgb, 0.22 * float(seg_w[i])))
-            if quads:
-                ax.add_collection(PolyCollection(
-                    quads, facecolors=qcols, edgecolors="none", zorder=3))
-
-        ok_t = np.isfinite(ty)
-        pts = np.column_stack([tx, ty])
-        lsegs, lcols = [], []
-        for i in range(len(tx) - 1):
-            if not (ok_t[i] and ok_t[i + 1]):
-                continue
-            lsegs.append([pts[i], pts[i + 1]])
-            lcols.append((*rgb, 0.18 + 0.82 * float(seg_w[i])))
-        if lsegs:
-            ax.add_collection(LineCollection(lsegs, colors=lcols,
-                                             linewidths=2.6, zorder=5))
+            ax.fill_between(tx, np.clip(ty - tsd, 0.0, 1.0),
+                            np.clip(ty + tsd, 0.0, 1.0),
+                            color=color, alpha=0.15, linewidth=0, zorder=3)
+        ax.plot(tx, ty, color=color, lw=2.4, zorder=5, label=key)
         drawn += 1
 
     ax.set_ylim(-0.02, 1.02)
