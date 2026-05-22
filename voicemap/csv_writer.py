@@ -27,34 +27,23 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-def write_vrp(analyzer: "VoiceMapAnalyzer",
-              metrics: Dict[str, np.ndarray],
-              return_df: bool = False,
-              plot_mode: str = "per-metric",
-              export_plots: Optional[bool] = None,
-              write_disk: bool = True):
-    """Build the per-cell aggregate DataFrame, optionally write it to CSV
-    and emit per-metric / combined PNGs.
+def _build_cycle_dataframe(config, metrics: Dict[str, np.ndarray],
+                           round_grid: bool) -> pd.DataFrame:
+    """One row per detected cycle, every metric column aligned.
 
-    plot_mode:
-      "none"       — skip PNG export (fastest; GUI embeds in-memory)
-      "per-metric" — one PNG per active metric (default; CLI-compatible)
-      "combined"   — single overview PNG with a grid of all metrics
+    This is the un-aggregated table the VRP is built from: each cycle's
+    per-cycle and windowed metrics already share a common index (window
+    metrics were assigned to cycles upstream).
 
-    `export_plots` is a legacy bool kwarg. False ⇒ "none", True ⇒ keep
-    current plot_mode; kept so older callers still work.
-
-    Returns ``out_file`` (str) by default, or ``(out_file, grouped_df)``
-    when ``return_df=True``. ``out_file`` is empty when ``write_disk=False``.
+    round_grid=True snaps MIDI/dB onto the integer (semitone, dB) grid
+    for VRP cell binning. round_grid=False keeps them continuous — the
+    form used by the per-cycle log, where binning is the very thing we
+    want to avoid.
     """
-    if export_plots is False:
-        plot_mode = "none"
-    config = analyzer.config
-    logger.info("Outputting VRP CSV...")
     spl_corr = metrics['spl'] + config.spl_correction_db
 
-    # Cluster labels may be shorter than metric arrays (e.g. trailing cycles
-    # dropped during feature extraction); align to the shortest array.
+    # Cluster labels may be shorter than metric arrays (e.g. trailing
+    # cycles dropped during feature extraction); align to base_n.
     base_n = len(metrics['midi'])
     cluster = metrics.get('cluster', np.zeros(base_n, dtype=np.int32))
     phon    = metrics.get('phon',    np.zeros(base_n, dtype=np.int32))
@@ -65,7 +54,6 @@ def write_vrp(analyzer: "VoiceMapAnalyzer",
         phon = np.concatenate([phon, np.zeros(base_n - len(phon),
                                                dtype=phon.dtype)])
 
-    # P1 per-cycle scalars: align to base_n same as cluster arrays
     def _pad(arr, n, dtype=np.float64):
         if arr is None:
             return np.zeros(n, dtype=dtype)
@@ -74,9 +62,18 @@ def write_vrp(analyzer: "VoiceMapAnalyzer",
             return np.concatenate([arr, np.zeros(n - len(arr), dtype=dtype)])
         return arr[:n]
 
-    df = pd.DataFrame({
-        'MIDI':     np.round(np.where(metrics['midi'] > 0, metrics['midi'], 0)).astype(int),
-        'dB':       np.round(np.where(spl_corr > 0, spl_corr, 0)).astype(int),
+    if round_grid:
+        midi_col = np.round(np.where(metrics['midi'] > 0,
+                                     metrics['midi'], 0)).astype(int)
+        db_col   = np.round(np.where(spl_corr > 0, spl_corr, 0)).astype(int)
+    else:
+        midi_col = np.where(metrics['midi'] > 0,
+                            metrics['midi'], 0.0).astype(np.float64)
+        db_col   = np.where(spl_corr > 0, spl_corr, 0.0).astype(np.float64)
+
+    return pd.DataFrame({
+        'MIDI':     midi_col,
+        'dB':       db_col,
         'Total':    1,
         'Clarity':  metrics['clarity'],
         'CPP':      metrics['cpp'],
@@ -100,7 +97,6 @@ def write_vrp(analyzer: "VoiceMapAnalyzer",
         'CPPS':          _pad(metrics.get('cpps'),          base_n),
         'PPE':           _pad(metrics.get('ppe'),           base_n),
         'ZCR':           _pad(metrics.get('zcr'),           base_n),
-        # 频谱形态 / 声压 / Vibrato / GNE / 共振峰带宽（待验证）
         'RMS':                _pad(metrics.get('rms'),               base_n),
         'F0_Hz':              _pad(metrics.get('f0_hz'),             base_n),
         'SpectralCentroid':   _pad(metrics.get('spec_centroid'),     base_n),
@@ -138,6 +134,62 @@ def write_vrp(analyzer: "VoiceMapAnalyzer",
         '_cluster': cluster.astype(int),
         '_phon':    phon.astype(int),
     })
+
+
+def write_cycle_log(config, metrics: Dict[str, np.ndarray],
+                    vrp_out_file: str) -> str:
+    """Write the per-cycle log CSV — one row per cycle, no binning.
+
+    The VRP collapses thousands of cycles into one (semitone, dB) cell,
+    discarding all within-cell variation. The log keeps every cycle at
+    its true continuous F0 (MIDI) and SPL so downstream plots can use
+    the real point cloud instead of the aggregated grid.
+
+    Pairs with the VRP CSV: same timestamp, ``_cycles.csv`` suffix.
+    """
+    df = _build_cycle_dataframe(config, metrics, round_grid=False)
+    range_mask = (
+        (df['MIDI'] >= config.n_min_midi) & (df['MIDI'] <= config.n_max_midi) &
+        (df['dB']   >= config.n_min_spl)  & (df['dB']   <= config.n_max_spl)
+    )
+    df = df[range_mask].copy()
+    # Per cycle: Total is always 1, and each cycle carries a single
+    # cluster label (the per-cell percentage columns make no sense here).
+    df = df.drop(columns=['Total'])
+    df = df.rename(columns={'_cluster': 'Cluster', '_phon': 'cPhon'})
+    df.insert(0, 'cycle', np.arange(len(df), dtype=int))
+
+    out_file = vrp_out_file.replace('_VRP.csv', '_cycles.csv')
+    df.to_csv(out_file, index=False, sep=';')
+    logger.info("Cycle log: %d cycles -> %s", len(df), out_file)
+    return out_file
+
+
+def write_vrp(analyzer: "VoiceMapAnalyzer",
+              metrics: Dict[str, np.ndarray],
+              return_df: bool = False,
+              plot_mode: str = "per-metric",
+              export_plots: Optional[bool] = None,
+              write_disk: bool = True):
+    """Build the per-cell aggregate DataFrame, optionally write it to CSV
+    and emit per-metric / combined PNGs.
+
+    plot_mode:
+      "none"       — skip PNG export (fastest; GUI embeds in-memory)
+      "per-metric" — one PNG per active metric (default; CLI-compatible)
+      "combined"   — single overview PNG with a grid of all metrics
+
+    `export_plots` is a legacy bool kwarg. False ⇒ "none", True ⇒ keep
+    current plot_mode; kept so older callers still work.
+
+    Returns ``out_file`` (str) by default, or ``(out_file, grouped_df)``
+    when ``return_df=True``. ``out_file`` is empty when ``write_disk=False``.
+    """
+    if export_plots is False:
+        plot_mode = "none"
+    config = analyzer.config
+    logger.info("Outputting VRP CSV...")
+    df = _build_cycle_dataframe(config, metrics, round_grid=True)
     logger.info("  Raw points: %d", len(df))
 
     range_mask = (
