@@ -9,6 +9,7 @@ import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 from scipy.signal import butter, sosfilt, lfilter
 from scipy.fft import rfft, irfft, ifft as _ifft
+from scipy.ndimage import median_filter
 from typing import Tuple, Dict, Optional
 import logging
 
@@ -157,6 +158,78 @@ class SPLCalculator(MetricCalculator):
 # ---------------------------------------------------------------------------
 # Clarity + MIDI (F0) — Tartini-style windowed NSDF autocorrelation
 # ---------------------------------------------------------------------------
+def _key_maxima(ns: np.ndarray) -> list:
+    """Indices of the NSDF 'key maxima' — the argmax within each
+    positive-valued region (the McLeod-Wyvill peak-picking primitive).
+    Returned lag-ascending (i.e. pitch-descending)."""
+    peaks: list = []
+    start = None
+    for j in range(len(ns)):
+        if ns[j] > 0.0 and start is None:
+            start = j
+        elif ns[j] <= 0.0 and start is not None:
+            peaks.append(start + int(np.argmax(ns[start:j])))
+            start = None
+    if start is not None:
+        peaks.append(start + int(np.argmax(ns[start:])))
+    return peaks
+
+
+def _repair_subharmonic_octaves(nsdf, peak_lag, clarity_w, midi_w, lo, sr,
+                                radius=15, gap=8.0, tol=4.0, min_nsdf=0.5):
+    """Temporal-continuity repair of subharmonic (octave-down) pitch errors.
+
+    Frame-wise NSDF pitch picking is inherently ambiguous for voices with
+    strong subharmonics: the autocorrelation forms a comb of near-equal
+    maxima at the true period and at 2x/3x/... of it, so no single-frame
+    rule (global argmax, power-of-2 octave halving, McLeod-Wyvill first
+    peak) can reliably pick the true pitch. Temporal continuity is what
+    disambiguates it — and the detector otherwise has no tracking stage.
+
+    For each window whose MIDI sits `gap`+ semitones below the local
+    rolling median (an isolated octave-down glitch — a real note never
+    drops an octave for a single 23 ms frame and back), re-pick the NSDF
+    key maximum nearest that median, provided it is a genuine peak
+    (NSDF > `min_nsdf`) and lands within `tol` semitones of it. Windows
+    that agree with their neighbours are never touched, so genuine low
+    notes (whose neighbours are also low, moving the median with them)
+    are safe from over-correction.
+
+    Returns (peak_lag, clarity_w) with the repaired entries updated.
+    """
+    if len(midi_w) < 2 * radius + 1:
+        return peak_lag, clarity_w
+
+    reference = median_filter(midi_w, size=2 * radius + 1, mode="nearest")
+    outliers = np.where(midi_w < reference - gap)[0]
+    if len(outliers) == 0:
+        return peak_lag, clarity_w
+
+    peak_lag = peak_lag.copy()
+    clarity_w = clarity_w.copy()
+    n_fixed = 0
+    for i in outliers:
+        ref = reference[i]
+        best_idx, best_dist = None, tol
+        for idx in _key_maxima(nsdf[i]):
+            if nsdf[i, idx] <= min_nsdf:
+                continue
+            cand_midi = 12.0 * np.log2((sr / (idx + lo)) / 440.0) + 69.0
+            if cand_midi <= midi_w[i] + 1.0:        # correction is upward only
+                continue
+            dist = abs(cand_midi - ref)
+            if dist < best_dist:
+                best_idx, best_dist = idx, dist
+        if best_idx is not None:
+            peak_lag[i] = best_idx + lo
+            clarity_w[i] = nsdf[i, best_idx]
+            n_fixed += 1
+    if n_fixed:
+        logger.info("  Subharmonic repair: corrected %d octave-down window(s)",
+                    n_fixed)
+    return peak_lag, clarity_w
+
+
 class ClarityCalculator(MetricCalculator):
 
     def __init__(self, config: VoiceMapConfig):
@@ -280,6 +353,15 @@ class ClarityCalculator(MetricCalculator):
         midi_w    = np.where(f0_w > 0, _hz_to_midi(f0_w), 20.0)
         midi_w    = np.maximum(midi_w, 20.0)
         clarity_w = np.maximum(clarity_w, 0.0)
+
+        # Temporal-continuity repair: fix isolated subharmonic (octave-
+        # down) glitches that no single-frame rule above can catch, then
+        # recompute the per-window pitch from the corrected lags.
+        peak_lag, clarity_w = _repair_subharmonic_octaves(
+            nsdf, peak_lag, clarity_w, midi_w, lo, sr)
+        f0_w      = np.where(peak_lag > 0, sr / peak_lag, 0.0)
+        midi_w    = np.where(f0_w > 0, _hz_to_midi(f0_w), 20.0)
+        midi_w    = np.maximum(midi_w, 20.0)
 
         cycle_idx = np.where(cycle_triggers > 0.5)[0]
         if len(cycle_idx) < 2:
