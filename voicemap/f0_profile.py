@@ -196,6 +196,96 @@ def draw_f0_profile(fig, df, metric_keys, show_band=False, show_scatter=True):
     fig.subplots_adjust(left=0.09, right=0.97, top=0.96, bottom=0.10)
 
 
+def _trend(x, y, frac=0.25):
+    """Smooth trend of y over x. LOWESS when statsmodels is installed
+    (the project's optional dep), else a cubic-polynomial fallback —
+    the same degradation path plot_overlay.py uses. Returns (xs, ys)
+    sorted by x, or None when there are too few points."""
+    m = np.isfinite(x) & np.isfinite(y)
+    x, y = x[m], y[m]
+    if len(x) < 12:
+        return None
+    order = np.argsort(x)
+    x, y = x[order], y[order]
+    try:
+        from statsmodels.nonparametric.smoothers_lowess import lowess
+        sm = lowess(y, x, frac=frac, return_sorted=True)
+        return sm[:, 0], sm[:, 1]
+    except Exception:
+        coef = np.polyfit(x, y, 3)
+        xs = np.linspace(x.min(), x.max(), 240)
+        return xs, np.clip(np.polyval(coef, xs), 0.0, 1.0)
+
+
+def draw_f0_scatter(fig, cycle_df, metric_keys, show_trend=True,
+                    show_scatter=False):
+    """Render the per-cycle F0 trend chart onto `fig` (cleared first).
+
+    Reads the per-cycle log (one row per cycle, continuous MIDI) rather
+    than the binned VRP. Each metric becomes one LOWESS trend line over
+    every cycle's (F0, normalised metric) — a smooth curve at full F0
+    resolution, not the coarse semitone-binned mean. `show_scatter`
+    optionally overlays the raw per-cycle dots behind the trend; the
+    1-D view keeps it off (the point cloud belongs to the 2-D map)."""
+    fig.clear()
+
+    if cycle_df is None or "MIDI" not in getattr(cycle_df, "columns", []):
+        _placeholder(fig, "No per-cycle log - run analysis with --cycle-log")
+        return
+    if not metric_keys:
+        _placeholder(fig, "No metric selected - tick a metric on the left")
+        return
+
+    midi = cycle_df["MIDI"].to_numpy(dtype=float)
+
+    gs = fig.add_gridspec(2, 1, height_ratios=[1, 7], hspace=0.10)
+    ax_cov = fig.add_subplot(gs[0])
+    ax = fig.add_subplot(gs[1], sharex=ax_cov)
+
+    # Coverage strip — cycle count per semitone-wide F0 bin.
+    ax_cov.hist(midi, bins=np.arange(MIDI_MIN, MIDI_MAX + 2),
+                color="#888888", alpha=0.55)
+    ax_cov.set_ylabel("Cycles\nper F0", fontsize=7)
+    ax_cov.tick_params(labelbottom=False, labelsize=7)
+    ax_cov.set_facecolor("white")
+
+    drawn = 0
+    for idx, key in enumerate(metric_keys):
+        if key not in cycle_df.columns:
+            continue
+        rng = _norm_range(key)
+        if rng is None:
+            continue
+        lo, hi = rng
+        color = _LINE_PALETTE[idx % len(_LINE_PALETTE)]
+        vals = _normalise(cycle_df[key].to_numpy(dtype=float), lo, hi)
+        if show_scatter:
+            ax.scatter(midi, vals, s=5, color=color, alpha=0.10,
+                       edgecolors="none", rasterized=True, zorder=2)
+        tr = _trend(midi, vals) if show_trend else None
+        if tr is not None:
+            # White halo under the coloured trend so it reads clearly
+            # over its own same-coloured scatter cloud.
+            ax.plot(tr[0], tr[1], color="white", lw=4.5, zorder=4)
+            ax.plot(tr[0], tr[1], color=color, lw=2.6, zorder=5, label=key)
+        else:
+            ax.plot([], [], color=color, lw=2.6, label=key)
+        drawn += 1
+
+    ax.set_ylim(-0.02, 1.02)
+    ax.set_xlim(MIDI_MIN - 0.5, MIDI_MAX + 0.5)
+    ax.set_xticks(list(range(30, MIDI_MAX + 1, 6)))
+    ax.xaxis.set_minor_locator(MultipleLocator(1))
+    ax.set_xlabel("Fundamental frequency F0 (MIDI semitone)")
+    ax.set_ylabel("Normalised metric value (0-1)")
+    ax.grid(True, color="#dddddd", linewidth=0.6)
+    ax.set_facecolor("white")
+    if drawn:
+        ax.legend(loc="upper right", fontsize=8, ncol=2, framealpha=0.9)
+
+    fig.subplots_adjust(left=0.09, right=0.97, top=0.96, bottom=0.10)
+
+
 def _placeholder(fig, message):
     ax = fig.add_subplot(111)
     ax.text(0.5, 0.5, message, ha="center", va="center",
