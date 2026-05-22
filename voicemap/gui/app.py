@@ -439,19 +439,17 @@ class VoiceMapApp(_TkBase):
 
     # ── F0-profile tab (1-D projection of the voice map) ─────────────
     def _build_f0_tab(self, parent):
-        """Tab 2 — the F0-profile line chart and its metric picker.
+        """Tab 2 — the F0-profile trend chart and its metric picker.
 
         Left: a scrollable, category-grouped checkbox panel choosing
-        which metrics become curves. Right: the matplotlib canvas. The
-        chart reuses ``self._last_df`` — the same grouped VRP the 2-D
-        heatmap reads — so no re-analysis is needed."""
-        # maxCluster / maxCPhon are categorical (a weighted mean of a
-        # cluster label is meaningless); Total already shown as the
-        # coverage strip. Exclude all three from the curve picker.
+        which metrics become trend lines. Right: the matplotlib canvas.
+        The chart reads the per-cycle log paired with the current VRP
+        CSV — one LOWESS trend per metric over every cycle's true F0."""
+        # maxCluster / maxCPhon are categorical (a trend over a cluster
+        # label is meaningless); Total is shown as the coverage strip.
+        # Exclude all three from the curve picker.
         exclude = {"Total", "maxCluster", "maxCPhon"}
         self._f0_vars = {}                          # metric key -> BooleanVar
-        self._f0_scatter_var = tk.BooleanVar(value=True)
-        self._f0_band_var = tk.BooleanVar(value=False)
 
         # ── Left: control column ──────────────────────────────────────
         ctrl = tk.Frame(parent, bg=PANEL, width=250,
@@ -461,25 +459,10 @@ class VoiceMapApp(_TkBase):
 
         tk.Label(ctrl, text="曲线指标", bg=PANEL, fg=TEXT,
                  font=FONT_UI_B).pack(anchor="w", padx=12, pady=(12, 4))
-        tk.Label(ctrl, text="每条线 = 一个指标，纵轴按各自上下限归一化到 0–1。",
+        tk.Label(ctrl, text="每条线 = 一个指标的 LOWESS 趋势，纵轴按各自上下限归一化到 0–1。",
                  bg=PANEL, fg=MUTED, font=FONT_CAPTION,
                  wraplength=220, justify="left").pack(
                      anchor="w", padx=12, pady=(0, 8))
-
-        tk.Checkbutton(ctrl, text="显示原始散点 (各 SPL cell)",
-                       variable=self._f0_scatter_var,
-                       command=self._refresh_f0_tab,
-                       bg=PANEL, fg=TEXT, selectcolor=PANEL_HI,
-                       activebackground=PANEL, activeforeground=TEXT,
-                       font=FONT_SMALL, anchor="w",
-                       takefocus=0).pack(fill="x", padx=10)
-        tk.Checkbutton(ctrl, text="显示 ±1SD 离散带",
-                       variable=self._f0_band_var,
-                       command=self._refresh_f0_tab,
-                       bg=PANEL, fg=TEXT, selectcolor=PANEL_HI,
-                       activebackground=PANEL, activeforeground=TEXT,
-                       font=FONT_SMALL, anchor="w",
-                       takefocus=0).pack(fill="x", padx=10)
 
         tk.Button(ctrl, text="清空选择", command=self._f0_clear_all,
                   bg=PANEL_HI, fg=TEXT, activebackground=BORDER,
@@ -555,8 +538,8 @@ class VoiceMapApp(_TkBase):
             pass
 
     def _on_tab_changed(self, _event=None):
-        """Redraw the F0 tab when it becomes visible — both tabs share
-        ``self._last_df``, so the chart picks up the latest analysis."""
+        """Redraw the F0 tab when it becomes visible so it picks up the
+        per-cycle log of the latest analysis / selected track."""
         nb = getattr(self, "_notebook", None)
         if nb is None:
             return
@@ -567,20 +550,39 @@ class VoiceMapApp(_TkBase):
         if on_f0:
             self._refresh_f0_tab()
 
+    def _load_cycle_log(self):
+        """Load the per-cycle log paired with the current VRP CSV
+        (``..._cycles.csv``), cached by path. None when unavailable."""
+        csv = self.last_csv
+        if not csv:
+            return None
+        path = csv.replace("_VRP.csv", "_cycles.csv")
+        if path == csv or not os.path.exists(path):
+            return None
+        if getattr(self, "_f0_cycle_src", None) == path:
+            return self._f0_cycle_df
+        try:
+            import pandas as _pd
+            self._f0_cycle_df = _pd.read_csv(path, sep=";")
+            self._f0_cycle_src = path
+            return self._f0_cycle_df
+        except Exception:
+            logging.exception("cycle-log load failed")
+            return None
+
     def _refresh_f0_tab(self):
-        """Redraw the F0-profile chart from ``self._last_df`` and the
+        """Redraw the F0 trend chart from the per-cycle log and the
         currently-ticked metrics. Safe to call before the tab exists."""
         if not hasattr(self, "_f0_fig"):
             return
-        from voicemap.f0_profile import draw_f0_profile
+        from voicemap.f0_profile import draw_f0_scatter
         keys = [k for k, v in self._f0_vars.items() if v.get()]
         try:
-            draw_f0_profile(self._f0_fig, self._last_df, keys,
-                            show_band=bool(self._f0_band_var.get()),
-                            show_scatter=bool(self._f0_scatter_var.get()))
+            draw_f0_scatter(self._f0_fig, self._load_cycle_log(), keys,
+                            show_trend=True)
             self._f0_plot_canvas.draw_idle()
         except Exception:
-            logging.exception("F0-profile redraw failed")
+            logging.exception("F0 trend redraw failed")
 
     def _build_menubar(self):
         """4-段顶部菜单栏：文件 / 编辑 / 视图 / 帮助。
@@ -2081,6 +2083,7 @@ class VoiceMapApp(_TkBase):
         cfg = VoiceMapConfig(
             clarity_threshold=self._analysis_clarity,
             output_dir=out_dir,
+            cycle_log=True,   # per-cycle log feeds the F0-trend tab
         )
         audio = str(p)
 

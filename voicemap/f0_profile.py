@@ -230,7 +230,7 @@ def draw_f0_scatter(fig, cycle_df, metric_keys, show_trend=True,
     fig.clear()
 
     if cycle_df is None or "MIDI" not in getattr(cycle_df, "columns", []):
-        _placeholder(fig, "No per-cycle log - run analysis with --cycle-log")
+        _placeholder(fig, "No per-cycle data - run an analysis first")
         return
     if not metric_keys:
         _placeholder(fig, "No metric selected - tick a metric on the left")
