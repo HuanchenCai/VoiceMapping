@@ -20,8 +20,12 @@ from); no re-analysis is needed.
 from __future__ import annotations
 
 import numpy as np
+from matplotlib.ticker import MultipleLocator
 
 from voicemap.metrics_registry import get as get_spec
+# Single source of truth for the MIDI axis bounds — shared with the
+# 2-D heatmap so both plots use an identical, fixed F0 axis.
+from voicemap.plotter import MIDI_MIN, MIDI_MAX
 
 
 # Line palette — Okabe-Ito colourblind-safe set, matching the project's
@@ -45,20 +49,20 @@ def _weighted_stats(values: np.ndarray, weights: np.ndarray):
     return mean, float(np.sqrt(max(var, 0.0)))
 
 
-def aggregate_by_f0(df, metric_keys):
-    """Project the grouped VRP `df` onto a continuous F0 axis.
+def aggregate_by_f0(df, metric_keys, midi_min=MIDI_MIN, midi_max=MIDI_MAX):
+    """Project the grouped VRP `df` onto the fixed F0 axis.
 
-    The MIDI axis spans min..max with no gaps; pitches absent from the
-    data stay NaN so polylines break there instead of drawing a
-    misleading bridge across an unsung range.
+    The MIDI axis is fixed to the 2-D voice-map range
+    (MIDI_MIN..MIDI_MAX) so the F0 axis lines up with the heatmap and
+    stays identical across recordings — curves from different takes can
+    then be overlaid directly. Pitches with no data stay NaN so
+    polylines break there instead of bridging an unsung range.
 
     Returns a dict:
       midi      — contiguous MIDI semitone values (np.ndarray)
       coverage  — ΣTotal per MIDI, the data-density / confidence signal
       stats     — {key: {"mean": arr, "std": arr}} aligned with `midi`
     """
-    midi_min = int(np.floor(float(df["MIDI"].min())))
-    midi_max = int(np.ceil(float(df["MIDI"].max())))
     midi = np.arange(midi_min, midi_max + 1)
     n = len(midi)
 
@@ -152,10 +156,15 @@ def draw_f0_profile(fig, df, metric_keys, show_band=True):
         drawn += 1
 
     ax.set_ylim(-0.02, 1.02)
+    # X axis fixed to the 2-D voice-map MIDI range (sharex carries it to
+    # the coverage strip) so the F0 axis lines up with the heatmap and
+    # is identical across recordings.
+    ax.set_xlim(MIDI_MIN - 0.5, MIDI_MAX + 0.5)
+    ax.set_xticks(list(range(30, MIDI_MAX + 1, 6)))
+    ax.xaxis.set_minor_locator(MultipleLocator(1))
     ax.set_xlabel("Fundamental frequency F0 (MIDI semitone)")
     ax.set_ylabel("Normalised metric value (0-1)")
     ax.grid(True, color="#dddddd", linewidth=0.6)
-    ax.margins(x=0)
     ax.set_facecolor("white")
     if drawn:
         ax.legend(loc="upper right", fontsize=8, ncol=2, framealpha=0.9)
