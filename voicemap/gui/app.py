@@ -450,7 +450,8 @@ class VoiceMapApp(_TkBase):
         # coverage strip. Exclude all three from the curve picker.
         exclude = {"Total", "maxCluster", "maxCPhon"}
         self._f0_vars = {}                          # metric key -> BooleanVar
-        self._f0_band_var = tk.BooleanVar(value=True)
+        self._f0_scatter_var = tk.BooleanVar(value=True)
+        self._f0_band_var = tk.BooleanVar(value=False)
 
         # ── Left: control column ──────────────────────────────────────
         ctrl = tk.Frame(parent, bg=PANEL, width=250,
@@ -465,6 +466,13 @@ class VoiceMapApp(_TkBase):
                  wraplength=220, justify="left").pack(
                      anchor="w", padx=12, pady=(0, 8))
 
+        tk.Checkbutton(ctrl, text="显示原始散点 (各 SPL cell)",
+                       variable=self._f0_scatter_var,
+                       command=self._refresh_f0_tab,
+                       bg=PANEL, fg=TEXT, selectcolor=PANEL_HI,
+                       activebackground=PANEL, activeforeground=TEXT,
+                       font=FONT_SMALL, anchor="w",
+                       takefocus=0).pack(fill="x", padx=10)
         tk.Checkbutton(ctrl, text="显示 ±1SD 离散带",
                        variable=self._f0_band_var,
                        command=self._refresh_f0_tab,
@@ -568,7 +576,8 @@ class VoiceMapApp(_TkBase):
         keys = [k for k, v in self._f0_vars.items() if v.get()]
         try:
             draw_f0_profile(self._f0_fig, self._last_df, keys,
-                            show_band=bool(self._f0_band_var.get()))
+                            show_band=bool(self._f0_band_var.get()),
+                            show_scatter=bool(self._f0_scatter_var.get()))
             self._f0_plot_canvas.draw_idle()
         except Exception:
             logging.exception("F0-profile redraw failed")
