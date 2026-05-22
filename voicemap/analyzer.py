@@ -826,6 +826,11 @@ class VoiceMapAnalyzer:
         else:
             out_file = csv_result
 
+        # Optional per-cycle log: unbinned, one row per cycle.
+        if self.config.cycle_log and out_file:
+            from voicemap.csv_writer import write_cycle_log
+            write_cycle_log(self.config, filtered_metrics, out_file)
+
         logger.info("Total wall time: %.2fs  (audio: %.1fs  ratio: %.1fx)",
                          time.perf_counter() - t0, duration,
                          duration / max(time.perf_counter() - t0, 1e-9))

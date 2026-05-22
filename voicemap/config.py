@@ -77,6 +77,10 @@ class VoiceMapConfig:
     # Analysis parameters
     clarity_threshold: float = 0.96
     spl_correction_db: float = 120.0
+
+    # When True, also write a per-cycle log CSV (one row per cycle,
+    # continuous MIDI/dB, no semitone×dB binning) next to the VRP CSV.
+    cycle_log: bool = False
     
     # File paths
     audio_file: str = "audio/test_Voice_EGG.wav"

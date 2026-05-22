@@ -93,6 +93,9 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="also write a clinical narrative .md report next to "
                         "the CSV. Each metric is graded against published "
                         "thresholds with auto-observations.")
+    p.add_argument("--cycle-log", action="store_true",
+                   help="also write a per-cycle log CSV (one row per cycle, "
+                        "continuous MIDI/dB, no semitone x dB binning).")
     p.add_argument("--compare", nargs=2, metavar=("CSV_A", "CSV_B"),
                    help="compare two previously-written VRP CSVs (A | B | A-B). "
                         "Exits after writing the comparison PNG; no new analysis.")
@@ -124,6 +127,8 @@ def _build_config(args):
         kwargs["clarity_threshold"] = float(args.clarity)
     if args.output_dir:
         kwargs["output_dir"] = args.output_dir
+    if args.cycle_log:
+        kwargs["cycle_log"] = True
     # Let the analyzer keep its other defaults (MIDI/SPL ranges, SR, etc.)
     if kwargs:
         return VoiceMapConfig(**kwargs)
