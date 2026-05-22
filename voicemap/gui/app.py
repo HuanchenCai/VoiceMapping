@@ -390,9 +390,18 @@ class VoiceMapApp(_TkBase):
         # padx=16 matches the rest of the chrome's left/right margin.
         # pady at top is 8 px — enough breath after metric bar without
         # surfacing a BG stripe.
-        self._outer = outer = tk.Frame(self, bg=BG)
-        outer.pack(side="top", fill="both", expand=True,
-                   padx=16, pady=(8, 8))
+        # Central area = a 2-tab notebook. Tab 1 keeps the existing
+        # 2-D voice-map heatmap; tab 2 is the 1-D F0-profile chart —
+        # a projection of the same grouped DataFrame onto the F0 axis.
+        self._notebook = ttk.Notebook(self)
+        self._notebook.pack(side="top", fill="both", expand=True,
+                            padx=16, pady=(8, 8))
+
+        tab_2d = tk.Frame(self._notebook, bg=BG)
+        self._notebook.add(tab_2d, text="二维图谱")
+
+        self._outer = outer = tk.Frame(tab_2d, bg=BG)
+        outer.pack(side="top", fill="both", expand=True)
 
         self.inspector = tk.Frame(outer, bg=PANEL, width=420,
                                    highlightthickness=1,
@@ -410,6 +419,12 @@ class VoiceMapApp(_TkBase):
                           padx=(0, 8))
         self._build_canvas_area(canvas_frame)
 
+        # Tab 2 — 1-D F0-profile line chart.
+        tab_f0 = tk.Frame(self._notebook, bg=BG)
+        self._notebook.add(tab_f0, text="基频曲线")
+        self._build_f0_tab(tab_f0)
+        self._notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+
         # Optional widget refs kept as None so guarded call sites
         # (.state(...) etc.) silently no-op when the widget is absent.
         self.open_csv_btn   = None
@@ -421,6 +436,142 @@ class VoiceMapApp(_TkBase):
         # the current layout (none currently in-tree).
         self.left = None
         self.right = canvas_frame
+
+    # ── F0-profile tab (1-D projection of the voice map) ─────────────
+    def _build_f0_tab(self, parent):
+        """Tab 2 — the F0-profile line chart and its metric picker.
+
+        Left: a scrollable, category-grouped checkbox panel choosing
+        which metrics become curves. Right: the matplotlib canvas. The
+        chart reuses ``self._last_df`` — the same grouped VRP the 2-D
+        heatmap reads — so no re-analysis is needed."""
+        # maxCluster / maxCPhon are categorical (a weighted mean of a
+        # cluster label is meaningless); Total already shown as the
+        # coverage strip. Exclude all three from the curve picker.
+        exclude = {"Total", "maxCluster", "maxCPhon"}
+        self._f0_vars = {}                          # metric key -> BooleanVar
+        self._f0_band_var = tk.BooleanVar(value=True)
+
+        # ── Left: control column ──────────────────────────────────────
+        ctrl = tk.Frame(parent, bg=PANEL, width=250,
+                        highlightthickness=1, highlightbackground=BORDER)
+        ctrl.pack(side="left", fill="y", padx=(0, 8))
+        ctrl.pack_propagate(False)
+
+        tk.Label(ctrl, text="曲线指标", bg=PANEL, fg=TEXT,
+                 font=FONT_UI_B).pack(anchor="w", padx=12, pady=(12, 4))
+        tk.Label(ctrl, text="每条线 = 一个指标，纵轴按各自上下限归一化到 0–1。",
+                 bg=PANEL, fg=MUTED, font=FONT_CAPTION,
+                 wraplength=220, justify="left").pack(
+                     anchor="w", padx=12, pady=(0, 8))
+
+        tk.Checkbutton(ctrl, text="显示 ±1SD 离散带",
+                       variable=self._f0_band_var,
+                       command=self._refresh_f0_tab,
+                       bg=PANEL, fg=TEXT, selectcolor=PANEL_HI,
+                       activebackground=PANEL, activeforeground=TEXT,
+                       font=FONT_SMALL, anchor="w",
+                       takefocus=0).pack(fill="x", padx=10)
+
+        tk.Button(ctrl, text="清空选择", command=self._f0_clear_all,
+                  bg=PANEL_HI, fg=TEXT, activebackground=BORDER,
+                  activeforeground=TEXT, bd=0, relief="flat",
+                  font=FONT_SMALL, cursor="hand2", padx=10, pady=2).pack(
+                      anchor="w", padx=12, pady=(6, 6))
+
+        # Scrollable checkbox list (canvas + scrollbar + inner frame).
+        box = tk.Frame(ctrl, bg=PANEL)
+        box.pack(fill="both", expand=True, padx=(8, 4), pady=(0, 8))
+        sc = tk.Canvas(box, bg=PANEL, highlightthickness=0, bd=0)
+        sb = ttk.Scrollbar(box, orient="vertical", command=sc.yview)
+        sc.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        sc.pack(side="left", fill="both", expand=True)
+        self._f0_scroll_canvas = sc
+
+        inner = tk.Frame(sc, bg=PANEL)
+        inner_id = sc.create_window((0, 0), window=inner, anchor="nw")
+        sc.bind("<Configure>",
+                lambda e: sc.itemconfigure(inner_id, width=e.width), add="+")
+        inner.bind("<Configure>",
+                   lambda _e: sc.configure(scrollregion=sc.bbox("all")),
+                   add="+")
+        sc.bind("<MouseWheel>", self._on_f0_mousewheel, add="+")
+        inner.bind("<MouseWheel>", self._on_f0_mousewheel, add="+")
+
+        for section_label, keys in _METRIC_SECTIONS:
+            shown = [k for k in keys if k not in exclude]
+            if not shown:
+                continue
+            tk.Label(inner, text=section_label, bg=PANEL, fg=ACCENT,
+                     font=FONT_CAPTION).pack(anchor="w", pady=(8, 2))
+            for k in shown:
+                var = tk.BooleanVar(value=(k in _DEFAULT_METRIC_CHAIN))
+                self._f0_vars[k] = var
+                cb = tk.Checkbutton(inner, text=k, variable=var,
+                                    command=self._refresh_f0_tab,
+                                    bg=PANEL, fg=TEXT, selectcolor=PANEL_HI,
+                                    activebackground=PANEL,
+                                    activeforeground=TEXT,
+                                    font=FONT_SMALL, anchor="w",
+                                    takefocus=0)
+                cb.pack(fill="x", anchor="w")
+                cb.bind("<MouseWheel>", self._on_f0_mousewheel, add="+")
+
+        # ── Right: matplotlib canvas ──────────────────────────────────
+        right = tk.Frame(parent, bg=PANEL,
+                         highlightthickness=1, highlightbackground=BORDER)
+        right.pack(side="left", fill="both", expand=True)
+        self._f0_fig = Figure(figsize=(8, 5), dpi=120, facecolor="white")
+        self._f0_plot_canvas = FigureCanvasTkAgg(self._f0_fig, master=right)
+        cw = self._f0_plot_canvas.get_tk_widget()
+        cw.configure(bg="white", highlightthickness=0, bd=0)
+        cw.pack(fill="both", expand=True, padx=6, pady=6)
+
+        self._refresh_f0_tab()
+
+    def _f0_clear_all(self):
+        """Untick every metric on the F0 tab."""
+        for v in self._f0_vars.values():
+            v.set(False)
+        self._refresh_f0_tab()
+
+    def _on_f0_mousewheel(self, event):
+        """Wheel-scroll the F0 metric-picker list."""
+        sc = getattr(self, "_f0_scroll_canvas", None)
+        if sc is None or not sc.winfo_exists():
+            return
+        try:
+            sc.yview_scroll(-1 if event.delta > 0 else 1, "units")
+        except tk.TclError:
+            pass
+
+    def _on_tab_changed(self, _event=None):
+        """Redraw the F0 tab when it becomes visible — both tabs share
+        ``self._last_df``, so the chart picks up the latest analysis."""
+        nb = getattr(self, "_notebook", None)
+        if nb is None:
+            return
+        try:
+            on_f0 = nb.index(nb.select()) == 1
+        except tk.TclError:
+            return
+        if on_f0:
+            self._refresh_f0_tab()
+
+    def _refresh_f0_tab(self):
+        """Redraw the F0-profile chart from ``self._last_df`` and the
+        currently-ticked metrics. Safe to call before the tab exists."""
+        if not hasattr(self, "_f0_fig"):
+            return
+        from voicemap.f0_profile import draw_f0_profile
+        keys = [k for k, v in self._f0_vars.items() if v.get()]
+        try:
+            draw_f0_profile(self._f0_fig, self._last_df, keys,
+                            show_band=bool(self._f0_band_var.get()))
+            self._f0_plot_canvas.draw_idle()
+        except Exception:
+            logging.exception("F0-profile redraw failed")
 
     def _build_menubar(self):
         """4-段顶部菜单栏：文件 / 编辑 / 视图 / 帮助。
@@ -2051,6 +2202,11 @@ class VoiceMapApp(_TkBase):
         if self._last_df is None:
             return
         df = self._last_df
+
+        # The F0-profile tab projects the same DataFrame onto the F0
+        # axis — keep it in sync whenever the analysis result changes.
+        if hasattr(self, "_f0_fig"):
+            self._refresh_f0_tab()
 
         # 对聚类 share 列（Cluster 1..N / cPhon 1..N）放宽过滤：哪怕本次
         # K-means 碰巧把某个簇跑空（所有点被更近的其它中心抢光），下拉里
