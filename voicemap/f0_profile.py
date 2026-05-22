@@ -20,7 +20,9 @@ from); no re-analysis is needed.
 from __future__ import annotations
 
 import numpy as np
+import matplotlib.colors as mcolors
 from matplotlib.ticker import MultipleLocator
+from matplotlib.collections import LineCollection, PolyCollection
 
 from voicemap.metrics_registry import get as get_spec
 # Single source of truth for the MIDI axis bounds — shared with the
@@ -210,11 +212,58 @@ def _trend(x, y, frac=0.25):
     try:
         from statsmodels.nonparametric.smoothers_lowess import lowess
         sm = lowess(y, x, frac=frac, return_sorted=True)
-        return sm[:, 0], sm[:, 1]
+        # Per-cycle input repeats x heavily (F0 is window-resolution) —
+        # collapse to one smoothed value per distinct F0.
+        ux, ui = np.unique(sm[:, 0], return_index=True)
+        return ux, sm[ui, 1]
     except Exception:
         coef = np.polyfit(x, y, 3)
         xs = np.linspace(x.min(), x.max(), 240)
         return xs, np.clip(np.polyval(coef, xs), 0.0, 1.0)
+
+
+def _smooth1d(a, win):
+    """Moving-average smooth — keeps the opacity gradient gradual
+    instead of combed by the jagged per-F0 cycle counts."""
+    a = np.asarray(a, dtype=float)
+    if win < 2 or len(a) < win:
+        return a
+    return np.convolve(a, np.ones(win) / win, mode="same")
+
+
+def _smooth_nan(a, win):
+    """Moving-average smooth that tolerates NaN gaps — averages only
+    over finite samples and keeps originally-NaN points NaN. Used to
+    de-comb the ±1 SD band edge."""
+    a = np.asarray(a, dtype=float)
+    valid = np.isfinite(a)
+    if win < 2 or valid.sum() < 2:
+        return a
+    k = np.ones(win)
+    num = np.convolve(np.where(valid, a, 0.0), k, mode="same")
+    den = np.convolve(valid.astype(float), k, mode="same")
+    out = np.where(den > 0, num / np.where(den > 0, den, 1.0), np.nan)
+    out[~valid] = np.nan
+    return out
+
+
+def _coverage_weight(midi_all, tx, half=1.0):
+    """Per-tx weight in [0, 1] from local cycle density — how many
+    cycles sit within ±half semitone of each trend point. Smoothed and
+    normalised by the 75th-percentile density so the well-populated F0
+    range reads at full strength and only genuinely sparse pitches fade
+    out, with a gradual (not combed) gradient between."""
+    m = np.sort(np.asarray(midi_all, dtype=float))
+    m = m[np.isfinite(m)]
+    tx = np.asarray(tx, dtype=float)
+    if len(m) == 0:
+        return np.zeros(len(tx))
+    cnt = (np.searchsorted(m, tx + half, side="right")
+           - np.searchsorted(m, tx - half, side="left")).astype(float)
+    cnt = _smooth1d(cnt, 9)
+    pos = cnt[cnt > 0]
+    ref = float(np.percentile(pos, 75)) if len(pos) else 1.0
+    return np.clip(cnt / max(ref, 1.0), 0.0, 1.0)
 
 
 def _local_std(x, y, tx, half=0.6):
@@ -285,19 +334,39 @@ def draw_f0_scatter(fig, cycle_df, metric_keys, show_trend=True,
             ax.scatter(midi, vals, s=5, color=color, alpha=0.10,
                        edgecolors="none", rasterized=True, zorder=2)
         tr = _trend(midi, vals) if show_trend else None
-        if tr is not None:
-            if show_band:
-                sigma = _local_std(midi, vals, tr[0])
-                ax.fill_between(tr[0],
-                                np.clip(tr[1] - sigma, 0.0, 1.0),
-                                np.clip(tr[1] + sigma, 0.0, 1.0),
-                                color=color, alpha=0.15, linewidth=0,
-                                zorder=3)
-            # White halo under the coloured trend so it reads clearly.
-            ax.plot(tr[0], tr[1], color="white", lw=4.5, zorder=4)
-            ax.plot(tr[0], tr[1], color=color, lw=2.6, zorder=5, label=key)
-        else:
-            ax.plot([], [], color=color, lw=2.6, label=key)
+        ax.plot([], [], color=color, lw=2.6, label=key)   # legend proxy
+        if tr is None:
+            drawn += 1
+            continue
+        tx, ty = tr
+        rgb = mcolors.to_rgb(color)
+        # Opacity per segment tracks local cycle density: dense F0 reads
+        # solid, sparse F0 (few cycles) fades out — so the eye weights
+        # the trend by how much data backs each stretch.
+        w = _coverage_weight(midi, tx)
+        seg_w = 0.5 * (w[:-1] + w[1:])
+
+        if show_band:
+            sigma = _smooth_nan(_local_std(midi, vals, tx), 11)
+            blo = np.clip(ty - sigma, 0.0, 1.0)
+            bhi = np.clip(ty + sigma, 0.0, 1.0)
+            ok_b = np.isfinite(blo) & np.isfinite(bhi)
+            quads, qcols = [], []
+            for i in range(len(tx) - 1):
+                if not (ok_b[i] and ok_b[i + 1]):
+                    continue
+                quads.append([(tx[i], blo[i]), (tx[i + 1], blo[i + 1]),
+                              (tx[i + 1], bhi[i + 1]), (tx[i], bhi[i])])
+                qcols.append((*rgb, 0.22 * float(seg_w[i])))
+            if quads:
+                ax.add_collection(PolyCollection(
+                    quads, facecolors=qcols, edgecolors="none", zorder=3))
+
+        pts = np.column_stack([tx, ty])
+        segs = np.stack([pts[:-1], pts[1:]], axis=1)
+        lcols = [(*rgb, 0.18 + 0.82 * float(sw)) for sw in seg_w]
+        ax.add_collection(LineCollection(segs, colors=lcols,
+                                         linewidths=2.6, zorder=5))
         drawn += 1
 
     ax.set_ylim(-0.02, 1.02)
