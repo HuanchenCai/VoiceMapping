@@ -2339,15 +2339,17 @@ class VoiceMapApp(_TkBase):
             self._clear_inline_readout()
             self._update_inspector_value(None, None)
             self._last_motion_cell = None
+            self._last_scatter_idx = None
             return
         if getattr(self, "_showing_placeholder", True):
             return
         if getattr(self, "_annot_mode_on", False):
             return
-        # The cell readout below is heatmap-grid logic; the scatter view
-        # has no (semitone, dB) cells, so skip it there.
+        # Scatter view has no (semitone, dB) cells — hover finds the
+        # nearest cycle point instead of the grid lookup below.
         if (getattr(self, "_vrp_mode_var", None) is not None
                 and self._vrp_mode_var.get() == "scatter"):
+            self._scatter_hover(event)
             return
         x, y = event.xdata, event.ydata
         if x is None or y is None:
@@ -2423,6 +2425,58 @@ class VoiceMapApp(_TkBase):
             ann.xy = (midi, spl)
             ann.set_visible(True)
         self._canvas.draw_idle()
+
+    def _place_inline_readout(self, ax, xy, text):
+        """Create or reuse the floating cursor annotation — the same
+        Annotation object is repositioned across motion events."""
+        ann = getattr(self, "_inline_readout", None)
+        if ann is None or ann.axes is not ax:
+            ann = ax.annotate(
+                text, xy=xy, xytext=(14, 14),
+                textcoords="offset pixels", fontsize=9, color=PLOT_FG,
+                bbox=dict(boxstyle="round,pad=0.35", fc=READOUT_BG,
+                          ec=ACCENT, alpha=0.95, linewidth=0.8),
+                zorder=20)
+            self._inline_readout = ann
+        else:
+            ann.set_text(text)
+            ann.xy = xy
+            ann.set_visible(True)
+        self._canvas.draw_idle()
+
+    def _scatter_hover(self, event):
+        """Hover for the per-cycle scatter: find the cycle nearest the
+        cursor, show its value in the Inspector + an inline readout."""
+        x, y = event.xdata, event.ydata
+        name = self.metric_var.get() if hasattr(self, "metric_var") else ""
+        cdf = self._load_cycle_log()
+        if x is None or y is None or cdf is None or not name:
+            return
+        src = name if name in cdf.columns else \
+            {"maxCluster": "Cluster", "maxCPhon": "cPhon"}.get(name)
+        if not src or src not in cdf.columns:
+            return
+        # Nearest cycle — distance normalised by axis span so MIDI and
+        # SPL contribute comparably.
+        d2 = (((cdf["MIDI"] - x) / 67.0) ** 2
+              + ((cdf["dB"] - y) / 81.0) ** 2)
+        idx = int(d2.idxmin())
+        if float(d2.loc[idx]) > 0.03 ** 2:        # cursor far from any cycle
+            self._clear_inline_readout()
+            self._update_inspector_value(None, None)
+            self._last_scatter_idx = None
+            return
+        if idx == getattr(self, "_last_scatter_idx", None):
+            return
+        self._last_scatter_idx = idx
+        cmidi = float(cdf["MIDI"].loc[idx])
+        cdb = float(cdf["dB"].loc[idx])
+        value = float(cdf[src].loc[idx])
+        self._update_inspector_value(cmidi, cdb, _value=value)
+        spec = get_spec(name)
+        unit = (spec.unit if spec else "") or ""
+        text = f"F0 {cmidi:.1f} · {cdb:.1f} dB · {value:.2f} {unit}".rstrip()
+        self._place_inline_readout(event.inaxes, (cmidi, cdb), text)
 
     def _on_metric_change(self, *_):
         col = self.metric_var.get()
@@ -2702,6 +2756,7 @@ class VoiceMapApp(_TkBase):
             self._show_placeholder("无 per-cycle 数据 — 请先分析")
             return
         self._inline_readout = None
+        self._last_scatter_idx = None
         self._showing_placeholder = False
         if hasattr(self, "_overlay_mgr"):
             self._overlay_mgr.clear()
