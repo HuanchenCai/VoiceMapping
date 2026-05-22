@@ -106,13 +106,16 @@ def _normalise(arr, lo, hi):
     return np.clip((arr - lo) / (hi - lo), 0.0, 1.0)
 
 
-def draw_f0_profile(fig, df, metric_keys, show_band=True):
+def draw_f0_profile(fig, df, metric_keys, show_band=False, show_scatter=True):
     """Render the F0-profile chart onto `fig` (cleared first).
 
-    Each metric becomes one 0-1 normalised polyline indexed by MIDI;
-    with `show_band` a ±1 SD ribbon is drawn around it. A thin coverage
-    strip on top shows ΣTotal per F0 so low-data pitches can be read
-    with appropriate caution."""
+    Each metric becomes one 0-1 normalised polyline indexed by MIDI —
+    the Total-weighted mean over that pitch's SPL cells. With
+    `show_scatter`, every individual (MIDI, SPL) cell is also drawn as a
+    faint dot (size ∝ cycle count), so the SPL spread that the mean
+    collapses stays visible — the mean is the trunk, the dots are the
+    detail. With `show_band`, a ±1 SD ribbon is drawn too. A thin
+    coverage strip on top shows ΣTotal per F0."""
     fig.clear()
 
     if df is None or "MIDI" not in getattr(df, "columns", []):
@@ -138,6 +141,13 @@ def draw_f0_profile(fig, df, metric_keys, show_band=True):
     ax_cov.margins(x=0)
     ax_cov.set_facecolor("white")
 
+    # Per-cell scatter setup — dot size ∝ cycle count, so the SPL cells
+    # that dominate the weighted mean read as bigger dots. A small x
+    # jitter spreads the otherwise-coincident dots at each integer MIDI.
+    jit_rng = np.random.default_rng(0)
+    tot = df["Total"].to_numpy(dtype=float) if "Total" in df.columns else None
+    tot_max = float(tot.max()) if tot is not None and tot.size else 1.0
+
     drawn = 0
     for idx, key in enumerate(metric_keys):
         st = agg["stats"].get(key)
@@ -146,13 +156,26 @@ def draw_f0_profile(fig, df, metric_keys, show_band=True):
             continue
         lo, hi = rng
         color = _LINE_PALETTE[idx % len(_LINE_PALETTE)]
-        ax.plot(midi, _normalise(st["mean"], lo, hi),
-                color=color, lw=2.0, label=key)
+
+        # Raw per-cell values — the SPL detail behind the weighted mean.
+        if show_scatter and key in df.columns:
+            cx = df["MIDI"].to_numpy(dtype=float)
+            cy = _normalise(df[key].to_numpy(dtype=float), lo, hi)
+            jit = (jit_rng.random(len(cx)) - 0.5) * 0.4
+            if tot is not None:
+                sz = 3.0 + 22.0 * np.sqrt(np.clip(tot / tot_max, 0.0, 1.0))
+            else:
+                sz = 8.0
+            ax.scatter(cx + jit, cy, s=sz, color=color, alpha=0.22,
+                       edgecolors="none", zorder=1)
+
         if show_band:
             ax.fill_between(midi,
                             _normalise(st["mean"] - st["std"], lo, hi),
                             _normalise(st["mean"] + st["std"], lo, hi),
-                            color=color, alpha=0.15, linewidth=0)
+                            color=color, alpha=0.15, linewidth=0, zorder=2)
+        ax.plot(midi, _normalise(st["mean"], lo, hi),
+                color=color, lw=2.0, label=key, zorder=4)
         drawn += 1
 
     ax.set_ylim(-0.02, 1.02)
