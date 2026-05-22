@@ -286,6 +286,64 @@ def _local_std(x, y, tx, half=0.6):
     return out
 
 
+def _spl_balance_weights(midi, dB, f0_bin=2.0, spl_bin=5.0):
+    """Per-cycle weights that rebalance each F0 region's SPL
+    distribution to the recording-wide one.
+
+    A pitch sung mostly quietly (or loudly) otherwise drags an
+    SPL-dependent metric down (or up) — an artefact of how the take was
+    sung, not a real F0 effect. Post-stratifying on SPL removes it:
+    within each F0 band, cycles are reweighted so their SPL mix matches
+    the global SPL mix, so every F0 is read 'at the same loudness'."""
+    midi = np.asarray(midi, dtype=float)
+    dB = np.asarray(dB, dtype=float)
+    w = np.ones(len(midi))
+    ok = np.isfinite(midi) & np.isfinite(dB)
+    if ok.sum() < 20:
+        return w
+    si = np.floor((dB - np.min(dB[ok])) / spl_bin).astype(int)
+    fi = np.floor((midi - np.min(midi[ok])) / f0_bin).astype(int)
+    n_spl = int(si[ok].max()) + 1
+    g = np.bincount(si[ok], minlength=n_spl).astype(float)
+    g /= g.sum()                                   # global SPL profile
+    for f in np.unique(fi[ok]):
+        sel = ok & (fi == f)
+        cnt = np.bincount(si[sel], minlength=n_spl).astype(float)
+        ftot = cnt.sum()
+        for s in range(n_spl):
+            if cnt[s] > 0:
+                w[sel & (si == s)] = g[s] * ftot / cnt[s]
+    w = np.clip(w, 0.1, 10.0)
+    w[ok] /= np.mean(w[ok])
+    return w
+
+
+def _weighted_kernel_trend(x, y, w, xs, bw=1.2):
+    """Weighted Gaussian-kernel regression of y on x, evaluated at xs.
+    Returns (mean, std) per xs — std is the weighted local spread for
+    the ±1 SD band. Uneven F0 sampling is handled naturally: a sparse
+    pitch is dominated by its neighbours rather than swinging to its
+    own few (possibly biased) cycles."""
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    w = np.asarray(w, dtype=float)
+    m = np.isfinite(x) & np.isfinite(y) & np.isfinite(w)
+    x, y, w = x[m], y[m], w[m]
+    mean = np.full(len(xs), np.nan)
+    std = np.full(len(xs), np.nan)
+    if len(x) < 5:
+        return mean, std
+    for i, xe in enumerate(xs):
+        k = np.exp(-0.5 * ((x - xe) / bw) ** 2) * w
+        ks = k.sum()
+        if ks <= 1e-9:
+            continue
+        mu = float((k * y).sum() / ks)
+        mean[i] = mu
+        std[i] = float(np.sqrt(max((k * (y - mu) ** 2).sum() / ks, 0.0)))
+    return mean, std
+
+
 def draw_f0_scatter(fig, cycle_df, metric_keys, show_trend=True,
                     show_scatter=False, show_band=True):
     """Render the per-cycle F0 trend chart onto `fig` (cleared first).
@@ -308,6 +366,15 @@ def draw_f0_scatter(fig, cycle_df, metric_keys, show_trend=True,
         return
 
     midi = cycle_df["MIDI"].to_numpy(dtype=float)
+    dB = (cycle_df["dB"].to_numpy(dtype=float)
+          if "dB" in cycle_df.columns else np.full(len(midi), np.nan))
+    # SPL-balancing weights (depend only on F0+SPL, shared by every
+    # metric) + the dense F0 grid the kernel trend is evaluated on.
+    w_spl = _spl_balance_weights(midi, dB)
+    fin = np.isfinite(midi)
+    tx = (np.arange(np.floor(midi[fin].min()),
+                    np.ceil(midi[fin].max()) + 0.25, 0.25)
+          if fin.any() else np.array([]))
 
     gs = fig.add_gridspec(2, 1, height_ratios=[1, 7], hspace=0.10)
     ax_cov = fig.add_subplot(gs[0])
@@ -333,23 +400,22 @@ def draw_f0_scatter(fig, cycle_df, metric_keys, show_trend=True,
         if show_scatter:
             ax.scatter(midi, vals, s=5, color=color, alpha=0.10,
                        edgecolors="none", rasterized=True, zorder=2)
-        tr = _trend(midi, vals) if show_trend else None
         ax.plot([], [], color=color, lw=2.6, label=key)   # legend proxy
-        if tr is None:
+        if not show_trend or len(tx) < 2:
             drawn += 1
             continue
-        tx, ty = tr
+        # SPL-balanced kernel trend: each F0 estimated as if sung at the
+        # global SPL mix, so a quietly-sung pitch is not read as low.
+        ty, tsd = _weighted_kernel_trend(midi, vals, w_spl, tx)
         rgb = mcolors.to_rgb(color)
-        # Opacity per segment tracks local cycle density: dense F0 reads
-        # solid, sparse F0 (few cycles) fades out — so the eye weights
-        # the trend by how much data backs each stretch.
+        # Opacity per segment tracks local cycle density — sparse F0
+        # fade, so the eye weights the trend by how much data backs it.
         w = _coverage_weight(midi, tx)
         seg_w = 0.5 * (w[:-1] + w[1:])
 
         if show_band:
-            sigma = _smooth_nan(_local_std(midi, vals, tx), 11)
-            blo = np.clip(ty - sigma, 0.0, 1.0)
-            bhi = np.clip(ty + sigma, 0.0, 1.0)
+            blo = np.clip(ty - tsd, 0.0, 1.0)
+            bhi = np.clip(ty + tsd, 0.0, 1.0)
             ok_b = np.isfinite(blo) & np.isfinite(bhi)
             quads, qcols = [], []
             for i in range(len(tx) - 1):
@@ -362,11 +428,17 @@ def draw_f0_scatter(fig, cycle_df, metric_keys, show_trend=True,
                 ax.add_collection(PolyCollection(
                     quads, facecolors=qcols, edgecolors="none", zorder=3))
 
+        ok_t = np.isfinite(ty)
         pts = np.column_stack([tx, ty])
-        segs = np.stack([pts[:-1], pts[1:]], axis=1)
-        lcols = [(*rgb, 0.18 + 0.82 * float(sw)) for sw in seg_w]
-        ax.add_collection(LineCollection(segs, colors=lcols,
-                                         linewidths=2.6, zorder=5))
+        lsegs, lcols = [], []
+        for i in range(len(tx) - 1):
+            if not (ok_t[i] and ok_t[i + 1]):
+                continue
+            lsegs.append([pts[i], pts[i + 1]])
+            lcols.append((*rgb, 0.18 + 0.82 * float(seg_w[i])))
+        if lsegs:
+            ax.add_collection(LineCollection(lsegs, colors=lcols,
+                                             linewidths=2.6, zorder=5))
         drawn += 1
 
     ax.set_ylim(-0.02, 1.02)
