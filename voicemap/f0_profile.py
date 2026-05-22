@@ -113,6 +113,41 @@ def _weighted_kernel_trend(x, y, w, xs, bw=1.2):
     return mean, std
 
 
+def _populated_mask(midi, tx, half=0.7, min_run=3.0):
+    """Boolean mask over tx — True only on F0 spans with real cycle
+    density at least `min_run` semitones wide.
+
+    Drops isolated outlier clusters (a few stray cycles far from the
+    sung range) and the empty bridges between them, so the trend is not
+    drawn over near-empty F0 where those strays would otherwise produce
+    a spurious curve."""
+    mask = np.zeros(len(tx), dtype=bool)
+    m = np.sort(np.asarray(midi, dtype=float))
+    m = m[np.isfinite(m)]
+    if len(m) < 10 or len(tx) < 2:
+        return np.ones(len(tx), dtype=bool)
+    dens = (np.searchsorted(m, tx + half, side="right")
+            - np.searchsorted(m, tx - half, side="left"))
+    thr = max(0.02 * dens.max(), 10)
+    valid = dens >= thr
+    step = float(tx[1] - tx[0])
+    min_len = max(int(round(min_run / step)), 1)
+    runs, s = [], None
+    for i in range(len(valid) + 1):
+        v = bool(valid[i]) if i < len(valid) else False
+        if v and s is None:
+            s = i
+        elif not v and s is not None:
+            runs.append((s, i))
+            s = None
+    long_runs = [r for r in runs if r[1] - r[0] >= min_len]
+    if not long_runs and runs:                 # fallback: keep longest run
+        long_runs = [max(runs, key=lambda r: r[1] - r[0])]
+    for a, b in long_runs:
+        mask[a:b] = True
+    return mask
+
+
 def draw_f0_scatter(fig, cycle_df, metric_keys, show_trend=True,
                     show_scatter=False, show_band=True):
     """Render the per-cycle F0 trend chart onto `fig` (cleared first).
@@ -144,6 +179,9 @@ def draw_f0_scatter(fig, cycle_df, metric_keys, show_trend=True,
     tx = (np.arange(np.floor(midi[fin].min()),
                     np.ceil(midi[fin].max()) + 0.25, 0.25)
           if fin.any() else np.array([]))
+    # Only draw the trend over F0 spans with real data — isolated
+    # outlier cycles otherwise drag a spurious curve into empty space.
+    pop = _populated_mask(midi, tx)
 
     gs = fig.add_gridspec(2, 1, height_ratios=[1, 7], hspace=0.10)
     ax_cov = fig.add_subplot(gs[0])
@@ -176,6 +214,8 @@ def draw_f0_scatter(fig, cycle_df, metric_keys, show_trend=True,
         # SPL-balanced kernel trend: each F0 estimated as if sung at the
         # global SPL mix, so a quietly-sung pitch is not read as low.
         ty, tsd = _weighted_kernel_trend(midi, vals, w_spl, tx)
+        ty = np.where(pop, ty, np.nan)
+        tsd = np.where(pop, tsd, np.nan)
         if show_band:
             ax.fill_between(tx, np.clip(ty - tsd, 0.0, 1.0),
                             np.clip(ty + tsd, 0.0, 1.0),
