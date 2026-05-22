@@ -414,61 +414,19 @@ def _build_grid(df: pd.DataFrame, col: str) -> np.ma.MaskedArray:
     return np.ma.masked_invalid(grid)
 
 
-def _draw_vrp_ax(ax, fig, df: pd.DataFrame, col: str) -> bool:
-    """Draw one VRP metric into *ax*. Returns False when the column is empty."""
-    cfg = METRIC_CFG.get(col, dict(
-        label=col, vmin=None, vmax=None, unit="", cmap="viridis", norm=None
-    ))
-
-    grid = _build_grid(df, col)
-    if grid.count() == 0:
-        return False
-
-    vmin = cfg["vmin"] if cfg["vmin"] is not None else float(np.nanmin(grid))
-    vmax = cfg["vmax"] if cfg["vmax"] is not None else float(np.nanmax(grid))
-    if vmin >= vmax:
-        vmax = vmin + 1.0
-
-    # ── Colour scheme ────────────────────────────────────────────────────
-    # White background for the plot area so exported PNGs and Excel
-    # figures drop straight into papers/slides without inverting. Empty
-    # cells are a slightly-off-white so you can still see them against
-    # the plot face. All text and axis chrome is black/dark-grey for
-    # contrast. Tokens live in voicemap.gui.theme so chart palette
-    # changes are one-line edits.
+def _finish_vrp_ax(ax, fig, mappable, cfg, col) -> None:
+    """Shared axis chrome for the VRP heatmap and the per-cycle scatter:
+    colourbar, MIDI/SPL ticks + fixed limits, grid, title, category tag.
+    Both views land on the identical (MIDI, SPL) axes."""
     from voicemap.gui.theme import (
-        PLOT_BG_AX  as _BG_AX,
-        PLOT_BG_EMPTY as _BG_EMPTY,
-        PLOT_FG     as _FG_TEXT,
+        PLOT_FG as _FG_TEXT,
         PLOT_FG_SPINE as _FG_SPINE,
-        PLOT_GRID   as _GRID_MAJOR,
+        PLOT_GRID as _GRID_MAJOR,
         PLOT_GRID_LIGHT as _GRID_MINOR,
         PLOT_FG_DIM as _CAT_TAG,
     )
-    ax.set_facecolor(_BG_AX)
-
-    midi_edges = np.arange(MIDI_MIN - 0.5, MIDI_MAX + 1.5)
-    spl_edges  = np.arange(SPL_MIN  - 0.5, SPL_MAX  + 1.5)
-
-    # Custom colormaps are already new objects; built-in names need a copy
-    raw_cmap = cfg["cmap"]
-    if isinstance(raw_cmap, str):
-        cmap_obj = plt.get_cmap(raw_cmap).copy()
-    else:
-        cmap_obj = raw_cmap
-    cmap_obj.set_bad(color=_BG_EMPTY)
-
-    norm = cfg.get("norm") or Normalize(vmin=vmin, vmax=vmax)
-
-    mesh = ax.pcolormesh(
-        midi_edges, spl_edges, grid,
-        cmap=cmap_obj, norm=norm,
-        shading="flat",
-        rasterized=True,
-    )
-
     unit_str = f" [{cfg['unit']}]" if cfg["unit"] else ""
-    cbar = fig.colorbar(mesh, ax=ax, fraction=0.03, pad=0.01)
+    cbar = fig.colorbar(mappable, ax=ax, fraction=0.03, pad=0.01)
     cbar.ax.yaxis.set_tick_params(color=_FG_TEXT)
     plt.setp(cbar.ax.yaxis.get_ticklabels(), color=_FG_TEXT, fontsize=7)
     cbar.outline.set_edgecolor(_FG_SPINE)
@@ -498,13 +456,63 @@ def _draw_vrp_ax(ax, fig, df: pd.DataFrame, col: str) -> bool:
     ax.grid(which="minor", color=_GRID_MINOR, linewidth=0.2)
 
     # Title + category tag
-    main_title = f"{cfg['label']}{unit_str}"
-    ax.set_title(main_title, color=_FG_TEXT, fontsize=9, pad=4)
+    ax.set_title(f"{cfg['label']}{unit_str}", color=_FG_TEXT, fontsize=9, pad=4)
     cat = METRIC_CATEGORY.get(col)
     if cat:
         ax.text(1.0, 1.02, cat, transform=ax.transAxes,
                 ha="right", va="bottom",
                 color=_CAT_TAG, fontsize=7, style="italic")
+
+
+def _draw_vrp_ax(ax, fig, df: pd.DataFrame, col: str) -> bool:
+    """Draw one VRP metric into *ax*. Returns False when the column is empty."""
+    cfg = METRIC_CFG.get(col, dict(
+        label=col, vmin=None, vmax=None, unit="", cmap="viridis", norm=None
+    ))
+
+    grid = _build_grid(df, col)
+    if grid.count() == 0:
+        return False
+
+    vmin = cfg["vmin"] if cfg["vmin"] is not None else float(np.nanmin(grid))
+    vmax = cfg["vmax"] if cfg["vmax"] is not None else float(np.nanmax(grid))
+    if vmin >= vmax:
+        vmax = vmin + 1.0
+
+    # ── Colour scheme ────────────────────────────────────────────────────
+    # White background for the plot area so exported PNGs and Excel
+    # figures drop straight into papers/slides without inverting. Empty
+    # cells are a slightly-off-white so you can still see them against
+    # the plot face. All text and axis chrome is black/dark-grey for
+    # contrast. Tokens live in voicemap.gui.theme so chart palette
+    # changes are one-line edits.
+    from voicemap.gui.theme import (
+        PLOT_BG_AX as _BG_AX,
+        PLOT_BG_EMPTY as _BG_EMPTY,
+    )
+    ax.set_facecolor(_BG_AX)
+
+    midi_edges = np.arange(MIDI_MIN - 0.5, MIDI_MAX + 1.5)
+    spl_edges  = np.arange(SPL_MIN  - 0.5, SPL_MAX  + 1.5)
+
+    # Custom colormaps are already new objects; built-in names need a copy
+    raw_cmap = cfg["cmap"]
+    if isinstance(raw_cmap, str):
+        cmap_obj = plt.get_cmap(raw_cmap).copy()
+    else:
+        cmap_obj = raw_cmap
+    cmap_obj.set_bad(color=_BG_EMPTY)
+
+    norm = cfg.get("norm") or Normalize(vmin=vmin, vmax=vmax)
+
+    mesh = ax.pcolormesh(
+        midi_edges, spl_edges, grid,
+        cmap=cmap_obj, norm=norm,
+        shading="flat",
+        rasterized=True,
+    )
+
+    _finish_vrp_ax(ax, fig, mesh, cfg, col)
     return True
 
 
@@ -598,6 +606,55 @@ def plot_vrp_csv(
 
 
 draw_vrp_on_ax = _draw_vrp_ax
+
+
+def draw_vrp_scatter_on_ax(ax, fig, cycle_df, col: str) -> bool:
+    """Per-cycle scatter view of the VRP: every analysed cycle is one
+    dot at its true continuous (MIDI, SPL), coloured by `col` with the
+    same palette and value range as the heatmap. Shares the heatmap's
+    axis chrome so the two views are directly comparable.
+
+    Reads the per-cycle log DataFrame (continuous MIDI/dB). Returns
+    False when the column is unavailable or empty."""
+    cfg = METRIC_CFG.get(col, dict(
+        label=col, vmin=None, vmax=None, unit="", cmap="viridis", norm=None
+    ))
+    if cycle_df is None:
+        return False
+    cols = getattr(cycle_df, "columns", [])
+    # Per-cycle log carries a single cluster label per cycle (Cluster /
+    # cPhon), not the per-cell dominant/percentage columns.
+    src = col
+    if src not in cols:
+        src = {"maxCluster": "Cluster", "maxCPhon": "cPhon"}.get(col)
+        if src is None or src not in cols:
+            return False
+
+    x = cycle_df["MIDI"].to_numpy(dtype=float)
+    y = cycle_df["dB"].to_numpy(dtype=float)
+    c = cycle_df[src].to_numpy(dtype=float)
+    keep = np.isfinite(x) & np.isfinite(y) & np.isfinite(c)
+    if not keep.any():
+        return False
+    x, y, c = x[keep], y[keep], c[keep]
+
+    vmin = cfg["vmin"] if cfg["vmin"] is not None else float(np.nanmin(c))
+    vmax = cfg["vmax"] if cfg["vmax"] is not None else float(np.nanmax(c))
+    if vmin >= vmax:
+        vmax = vmin + 1.0
+
+    from voicemap.gui.theme import PLOT_BG_AX as _BG_AX
+    ax.set_facecolor(_BG_AX)
+
+    raw_cmap = cfg["cmap"]
+    cmap_obj = (plt.get_cmap(raw_cmap).copy()
+                if isinstance(raw_cmap, str) else raw_cmap)
+    norm = cfg.get("norm") or Normalize(vmin=vmin, vmax=vmax)
+
+    sc = ax.scatter(x, y, c=c, cmap=cmap_obj, norm=norm,
+                    s=10, linewidths=0, alpha=0.6, rasterized=True)
+    _finish_vrp_ax(ax, fig, sc, cfg, col)
+    return True
 
 
 # ───────────────────────────────────────────────────────────────────────────

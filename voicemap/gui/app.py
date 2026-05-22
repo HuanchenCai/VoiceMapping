@@ -1662,6 +1662,20 @@ class VoiceMapApp(_TkBase):
         self._annot_mode_on = False
         self._annot_canvas_cid = None
 
+        # 二维视图模式：网格热图 / per-cycle 散点（同一套 MIDI×SPL 坐标）
+        self._vrp_mode_var = tk.StringVar(value="heatmap")
+        mode_bar = tk.Frame(parent, bg=PANEL)
+        mode_bar.pack(side="top", fill="x", padx=12, pady=(6, 0))
+        tk.Label(mode_bar, text="二维视图", bg=PANEL, fg=MUTED,
+                 font=FONT_SMALL).pack(side="left", padx=(0, 8))
+        for _val, _txt in (("heatmap", "热图"), ("scatter", "散点")):
+            tk.Radiobutton(mode_bar, text=_txt, value=_val,
+                           variable=self._vrp_mode_var,
+                           command=self._on_vrp_mode_change,
+                           bg=PANEL, fg=TEXT, selectcolor=PANEL_HI,
+                           activebackground=PANEL, activeforeground=TEXT,
+                           font=FONT_SMALL, takefocus=0).pack(side="left")
+
         middle = tk.Frame(parent, bg=PANEL)
         middle.pack(side="top", fill="both", expand=True)
 
@@ -2330,6 +2344,11 @@ class VoiceMapApp(_TkBase):
             return
         if getattr(self, "_annot_mode_on", False):
             return
+        # The cell readout below is heatmap-grid logic; the scatter view
+        # has no (semitone, dB) cells, so skip it there.
+        if (getattr(self, "_vrp_mode_var", None) is not None
+                and self._vrp_mode_var.get() == "scatter"):
+            return
         x, y = event.xdata, event.ydata
         if x is None or y is None:
             return
@@ -2626,6 +2645,10 @@ class VoiceMapApp(_TkBase):
             m.grab_release()
 
     def _render_metric(self, col: str):
+        if (getattr(self, "_vrp_mode_var", None) is not None
+                and self._vrp_mode_var.get() == "scatter"):
+            self._render_metric_scatter(col)
+            return
         if self._last_df is None or col not in self._last_df.columns:
             return
         # The inline readout annotation belongs to the previous axes;
@@ -2669,6 +2692,37 @@ class VoiceMapApp(_TkBase):
             self._show_placeholder(tr("placeholder.no_data", col=col))
             return
         self._canvas.draw_idle()
+
+    def _render_metric_scatter(self, col: str):
+        """2-D per-cycle scatter: every cycle a dot at its true
+        (MIDI, SPL), coloured by `col`. Reads the per-cycle log paired
+        with the current VRP CSV — same axes as the heatmap."""
+        cycle_df = self._load_cycle_log()
+        if cycle_df is None:
+            self._show_placeholder("无 per-cycle 数据 — 请先分析")
+            return
+        self._inline_readout = None
+        self._showing_placeholder = False
+        if hasattr(self, "_overlay_mgr"):
+            self._overlay_mgr.clear()
+        if getattr(self, "_annot_mode_on", False):
+            self._toggle_annotation_mode()
+        self._sync_fig_to_widget()
+        self._fig.clear()
+        self._fig.patch.set_facecolor("white")
+        self._fig.subplots_adjust(left=0.13, right=0.90, top=0.90, bottom=0.16)
+        ax = self._fig.add_subplot(111)
+        from voicemap.plotter import draw_vrp_scatter_on_ax
+        if not draw_vrp_scatter_on_ax(ax, self._fig, cycle_df, col):
+            self._show_placeholder(f"散点模式暂不支持指标 {col}")
+            return
+        self._canvas.draw_idle()
+
+    def _on_vrp_mode_change(self):
+        """Re-render the 2-D view when the heatmap/scatter mode flips."""
+        col = self.metric_var.get()
+        if col:
+            self._render_metric(col)
 
     # ── 日志 ──
     def _init_logging(self):
