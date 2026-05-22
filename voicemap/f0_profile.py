@@ -217,16 +217,38 @@ def _trend(x, y, frac=0.25):
         return xs, np.clip(np.polyval(coef, xs), 0.0, 1.0)
 
 
+def _local_std(x, y, tx, half=0.6):
+    """Std of y over the points whose x lies within ±half of each tx.
+    NaN where fewer than 3 samples fall in the window. Used for the
+    ±1 SD ribbon — the local spread of per-cycle values around the
+    trend."""
+    m = np.isfinite(x) & np.isfinite(y)
+    x, y = x[m], y[m]
+    out = np.full(len(tx), np.nan)
+    if len(x) < 3:
+        return out
+    order = np.argsort(x)
+    xs, ys = x[order], y[order]
+    lo_idx = np.searchsorted(xs, np.asarray(tx) - half, side="left")
+    hi_idx = np.searchsorted(xs, np.asarray(tx) + half, side="right")
+    for i in range(len(tx)):
+        if hi_idx[i] - lo_idx[i] >= 3:
+            out[i] = float(np.std(ys[lo_idx[i]:hi_idx[i]]))
+    return out
+
+
 def draw_f0_scatter(fig, cycle_df, metric_keys, show_trend=True,
-                    show_scatter=False):
+                    show_scatter=False, show_band=True):
     """Render the per-cycle F0 trend chart onto `fig` (cleared first).
 
     Reads the per-cycle log (one row per cycle, continuous MIDI) rather
     than the binned VRP. Each metric becomes one LOWESS trend line over
     every cycle's (F0, normalised metric) — a smooth curve at full F0
-    resolution, not the coarse semitone-binned mean. `show_scatter`
-    optionally overlays the raw per-cycle dots behind the trend; the
-    1-D view keeps it off (the point cloud belongs to the 2-D map)."""
+    resolution, not the coarse semitone-binned mean. With `show_band` a
+    ±1 SD ribbon (local spread of the per-cycle values around the
+    trend) is drawn too. `show_scatter` optionally overlays the raw
+    per-cycle dots; the 1-D view keeps it off (the point cloud belongs
+    to the 2-D map)."""
     fig.clear()
 
     if cycle_df is None or "MIDI" not in getattr(cycle_df, "columns", []):
@@ -264,8 +286,14 @@ def draw_f0_scatter(fig, cycle_df, metric_keys, show_trend=True,
                        edgecolors="none", rasterized=True, zorder=2)
         tr = _trend(midi, vals) if show_trend else None
         if tr is not None:
-            # White halo under the coloured trend so it reads clearly
-            # over its own same-coloured scatter cloud.
+            if show_band:
+                sigma = _local_std(midi, vals, tr[0])
+                ax.fill_between(tr[0],
+                                np.clip(tr[1] - sigma, 0.0, 1.0),
+                                np.clip(tr[1] + sigma, 0.0, 1.0),
+                                color=color, alpha=0.15, linewidth=0,
+                                zorder=3)
+            # White halo under the coloured trend so it reads clearly.
             ax.plot(tr[0], tr[1], color="white", lw=4.5, zorder=4)
             ax.plot(tr[0], tr[1], color=color, lw=2.6, zorder=5, label=key)
         else:
