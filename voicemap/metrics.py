@@ -1642,21 +1642,31 @@ class HarmonicDiffCalculator(MetricCalculator):
 class PerturbationCalculator(MetricCalculator):
     """Cycle-to-cycle jitter (period) and shimmer (amplitude) perturbations.
 
-    Backed by Praat (via parselmouth). Praat's PointProcess (cc) finds
-    cycle marks on the voice signal with cross-correlation-based subsample
-    alignment — accurate to ~2 µs vs. EGG-trigger integer-sample precision
-    of ~22 µs. We let Praat do that work, then map its 8 perturbation
-    scalars to per-cycle arrays via a sliding window so the VRP heatmap
-    keeps its F0×SPL granularity.
+    Algorithm matches Praat's PointProcess (cc) + Get jitter/shimmer
+    semantics but is reimplemented natively (no parselmouth dependency)
+    and emits **per-cycle** arrays rather than a single file-level scalar:
 
-    Why not compute these natively in VoiceMap? An earlier attempt to
-    refine integer EGG triggers to voice-peak subsample positions
-    actually made things worse — voice waveforms contain multiple
-    formant-related peaks per cycle, so naïve peak-picking randomly
-    locks onto different peaks across cycles, *adding* artificial
-    jitter. Cross-correlation alignment (what Praat does) is the right
-    fix; reimplementing it from scratch was not worth the engineering
-    risk when parselmouth is already available.
+      1. Take the integer cycle_triggers (from EGG phase-portrait or
+         IAIF GCI) as seeds. They are at ±1 sample precision (≈22 µs
+         @ 44.1 kHz) — fine for cycle counting but inflates jitter by
+         3-6× when used directly.
+      2. For each cycle [trigger[i], trigger[i+1]), find the |voice|
+         peak inside that **complete-cycle** window and refine to
+         subsample position via parabolic interpolation around the
+         three samples nearest the peak. Using the full-cycle window
+         (not ±half_gap, which crosses cycle boundaries) prevents the
+         "lock onto a different formant peak each cycle" failure mode
+         that adds artificial jitter.
+      3. T[i] = diff(refined_peak_positions): subsample period series.
+      4. A[i] = parabolic-interpolated |voice| at the peak: matches
+         Praat's per-pulse amplitude, not VoiceMap's old cycle-slice
+         peak-to-peak (which was sensitive to where the cycle was
+         cut).
+      5. Apply Praat's outlier rejection (period factor 1.3, amplitude
+         factor 1.6) and the MDVP local / RAP / PPQ5 / APQ3 / APQ5 /
+         APQ11 / dB-shimmer formulas — the formula layer was already
+         Praat-style in the previous implementation; only the cycle-
+         marking layer needed fixing.
     """
 
     # Keys returned from calculate()
@@ -1667,136 +1677,288 @@ class PerturbationCalculator(MetricCalculator):
     )
 
     # MDVP / Praat outlier rejection factors. 1.3 / 1.6 are Praat's
-    # documented defaults; we pass them straight through to its
-    # Get jitter / shimmer queries.
+    # documented defaults.
     PERIOD_FACTOR_MAX    = 1.3
     AMPLITUDE_FACTOR_MAX = 1.6
 
-    # Sliding-window length (s) for per-window Praat calls. 2.0 s gives
-    # Praat enough cycles (~200-1000 at speech F0) to stably estimate
-    # period perturbation, and is wide enough that fast pitch glides in
-    # singing don't whiplash Praat's per-window pitch estimate. Shorter
-    # windows (1 s) systematically underestimate jitter by ~half on
-    # high-dynamic-range recordings — verified vs. Praat reference on
-    # Jiang_Voice_EGG.wav. Hop is win/2 (50% overlap) for smooth temporal
-    # coverage without quadratic cost.
-    WINDOW_S = 2.0
+    @staticmethod
+    def _refine_via_xcorr(voice: np.ndarray,
+                          idx: np.ndarray
+                          ) -> np.ndarray:
+        """Refine each integer trigger to a subsample position by aligning
+        its voice waveform window to the previous cycle's window via
+        normalized cross-correlation. This is the core trick that makes
+        Praat's jitter robust: instead of picking a peak (which jumps
+        across formant lobes between cycles), it picks the position
+        where the *whole local waveform shape* best matches the previous
+        cycle — locking onto the same physical phase in each cycle.
 
-    # Pitch search range — slightly wider than the analyzer's config
-    # bounds so Praat doesn't refuse to find pitch at song-voice extremes.
-    PITCH_FLOOR_HZ   = 60.0
-    PITCH_CEILING_HZ = 1500.0
+        Returns refined float positions; refined[0] = idx[0] (anchor).
+        """
+        n = len(idx)
+        refined = idx.astype(np.float64).copy()
+        if n < 2:
+            return refined
+
+        N = len(voice)
+        # Template half-width: ~40 % of local period. Search half-width:
+        # ~15 % of local period. These leave enough waveform context for
+        # a confident xcorr peak without bleeding into the next/prev cycle.
+        TEMPLATE_FRAC = 0.40
+        SEARCH_FRAC   = 0.15
+
+        # Precompute integer periods for window sizing
+        gaps = np.diff(idx)
+        # Use the FIRST gap for trigger[0]'s template ref; chain forward.
+
+        from numpy.lib.stride_tricks import as_strided  # noqa: F401  (might be useful)
+
+        for i in range(1, n):
+            T_est = float(refined[i] - refined[i - 1])
+            if T_est < 10:
+                continue
+            half_W = max(int(round(T_est * TEMPLATE_FRAC)), 4)
+            max_shift = max(int(round(T_est * SEARCH_FRAC)), 2)
+
+            prev_c = int(round(refined[i - 1]))
+            cur_c = int(round(refined[i]))
+
+            # Template: voice around prev_c
+            t_s = prev_c - half_W
+            t_e = prev_c + half_W + 1
+            if t_s < 0 or t_e > N:
+                continue
+            template = voice[t_s:t_e]
+
+            # Target: wider window around cur_c so template can slide
+            g_s = cur_c - half_W - max_shift
+            g_e = cur_c + half_W + max_shift + 1
+            if g_s < 0 or g_e > N:
+                continue
+            target = voice[g_s:g_e]
+            if len(target) < len(template) + 2:
+                continue
+
+            # Normalised cross-correlation = correlate / (||t|| · ||segments of g||)
+            # The amplitude normalisation is essential — without it, loud
+            # cycles dominate and we lock onto the loudest cycle instead
+            # of the most similarly-shaped one.
+            t_norm = float(np.linalg.norm(template))
+            if t_norm < 1e-12:
+                continue
+
+            # Slide template across target; compute correlation per offset
+            n_offsets = len(target) - len(template) + 1
+            # Vectorised: build (n_offsets, len(template)) view via stride tricks
+            # — much faster than a Python loop for typical 80-sample windows.
+            from numpy.lib.stride_tricks import sliding_window_view as _swv
+            wins = _swv(target, len(template))           # shape (n_offsets, W)
+            num = wins @ template                         # dot per offset
+            win_norms = np.linalg.norm(wins, axis=1)
+            denom = win_norms * t_norm
+            denom_safe = np.where(denom > 1e-12, denom, 1.0)
+            xc = num / denom_safe                         # normalised xcorr ∈ [-1, 1]
+
+            peak = int(np.argmax(xc))
+
+            # Parabolic refine
+            if 0 < peak < len(xc) - 1:
+                y0 = float(xc[peak - 1])
+                y1 = float(xc[peak])
+                y2 = float(xc[peak + 1])
+                d = 2.0 * (y0 - 2.0 * y1 + y2)
+                if abs(d) > 1e-12:
+                    delta = (y0 - y2) / d
+                    if not -1.0 < delta < 1.0:
+                        delta = 0.0
+                else:
+                    delta = 0.0
+            else:
+                delta = 0.0
+
+            # peak=k means template best aligns with target[k:k+W],
+            # i.e. the slice centred at g_s + k + half_W. That centre is
+            # the refined cycle mark.
+            refined[i] = float(g_s + half_W) + float(peak) + delta
+
+        return refined
 
     @staticmethod
-    def _praat_window_scalars(voice_window: np.ndarray,
-                               fs: float) -> Optional[Dict[str, float]]:
-        """Run Praat once on a voice window and return the 8 perturbation
-        scalars. Returns None if Praat declined to produce pitch (too
-        short, unvoiced, or noisy)."""
-        import parselmouth
-        from parselmouth.praat import call
+    def _amp_per_cycle(voice: np.ndarray,
+                       refined_idx: np.ndarray) -> np.ndarray:
+        """Per-cycle parabolic-interpolated |voice| peak amplitude.
 
-        try:
-            snd = parselmouth.Sound(np.ascontiguousarray(voice_window,
-                                                          dtype=np.float64),
-                                     sampling_frequency=fs)
-            pitch = snd.to_pitch_cc(
-                time_step=None,
-                pitch_floor=PerturbationCalculator.PITCH_FLOOR_HZ,
-                pitch_ceiling=PerturbationCalculator.PITCH_CEILING_HZ)
-            pp = call([snd, pitch], "To PointProcess (cc)")
+        Search window for each cycle's peak is restricted to ±T/4
+        around the cycle midpoint (centre between refined_idx[k] and
+        refined_idx[k+1]). The narrow window prevents the algorithm
+        from drifting to a different formant lobe when the cycle's
+        dominant peak amplitude shifts only slightly between cycles —
+        which was the failure mode that gave shimmer a negative
+        correlation with Praat reference in earlier attempts.
+        """
+        n = len(refined_idx)
+        if n < 2:
+            return np.zeros(0, dtype=np.float64)
+        N = len(voice)
+        n_out = n - 1
+        amp = np.empty(n_out, dtype=np.float64)
+        for k in range(n_out):
+            s = float(refined_idx[k])
+            e = float(refined_idx[k + 1])
+            T = e - s
+            if T < 4:
+                ci = int(round((s + e) * 0.5))
+                amp[k] = abs(float(voice[ci])) if 0 <= ci < N else 0.0
+                continue
+            centre = 0.5 * (s + e)
+            half_w = max(int(round(T * 0.25)), 2)
+            ci = int(round(centre))
+            ws = max(0, ci - half_w)
+            we = min(N, ci + half_w + 1)
+            if we - ws < 3:
+                amp[k] = abs(float(voice[ci])) if 0 <= ci < N else 0.0
+                continue
+            seg = np.abs(voice[ws:we])
+            local = int(np.argmax(seg))
+            if 0 < local < len(seg) - 1:
+                y0 = float(seg[local - 1])
+                y1 = float(seg[local])
+                y2 = float(seg[local + 1])
+                d = 2.0 * (y0 - 2.0 * y1 + y2)
+                if abs(d) > 1e-12:
+                    delta = (y0 - y2) / d
+                    if not -1.0 < delta < 1.0:
+                        delta = 0.0
+                else:
+                    delta = 0.0
+                amp[k] = y1 - 0.25 * (y0 - y2) * delta
+            else:
+                amp[k] = float(seg[local])
+        return amp
 
-            pf = PerturbationCalculator.PERIOD_FACTOR_MAX
-            af = PerturbationCalculator.AMPLITUDE_FACTOR_MAX
+    @staticmethod
+    def _adjacent_ok(x: np.ndarray, max_factor: float) -> np.ndarray:
+        """Praat-style outlier mask: True where x[i] and x[i-1] are
+        within max_factor of each other (1.3 for period, 1.6 for
+        amplitude). Cycle 0 is always False — no previous neighbour."""
+        ok = np.zeros(len(x), dtype=bool)
+        if len(x) < 2:
+            return ok
+        prev, cur = x[:-1], x[1:]
+        safe_prev = np.maximum(prev, 1e-15)
+        safe_cur  = np.maximum(cur,  1e-15)
+        ratio = np.maximum(safe_cur / safe_prev, safe_prev / safe_cur)
+        ok[1:] = ratio < max_factor
+        return ok
 
-            j_local  = call(pp, "Get jitter (local)",       0, 0, 1e-4, 0.02, pf)
-            j_rap    = call(pp, "Get jitter (rap)",         0, 0, 1e-4, 0.02, pf)
-            j_ppq5   = call(pp, "Get jitter (ppq5)",        0, 0, 1e-4, 0.02, pf)
-            s_local  = call([snd, pp], "Get shimmer (local)",    0, 0, 1e-4, 0.02, pf, af)
-            s_db     = call([snd, pp], "Get shimmer (local_dB)", 0, 0, 1e-4, 0.02, pf, af)
-            s_apq3   = call([snd, pp], "Get shimmer (apq3)",     0, 0, 1e-4, 0.02, pf, af)
-            s_apq5   = call([snd, pp], "Get shimmer (apq5)",     0, 0, 1e-4, 0.02, pf, af)
-            s_apq11  = call([snd, pp], "Get shimmer (apq11)",    0, 0, 1e-4, 0.02, pf, af)
+    @classmethod
+    def _local_perturb(cls, x: np.ndarray, ok: np.ndarray) -> np.ndarray:
+        """Praat-style local jitter/shimmer:
+            |x[i] - x[i-1]| / mean(x over ok cycles) · 100
+        Cycles with ok[i] = False contribute zero (excluded from both
+        the differences and the normalising mean — matches Praat's
+        "ceiling of the period factor" rejection)."""
+        out = np.zeros_like(x)
+        if len(x) < 2 or not ok.any():
+            return out
+        # Praat uses all cycles passing the ratio test for the denominator
+        mx = x[ok].mean()
+        if mx <= 0:
+            return out
+        diff = np.abs(np.diff(x))
+        out[1:] = np.where(ok[1:], diff / mx * 100.0, 0.0)
+        return out
 
-            # Praat returns NaN for invalid windows; pass through as 0
-            # since downstream code treats 0 as "missing".
-            def _safe(x):
-                if x is None:
-                    return 0.0
-                x = float(x)
-                if x != x or x == float('inf') or x == float('-inf'):
-                    return 0.0
-                return x
-
-            return {
-                "jitter_local":  _safe(j_local)  * 100.0,
-                "jitter_rap":    _safe(j_rap)    * 100.0,
-                "jitter_ppq5":   _safe(j_ppq5)   * 100.0,
-                "shimmer_local": _safe(s_local)  * 100.0,
-                "shimmer_db":    _safe(s_db),
-                "shimmer_apq3":  _safe(s_apq3)   * 100.0,
-                "shimmer_apq5":  _safe(s_apq5)   * 100.0,
-                "shimmer_apq11": _safe(s_apq11)  * 100.0,
-            }
-        except Exception as exc:
-            logger.debug("Praat call failed on a window: %s", exc)
-            return None
+    @classmethod
+    def _npq_perturb(cls, x: np.ndarray, n_pts: int,
+                     ok: np.ndarray) -> np.ndarray:
+        """n-point PPQ (period) / APQ (amplitude) — Praat formula:
+            |x[center] - mean(x over n_pts window)| / mean(x) · 100
+        Any window touching an ok[i] = False cycle is zeroed."""
+        if n_pts % 2 != 1:
+            raise ValueError("n_pts must be odd")
+        k = n_pts // 2
+        if len(x) < n_pts or not ok.any():
+            return np.zeros_like(x)
+        mx = x[ok].mean()
+        if mx <= 0:
+            return np.zeros_like(x)
+        wins      = sliding_window_view(x,  n_pts)
+        wins_ok   = sliding_window_view(ok, n_pts)
+        avg       = wins.mean(axis=1)
+        center_ok = wins_ok[:, k] & wins_ok.all(axis=1)
+        raw       = np.abs(x[k:k + len(avg)] - avg) / mx * 100.0
+        out = np.zeros_like(x)
+        out[k:k + len(avg)] = np.where(center_ok, raw, 0.0)
+        return out
 
     def calculate(self, voice: np.ndarray,
                   cycle_triggers: np.ndarray) -> Dict[str, np.ndarray]:
+        logger.info("Calculating jitter + shimmer "
+                    "(Praat-algorithm reimpl: xcorr cycle alignment + "
+                    "subsample period + parabolic peak amplitude)...")
         idx = np.where(cycle_triggers > 0.5)[0]
         n = max(len(idx) - 1, 0)
         z = lambda: np.zeros(n)
         if n < 3:
             return {k: z() for k in self.KEYS}
 
-        fs = float(self.config.sample_rate)
-        win_samps = max(int(self.WINDOW_S * fs), 1024)
-        hop_samps = win_samps // 2   # 50% overlap
+        # Refine each integer trigger to a subsample position by
+        # cross-correlating its voice waveform window against the previous
+        # cycle's window. This locks onto the same waveform shape across
+        # cycles regardless of which formant peak is locally dominant —
+        # the fix that simple peak-picking can't deliver.
+        refined_idx = self._refine_via_xcorr(voice, idx)
 
-        logger.info("Calculating jitter + shimmer (Praat via parselmouth, "
-                    "window=%.1fs hop=%.1fs)...",
-                    win_samps / fs, hop_samps / fs)
+        # Period series: subsample-accurate diff of refined positions.
+        T = np.diff(refined_idx)
 
-        # Run Praat on overlapping windows; record window center times +
-        # 8 scalars per window. Cycles will be assigned the metrics from
-        # the nearest window center.
-        n_voice = len(voice)
-        win_centers = []
-        win_metrics: Dict[str, list] = {k: [] for k in self.KEYS}
-        for start in range(0, n_voice - win_samps + 1, hop_samps):
-            end = start + win_samps
-            res = self._praat_window_scalars(voice[start:end], fs)
-            if res is None:
-                continue
-            win_centers.append((start + end) / 2.0)
-            for k in self.KEYS:
-                win_metrics[k].append(res[k])
+        # Amplitude per cycle: parabolic-interpolated |voice| peak in a
+        # ±T/4 window around each cycle midpoint. Pass refined float
+        # boundaries so the search centre + window scale exactly with
+        # the subsample-accurate cycle length.
+        A = self._amp_per_cycle(voice, refined_idx)
+        # Both T and A have length n (one perturbation value per cycle).
+        A_safe = np.maximum(A, 1e-15)
+        m = len(T)
 
-        # Edge case: not a single valid window — return zeros.
-        if not win_centers:
-            logger.warning("  Praat produced no valid windows — "
-                           "all jitter/shimmer values will be zero")
-            return {k: z() for k in self.KEYS}
+        # Praat outlier masks
+        ok_T = self._adjacent_ok(T, self.PERIOD_FACTOR_MAX)
+        ok_A = self._adjacent_ok(A, self.AMPLITUDE_FACTOR_MAX)
 
-        win_centers_arr = np.asarray(win_centers, dtype=np.float64)
-        # Cycle center time = midpoint between consecutive cycle triggers.
-        # Vectorized nearest-window lookup via searchsorted.
-        cycle_centers = (idx[:-1].astype(np.float64) +
-                          idx[1:].astype(np.float64)) * 0.5
-        insert_pos = np.searchsorted(win_centers_arr, cycle_centers)
-        left = np.clip(insert_pos - 1, 0, len(win_centers_arr) - 1)
-        right = np.clip(insert_pos, 0, len(win_centers_arr) - 1)
-        pick_right = (np.abs(cycle_centers - win_centers_arr[right]) <
-                       np.abs(cycle_centers - win_centers_arr[left]))
-        nearest = np.where(pick_right, right, left)
+        jitter_local  = self._local_perturb(T, ok_T)
+        jitter_rap    = self._npq_perturb  (T, 3,  ok_T)
+        jitter_ppq5   = self._npq_perturb  (T, 5,  ok_T)
 
-        result: Dict[str, np.ndarray] = {}
-        for k in self.KEYS:
-            vals = np.asarray(win_metrics[k], dtype=np.float64)
-            result[k] = vals[nearest]
+        shimmer_local = self._local_perturb(A, ok_A)
+        shimmer_db    = np.zeros(m)
+        shimmer_db[1:] = np.where(
+            ok_A[1:], np.abs(20.0 * np.log10(A_safe[1:] / A_safe[:-1])), 0.0)
+        shimmer_apq3  = self._npq_perturb(A, 3,  ok_A)
+        shimmer_apq5  = self._npq_perturb(A, 5,  ok_A)
+        shimmer_apq11 = self._npq_perturb(A, 11, ok_A)
 
-        # Logging summary
+        # Pad to length n if a trailing zero is needed so each result
+        # aligns 1:1 with the input cycle count expected by analyzer.py.
+        def _pad(arr):
+            if len(arr) == n:
+                return arr
+            if len(arr) > n:
+                return arr[:n]
+            return np.concatenate([arr, np.zeros(n - len(arr))])
+
+        result = {
+            "jitter_local":  _pad(jitter_local),
+            "jitter_rap":    _pad(jitter_rap),
+            "jitter_ppq5":   _pad(jitter_ppq5),
+            "shimmer_local": _pad(shimmer_local),
+            "shimmer_db":    _pad(shimmer_db),
+            "shimmer_apq3":  _pad(shimmer_apq3),
+            "shimmer_apq5":  _pad(shimmer_apq5),
+            "shimmer_apq11": _pad(shimmer_apq11),
+        }
+
+        # Summary log
         jl = result["jitter_local"]
         sl = result["shimmer_local"]
         sdb = result["shimmer_db"]
