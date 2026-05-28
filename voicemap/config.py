@@ -89,6 +89,13 @@ class VoiceMapConfig:
     # cross-validation of voice-derived shape metrics against EGG.
     # Default off because IAIF adds ~2-3× to the cycle-detection step.
     iaif_always_run: bool = False
+
+    # Pitch tracking range for the Praat Sound_to_Pitch translation
+    # (used by PerturbationCalculator and any future voice-only pitch
+    # paths). Praat's own defaults are 75/600; we widen to 60/1500 by
+    # default to cover children, female singing, and Peking-opera highs.
+    pitch_floor_hz:   float = 60.0
+    pitch_ceiling_hz: float = 1500.0
     
     # File paths
     audio_file: str = "audio/test_Voice_EGG.wav"
