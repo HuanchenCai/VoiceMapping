@@ -81,6 +81,14 @@ class VoiceMapConfig:
     # When True, also write a per-cycle log CSV (one row per cycle,
     # continuous MIDI/dB, no semitone×dB binning) next to the VRP CSV.
     cycle_log: bool = False
+
+    # When True, run IAIF on the voice channel even if EGG is present.
+    # Cycle boundaries still come from the EGG phase-portrait path
+    # (gold standard when available), but _voice metric columns get
+    # populated alongside the EGG-derived ones — enabling per-cycle
+    # cross-validation of voice-derived shape metrics against EGG.
+    # Default off because IAIF adds ~2-3× to the cycle-detection step.
+    iaif_always_run: bool = False
     
     # File paths
     audio_file: str = "audio/test_Voice_EGG.wav"
