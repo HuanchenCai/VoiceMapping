@@ -277,53 +277,52 @@ def sound_find_maximum_correlation(voice: np.ndarray, fs: float,
     ileft2max = _high(tmax2 - half_window)
     if ileft2max < ileft2min or iright1 <= ileft1:
         return -1.0, t1, 0.0
+    W = iright1 - ileft1 + 1
 
-    W = iright1 - ileft1 + 1   # window length in samples
-
-    # Build correlation array via vectorized stride view, with bounds clipped.
-    # Out-of-range samples in template / candidate are masked rather than
-    # set to zero — matches Praat's `if (i < 1 || i > nx) continue;`
-    r_arr = np.full(ileft2max - ileft2min + 1, -2.0, dtype=np.float64)
-    peak_arr = np.zeros(ileft2max - ileft2min + 1, dtype=np.float64)
-
-    for k, ileft2 in enumerate(range(ileft2min, ileft2max + 1)):
-        i1_range = np.arange(ileft1, iright1 + 1)
-        i2_range = np.arange(ileft2, ileft2 + W)
-        valid = (i1_range >= 0) & (i1_range < N) & (i2_range >= 0) & (i2_range < N)
-        if not valid.any():
-            r_arr[k] = 0.0
-            continue
-        a1 = voice[i1_range[valid]]
-        a2 = voice[i2_range[valid]]
-        norm1 = float(np.sum(a1 * a1))
-        norm2 = float(np.sum(a2 * a2))
-        if norm1 == 0.0 or norm2 == 0.0:
-            r_arr[k] = 0.0
-        else:
-            r_arr[k] = float(np.sum(a1 * a2) / np.sqrt(norm1 * norm2))
-        peak_arr[k] = float(np.max(np.abs(a2)))
-
-    # Praat picks a local maximum where r[i] >= r[i-1] and r[i] >= r[i+1],
-    # tracking r1 (previous), r2 (current), r3 (next). It writes results
-    # at the FIRST such qualified peak found (since the condition is
-    # checked against `> maximumCorrelation`). Replicate:
-    max_corr = -1.0
-    best_k = -1
-    r1_best = r3_best = 0.0
-    for k in range(1, len(r_arr) - 1):
-        r1, r2, r3 = r_arr[k - 1], r_arr[k], r_arr[k + 1]
-        if r2 > max_corr and r2 >= r1 and r2 >= r3:
-            max_corr = r2
-            r1_best = r1
-            r3_best = r3
-            best_k = k
-
-    if best_k < 0:
+    # Require template + all candidate windows fully inside the signal.
+    # Praat masks out-of-range samples; for our use case (refining inner
+    # cycle marks of a sustained recording) this corner is irrelevant —
+    # bail out cleanly rather than carry boundary plumbing through the
+    # vectorised path.
+    if ileft1 < 0 or iright1 >= N or ileft2min < 0 or ileft2max + W > N:
         return -1.0, t1, 0.0
 
-    ir = float(ileft2min + best_k)   # integer best offset
-    interpolated_peak = max_corr
+    template = voice[ileft1: iright1 + 1]
+    t_norm = float(np.dot(template, template))
+    if t_norm <= 0.0:
+        return -1.0, t1, 0.0
 
+    # Sliding view: shape (n_offsets, W) — one row per candidate offset.
+    from numpy.lib.stride_tricks import sliding_window_view as _swv
+    wins = _swv(voice[ileft2min: ileft2max + W], W)
+    win_norms = np.einsum('ij,ij->i', wins, wins)
+    products = wins @ template
+    with np.errstate(divide='ignore', invalid='ignore'):
+        r_full = products / np.sqrt(t_norm * win_norms)
+    r_full = np.where(win_norms > 0, r_full, 0.0)
+    peak_full = np.max(np.abs(wins), axis=1)
+
+    n_r = len(r_full)
+    if n_r < 3:
+        return -1.0, t1, 0.0
+
+    # Praat-equivalent local-max selection:
+    #   for each k ∈ (0, n_r-1) where r[k] ≥ r[k-1] and r[k] ≥ r[k+1]
+    #   pick the one with the highest r[k]. Praat's iterative form tracks
+    #   the running max-of-local-maxima — equivalent to argmax over the
+    #   mask below.
+    local_max = ((r_full[1:-1] >= r_full[:-2]) &
+                 (r_full[1:-1] >= r_full[2:]))
+    if not local_max.any():
+        return -1.0, t1, 0.0
+    lm_indices = np.flatnonzero(local_max) + 1   # back to full index
+    best_k = int(lm_indices[int(np.argmax(r_full[lm_indices]))])
+    max_corr = float(r_full[best_k])
+    r1_best = float(r_full[best_k - 1])
+    r3_best = float(r_full[best_k + 1])
+
+    ir = float(ileft2min + best_k)
+    interpolated_peak = max_corr
     d2r = (max_corr - r1_best) + (max_corr - r3_best)
     if d2r != 0.0:
         dr = 0.5 * (r3_best - r1_best)
@@ -331,11 +330,10 @@ def sound_find_maximum_correlation(voice: np.ndarray, fs: float,
         ir += dr / d2r
 
     peak_time = t1 + (ir - ileft1) * dx
-    peak_amp = float(peak_arr[best_k])
+    peak_amp = float(peak_full[best_k])
     if tmin2 <= peak_time <= tmax2:
         return interpolated_peak, peak_time, peak_amp
 
-    # Out-of-range: Praat falls back to the geometric-mean midpoint
     mid_dist = np.sqrt(max((tmin2 - t1) * (tmax2 - t1), 0.0))
     mid_time = (t1 - mid_dist) if tmin2 < t1 else (t1 + mid_dist)
     return max_corr, mid_time, peak_amp
