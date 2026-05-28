@@ -176,6 +176,13 @@ class VoiceMapAnalyzer:
         self.integrative_calculator    = IntegrativeMetricsCalculator(self.config)
         self.vib_jitter_calculator     = VibratoJitterCalculator(self.config)
 
+        # Per-analysis transient state — populated by voice_only_cycle_detection()
+        # when running on a mono file, consumed by calculate_all_metrics()
+        # to derive *_voice equivalents of EGG-shape metrics. None when
+        # an EGG channel was available (phase-portrait path).
+        self._glottal_flow: Optional[np.ndarray] = None
+        self._glottal_flow_derivative: Optional[np.ndarray] = None
+
         logger.info("VoiceMap analyzer initialized (numba=%s)", _NUMBA)
 
     # ------------------------------------------------------------------
@@ -347,6 +354,36 @@ class VoiceMapAnalyzer:
     # ------------------------------------------------------------------
     # Cycle detection
     # ------------------------------------------------------------------
+    def voice_only_cycle_detection(self,
+                                    voice_signal: np.ndarray
+                                    ) -> np.ndarray:
+        """IAIF-based GCI detection for mono (no-EGG) files.
+
+        Runs IAIF on the voice signal to estimate the glottal flow and
+        its derivative; cycle boundaries = negative peaks of the
+        derivative (closure instants). The glottal flow + derivative
+        are cached on ``self`` so the per-cycle metrics step can derive
+        ``*_voice`` equivalents of Qcontact / dEGGmax / OQ / etc.
+        """
+        from voicemap.inverse_filtering import voice_to_cycle_triggers
+
+        logger.info("Using IAIF + GCI for voice-only cycle detection...")
+        cfg = self.config
+        fs = cfg.sample_rate
+        # Map config's sample-domain period bounds into Hz for find_peaks.
+        f0_max = fs / max(cfg.min_samples, 1)
+        f0_min = fs / max(cfg.max_period_samples, 1)
+
+        triggers, g, dg = voice_to_cycle_triggers(
+            voice_signal, fs,
+            min_f0_hz=f0_min, max_f0_hz=f0_max)
+
+        # Cache for the metrics stage (_voice columns).
+        self._glottal_flow = g
+        self._glottal_flow_derivative = dg
+
+        return self.filter_cycles(triggers)
+
     def phase_portrait_cycle_detection(self, egg_signal: np.ndarray) -> np.ndarray:
         """Phase Portrait method — matches current SC namePhasePortrait SynthDef.
 
@@ -787,9 +824,19 @@ class VoiceMapAnalyzer:
 
         _cb(3)   # "周期检测 (phase-portrait)"
         logger.info("Cycle detection on %s channel...",
-                    "voice" if mono else "EGG")
-        cycle_triggers = self.phase_portrait_cycle_detection(
-            voice_p if mono else egg_p)
+                    "voice (IAIF + GCI)" if mono else "EGG (phase-portrait)")
+        # Two paths:
+        #   有 EGG: 走原始 phase-portrait 检测（已校准、和 SC 实现一致）。
+        #   无 EGG: 走 IAIF — 用 voice 信号反演 glottal flow，再从其
+        #           导数的负峰拿 GCI 做 cycle 边界。同时把 glottal flow
+        #           缓存在 self._glottal_flow / _glottal_flow_derivative
+        #           上，供 calculate_all_metrics 算 _voice 等价指标。
+        if mono:
+            cycle_triggers = self.voice_only_cycle_detection(voice_p)
+        else:
+            cycle_triggers = self.phase_portrait_cycle_detection(egg_p)
+            self._glottal_flow = None
+            self._glottal_flow_derivative = None
         cycle_count = int(np.sum(cycle_triggers > 0.5))
         logger.info("Detected cycles: %d", cycle_count)
 
