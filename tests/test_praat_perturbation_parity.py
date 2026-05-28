@@ -195,6 +195,79 @@ class TestPraatShimmerParity(unittest.TestCase):
 
 
 @unittest.skipUnless(_PARSELMOUTH_OK, "parselmouth not installed")
+class TestPerCycleDecomposition(unittest.TestCase):
+    """Each per-cycle decomposition function must satisfy:
+        mean(out[out > 0]) ≈ global Praat scalar
+    so a downstream consumer can recover the clinical scalar by averaging
+    the per-cycle output across the whole recording.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        path = os.path.join(ROOT, "audio", "test_Voice_EGG.wav")
+        if not os.path.exists(path):
+            raise unittest.SkipTest(f"missing fixture: {path}")
+        cls.voice, cls.fs = _load_voice(path, duration_s=10.0)
+        snd = parselmouth.Sound(np.ascontiguousarray(cls.voice),
+                                 sampling_frequency=cls.fs)
+        pitch = snd.to_pitch_cc(time_step=None, pitch_floor=75., pitch_ceiling=600.)
+        cls.pp_obj = call([snd, pitch], "To PointProcess (cc)")
+        n_pts = int(call(cls.pp_obj, "Get number of points"))
+        cls.t_points = np.array([call(cls.pp_obj, "Get time from index", i + 1)
+                                   for i in range(n_pts)], dtype=np.float64)
+        cls.amp_t, cls.amp_v = pp.point_process_to_amplitude_tier(
+            cls.t_points, cls.voice, cls.fs, PMIN, PMAX, PERIOD_FACTOR)
+
+    def _check(self, per_cycle_arr, global_value, name):
+        nz = per_cycle_arr[per_cycle_arr > 0]
+        self.assertGreater(len(nz), 10, f"{name}: only {len(nz)} nonzero")
+        recovered = float(np.mean(nz))
+        np.testing.assert_allclose(
+            recovered, global_value, rtol=1e-6,
+            err_msg=f"{name}: recovered {recovered:.8f}, global {global_value:.8f}")
+
+    def test_jitter_local_decomposition(self):
+        pc = pp.jitter_local_per_cycle(self.t_points, PMIN, PMAX, PERIOD_FACTOR)
+        g = pp.jitter_local(self.t_points, PMIN, PMAX, PERIOD_FACTOR)
+        self._check(pc, g, "jitter_local")
+
+    def test_jitter_rap_decomposition(self):
+        pc = pp.jitter_rap_per_cycle(self.t_points, PMIN, PMAX, PERIOD_FACTOR)
+        g = pp.jitter_rap(self.t_points, PMIN, PMAX, PERIOD_FACTOR)
+        self._check(pc, g, "jitter_rap")
+
+    def test_jitter_ppq5_decomposition(self):
+        pc = pp.jitter_ppq5_per_cycle(self.t_points, PMIN, PMAX, PERIOD_FACTOR)
+        g = pp.jitter_ppq5(self.t_points, PMIN, PMAX, PERIOD_FACTOR)
+        self._check(pc, g, "jitter_ppq5")
+
+    def test_shimmer_local_decomposition(self):
+        pc = pp.shimmer_local_per_cycle(self.amp_t, self.amp_v, PMIN, PMAX, AMP_FACTOR)
+        g = pp.shimmer_local(self.amp_t, self.amp_v, PMIN, PMAX, AMP_FACTOR)
+        self._check(pc, g, "shimmer_local")
+
+    def test_shimmer_local_dB_decomposition(self):
+        pc = pp.shimmer_local_dB_per_cycle(self.amp_t, self.amp_v, PMIN, PMAX, AMP_FACTOR)
+        g = pp.shimmer_local_dB(self.amp_t, self.amp_v, PMIN, PMAX, AMP_FACTOR)
+        self._check(pc, g, "shimmer_local_dB")
+
+    def test_shimmer_apq3_decomposition(self):
+        pc = pp.shimmer_apq3_per_cycle(self.amp_t, self.amp_v, PMIN, PMAX, AMP_FACTOR)
+        g = pp.shimmer_apq3(self.amp_t, self.amp_v, PMIN, PMAX, AMP_FACTOR)
+        self._check(pc, g, "shimmer_apq3")
+
+    def test_shimmer_apq5_decomposition(self):
+        pc = pp.shimmer_apq5_per_cycle(self.amp_t, self.amp_v, PMIN, PMAX, AMP_FACTOR)
+        g = pp.shimmer_apq5(self.amp_t, self.amp_v, PMIN, PMAX, AMP_FACTOR)
+        self._check(pc, g, "shimmer_apq5")
+
+    def test_shimmer_apq11_decomposition(self):
+        pc = pp.shimmer_apq11_per_cycle(self.amp_t, self.amp_v, PMIN, PMAX, AMP_FACTOR)
+        g = pp.shimmer_apq11(self.amp_t, self.amp_v, PMIN, PMAX, AMP_FACTOR)
+        self._check(pc, g, "shimmer_apq11")
+
+
+@unittest.skipUnless(_PARSELMOUTH_OK, "parselmouth not installed")
 class TestCCPointProcessParity(unittest.TestCase):
     """Cycle marks from the full Praat pipeline (Sound_to_Pitch +
     Sound_Pitch_to_PointProcess_cc, both natively reimplemented) should
