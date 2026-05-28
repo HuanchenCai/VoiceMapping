@@ -129,8 +129,10 @@ def iaif(signal: np.ndarray,
         Frame hop in milliseconds. 5 ms gives 80% overlap → smooth time
         variation of VT/source estimates across an F0 sweep.
     p_vt : int, optional
-        Vocal-tract LP order. Default = round(2·fs/1000) + 4, which is
-        the Praat / standard speech rule of thumb (~24 at 44.1 kHz).
+        Vocal-tract LP order. Default = round(2·fs/1000) + 4 (~92 at
+        44.1 kHz). Higher than the canonical speech-band rule because
+        VoiceMap analyzes the full audio bandwidth — empirically a lower
+        order leaves formant residue in dg that hurts GCI detection.
     p_gl : int
         Glottal source LP order. 4 is the canonical IAIF value.
     hpf_cutoff_hz : float
@@ -153,6 +155,11 @@ def iaif(signal: np.ndarray,
         return np.zeros(N), np.zeros(N)
 
     if p_vt is None:
+        # 2·fs/1000 + 4 — higher than the speech-bandwidth-only rule
+        # (fs/1000+4 ≈ 48 @ 44.1k) because phonation analysis here uses the
+        # full audio bandwidth, not just the 0-4 kHz speech band. Lowering
+        # the order to 48 left visible formant residue in dg that fooled
+        # the GCI detector on synthetic test vowels.
         p_vt = int(round(2.0 * fs / 1000.0)) + 4
 
     # Step 0: pre-emphasis HPF — remove DC drift before any LP analysis.
