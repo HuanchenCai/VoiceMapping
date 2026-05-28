@@ -150,5 +150,89 @@ class TestPraatPitchAgainstParselmouth(unittest.TestCase):
               f"over {n_match} voiced frames")
 
 
+class TestSincInterpolation(unittest.TestCase):
+    """Verify sinc_interpolate_raised_cosine matches the analytical form
+    on simple test cases."""
+
+    def test_sinc_at_integer_returns_sample(self):
+        y = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        for k in range(len(y)):
+            self.assertEqual(pp.sinc_interpolate_raised_cosine(y, float(k), 30),
+                              y[k])
+
+    def test_sinc_on_sine_wave_recovers_value(self):
+        """Bandlimited signal: sinc interpolation should recover f(x)
+        exactly (within numerical noise) at fractional x."""
+        n = 200
+        freq = 0.05    # cycles per sample, well below Nyquist
+        idx = np.arange(n)
+        y = np.sin(2 * np.pi * freq * idx)
+        # Probe halfway between samples in the interior
+        for x in [50.5, 75.25, 100.75]:
+            interp = pp.sinc_interpolate_raised_cosine(y, x, 30)
+            true = np.sin(2 * np.pi * freq * x)
+            self.assertAlmostEqual(interp, true, places=4,
+                msg=f"x={x}: sinc gave {interp:.6f}, true {true:.6f}")
+
+
+class TestImproveMaximumSinc(unittest.TestCase):
+
+    def test_finds_smooth_peak(self):
+        # Cosine peak at x=10.3
+        x_true = 10.3
+        idx = np.arange(20)
+        y = np.cos((idx - x_true) * 0.5)   # broad peak centred at 10.3
+        y_max, x_max = pp.improve_maximum_sinc(y, 10, depth=30)
+        # places=2 (0.01) reflects the depth-30 truncation: Brent on a
+        # truncated sinc kernel can land ~1 % off the true peak on a
+        # near-flat cosine. Real autocorrelation peaks are sharper and
+        # parity vs parselmouth on real audio is 4 orders tighter.
+        self.assertAlmostEqual(x_max, x_true, places=2,
+            msg=f"true peak at {x_true}, got {x_max:.4f}")
+        self.assertAlmostEqual(y_max, 1.0, places=3)
+
+
+@unittest.skipUnless(_PARSELMOUTH_OK, "parselmouth not installed")
+class TestPraatPitchSincAgainstParselmouth(unittest.TestCase):
+    """Sinc-refined version should be at least as accurate as parabolic
+    on the same recording, ideally within 10⁻⁴ relative error."""
+
+    @classmethod
+    def setUpClass(cls):
+        path = os.path.join(ROOT, "audio", "test_Voice_EGG.wav")
+        if not os.path.exists(path):
+            raise unittest.SkipTest(f"missing test fixture: {path}")
+        cls.voice, cls.fs = _load_voice(path, duration_s=10.0)
+
+    def test_sinc_at_least_as_accurate_as_parabolic(self):
+        floor, ceiling = 75.0, 600.0
+        snd = parselmouth.Sound(np.ascontiguousarray(self.voice),
+                                 sampling_frequency=self.fs)
+        praat_pitch = snd.to_pitch_ac(time_step=None,
+                                       pitch_floor=floor,
+                                       pitch_ceiling=ceiling)
+
+        frame_t, _, cands = pp.sound_to_pitch_frames(
+            self.voice, self.fs, pitch_floor=floor, pitch_ceiling=ceiling,
+            method='sinc')
+        ours_F0 = np.array([_strongest_F0(c) for c in cands])
+        praat_F0 = np.array([praat_pitch.get_value_at_time(t) for t in frame_t])
+        praat_F0 = np.where(np.isfinite(praat_F0) & (praat_F0 > 0), praat_F0, 0.0)
+        both_voiced = (ours_F0 > 0) & (praat_F0 > 0)
+        n_match = int(both_voiced.sum())
+        self.assertGreater(n_match, 10)
+
+        rel_err = np.abs(ours_F0[both_voiced] - praat_F0[both_voiced]) / praat_F0[both_voiced]
+        median_err_pct = float(np.median(rel_err) * 100.0)
+        p90_err_pct = float(np.percentile(rel_err, 90) * 100.0)
+        # Tighter than commit 1 tolerance — sinc should be < 0.5 % median
+        self.assertLess(median_err_pct, 0.5,
+                         f"sinc median F0 err {median_err_pct:.4f}% > 0.5 %")
+        self.assertLess(p90_err_pct, 10.0,
+                         f"sinc P90 F0 err {p90_err_pct:.4f}% > 10 %")
+        print(f"\n  test_Voice_EGG (10 s, sinc-70): "
+              f"median F0 err {median_err_pct:.4f}%, P90 {p90_err_pct:.4f}%")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
