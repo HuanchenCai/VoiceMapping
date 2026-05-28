@@ -522,6 +522,35 @@ class VoiceMapAnalyzer:
             entropy_values                   = self.entropy_calculator.calculate(egg_signal, cycle_triggers, dft=_dft)
             hrf_values                       = self.hrf_calculator.calculate(egg_signal, cycle_triggers, dft=_dft)
 
+        # ── _voice equivalents: when IAIF ran (mono path), feed -g into the
+        #    same EGG-shape calculators. -g is "high when closed" (flow is
+        #    low during closed phase), which matches EGG's contact semantics,
+        #    so Qcontact / dEGGmax / Icontact / Entropy / HRFegg computed on
+        #    -g carry the same physical meaning up to amplitude scaling.
+        #    We keep the original *_values=0 columns intact so an analyst
+        #    can distinguish source-of-truth (EGG vs voice-derived).
+        g = self._glottal_flow
+        if g is not None and len(_idx) >= 2:
+            from voicemap.metrics import _compute_cycle_dft as _dft_fn
+            egg_sub = (-g).astype(np.float64)
+            _dft_voice = _dft_fn(egg_sub, _idx, _dft_n)
+            qc_voice, dq_voice, ic_voice = self.qcontact_calculator.calculate(
+                egg_sub, cycle_triggers)
+            entropy_voice = self.entropy_calculator.calculate(
+                egg_sub, cycle_triggers, dft=_dft_voice)
+            hrf_voice = self.hrf_calculator.calculate(
+                egg_sub, cycle_triggers, dft=_dft_voice)
+            oq_voice_dict = self.oq_calculator.calculate(egg_sub, cycle_triggers)
+        else:
+            qc_voice      = np.zeros(n_cycles)
+            dq_voice      = np.zeros(n_cycles)
+            ic_voice      = np.zeros(n_cycles)
+            entropy_voice = np.zeros(n_cycles)
+            hrf_voice     = np.zeros(n_cycles)
+            oq_voice_dict = {"oq":  np.zeros(n_cycles),
+                             "spq": np.zeros(n_cycles),
+                             "ciq": np.zeros(n_cycles)}
+
         # ── First pass complete — fire partial_cb so the GUI can render
         # a voice map with these 11 fast metrics while the slow
         # computations (K-means clustering, formants, MFCC) continue.
@@ -661,6 +690,17 @@ class VoiceMapAnalyzer:
             'oq':  oq_values['oq'],
             'spq': oq_values['spq'],
             'ciq': oq_values['ciq'],
+            # Voice-derived analogs of EGG-shape metrics. Populated only when
+            # IAIF ran (mono path); zeros otherwise. Distinct column names
+            # let downstream analyses tell the two signal sources apart.
+            'qcontact_voice':  qc_voice,
+            'deggmax_voice':   dq_voice,
+            'icontact_voice':  ic_voice,
+            'entropy_voice':   entropy_voice,
+            'hrf_voice':       hrf_voice,
+            'oq_voice':        oq_voice_dict['oq'],
+            'spq_voice':       oq_voice_dict['spq'],
+            'ciq_voice':       oq_voice_dict['ciq'],
         }
         # Phonation-type cluster uses the already-computed quality metrics
         # as features — must run AFTER them.
