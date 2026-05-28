@@ -1893,21 +1893,26 @@ class PerturbationCalculator(MetricCalculator):
         return out
 
     # Per-cycle value strategy.
-    #   None  → run Praat formulas ONCE on the whole recording's cycle
-    #            mark set, broadcast the scalar to every cycle. CSV values
-    #            then match parselmouth's clinical scalar to ~0.06 %.
-    #            **Default** because clinical jitter/shimmer reporting
-    #            standards (MDVP / Praat voice report) are whole-recording
-    #            scalars, not per-cycle.
-    #   float > 0 → sliding window of that many seconds (50 % hop). Each
-    #            cycle's value comes from a Praat call on the marks inside
-    #            its window. Preserves VRP heatmap spatial variation but
-    #            introduces a Jensen-inequality bias of 5-30 % vs the
-    #            single-call reference (windows that don't span the whole
-    #            recording can't reproduce a whole-recording scalar).
-    # Future option (not implemented): per-VRP-cell aggregation — would
-    # give per-cell Praat-exact values, but needs csv_writer integration.
+    #   'per_cycle' (default) → decompose Praat's global formulas into
+    #            per-cycle contributions on voice-derived (Praat-cc) cycle
+    #            marks, then nearest-neighbour-map onto the EGG cycle
+    #            indices the rest of the pipeline uses. Each EGG cycle k
+    #            gets the Praat-cc contribution from its nearest voice
+    #            cycle (within ±NEAREST_TOL_S); EGG cycles falling in
+    #            unvoiced regions get 0. After clarity filtering, the per-
+    #            cell mean closely tracks Praat's local scalar for that
+    #            (MIDI, dB) region. Mean across the recording recovers
+    #            the global clinical scalar.
+    #   'global'  → run Praat formulas once on the whole recording,
+    #            broadcast the scalar to every cycle. Clinically-exact
+    #            but loses VRP spatial variation.
+    #   'window'  → sliding-window mode (legacy). Set WINDOW_S > 0.
+    STRATEGY = 'per_cycle'
     WINDOW_S = None
+    # Tolerance for EGG↔Praat-cc cycle matching (s). 10 ms ≈ one period at
+    # 100 Hz; EGG cycles further than this from any Praat-cc mark are
+    # treated as unvoiced (contribution = 0).
+    NEAREST_TOL_S = 0.010
 
     # Praat default period bounds (corresponds to F0 ∈ [50 Hz, 10 kHz])
     PMIN_S = 1e-4
@@ -1952,8 +1957,95 @@ class PerturbationCalculator(MetricCalculator):
 
         out = {k: np.zeros(n, dtype=np.float64) for k in self.KEYS}
 
+        # EGG cycle centres in seconds (the indexing the rest of the
+        # pipeline uses — SPL, Clarity, CPP all output one value per EGG
+        # cycle, so jitter/shimmer must too).
+        egg_centres_t = (idx[:-1].astype(np.float64) +
+                         idx[1:].astype(np.float64)) * 0.5 / fs
+
+        # ── Per-cycle path (default) ──
+        # Decompose each Praat global formula into per-cycle contributions
+        # on the Praat-cc cycle marks, then nearest-neighbour-map each EGG
+        # cycle to its closest Praat-cc cycle (within NEAREST_TOL_S).
+        # Mean of all non-zero EGG-mapped values ≈ global Praat scalar.
+        # Mean per VRP cell ≈ Praat scalar for that (MIDI, dB) region.
+        if self.STRATEGY == 'per_cycle':
+            # Jitter contributions are indexed by Praat-cc cycle marks
+            jl_pc = _ppt.jitter_local_per_cycle(
+                t_points, self.PMIN_S, self.PMAX_S, self.PERIOD_FACTOR_MAX)
+            jr_pc = _ppt.jitter_rap_per_cycle(
+                t_points, self.PMIN_S, self.PMAX_S, self.PERIOD_FACTOR_MAX)
+            jp_pc = _ppt.jitter_ppq5_per_cycle(
+                t_points, self.PMIN_S, self.PMAX_S, self.PERIOD_FACTOR_MAX)
+            # Shimmer contributions are indexed by the AMPLITUDE TIER
+            # (a subset of Praat-cc marks that passed the period gate)
+            sl_pc = _ppt.shimmer_local_per_cycle(
+                amp_t, amp_v, self.PMIN_S, self.PMAX_S, self.AMPLITUDE_FACTOR_MAX)
+            sd_pc = _ppt.shimmer_local_dB_per_cycle(
+                amp_t, amp_v, self.PMIN_S, self.PMAX_S, self.AMPLITUDE_FACTOR_MAX)
+            s3_pc = _ppt.shimmer_apq3_per_cycle(
+                amp_t, amp_v, self.PMIN_S, self.PMAX_S, self.AMPLITUDE_FACTOR_MAX)
+            s5_pc = _ppt.shimmer_apq5_per_cycle(
+                amp_t, amp_v, self.PMIN_S, self.PMAX_S, self.AMPLITUDE_FACTOR_MAX)
+            s11_pc = _ppt.shimmer_apq11_per_cycle(
+                amp_t, amp_v, self.PMIN_S, self.PMAX_S, self.AMPLITUDE_FACTOR_MAX)
+
+            def _nearest_map(source_t, values):
+                """For each egg_centres_t entry, return values[nearest source]
+                if the nearest is within NEAREST_TOL_S, else 0."""
+                if len(source_t) == 0:
+                    return np.zeros(n, dtype=np.float64)
+                ins = np.searchsorted(source_t, egg_centres_t)
+                left = np.clip(ins - 1, 0, len(source_t) - 1)
+                right = np.clip(ins, 0, len(source_t) - 1)
+                d_left = np.abs(egg_centres_t - source_t[left])
+                d_right = np.abs(egg_centres_t - source_t[right])
+                nearest_idx = np.where(d_left <= d_right, left, right)
+                nearest_dist = np.where(d_left <= d_right, d_left, d_right)
+                vals_mapped = values[nearest_idx] * 100.0
+                return np.where(nearest_dist <= self.NEAREST_TOL_S,
+                                 vals_mapped, 0.0)
+
+            # Jitter: map from t_points (Praat-cc) to EGG cycles
+            out["jitter_local"] = _nearest_map(t_points, jl_pc)
+            out["jitter_rap"]   = _nearest_map(t_points, jr_pc)
+            out["jitter_ppq5"]  = _nearest_map(t_points, jp_pc)
+            # Shimmer: map from amp_t (subset of Praat-cc) to EGG cycles
+            # Note: ShimmerDB is already in dB so no ×100 — handle separately
+            out["shimmer_local"]  = _nearest_map(amp_t, sl_pc)
+            # ShimmerDB: replace the ×100 with pass-through (sd_pc is already dB)
+            if len(amp_t) > 0:
+                ins = np.searchsorted(amp_t, egg_centres_t)
+                left = np.clip(ins - 1, 0, len(amp_t) - 1)
+                right = np.clip(ins, 0, len(amp_t) - 1)
+                d_left = np.abs(egg_centres_t - amp_t[left])
+                d_right = np.abs(egg_centres_t - amp_t[right])
+                nearest_idx = np.where(d_left <= d_right, left, right)
+                nearest_dist = np.where(d_left <= d_right, d_left, d_right)
+                out["shimmer_db"] = np.where(nearest_dist <= self.NEAREST_TOL_S,
+                                              sd_pc[nearest_idx], 0.0)
+            out["shimmer_apq3"]  = _nearest_map(amp_t, s3_pc)
+            out["shimmer_apq5"]  = _nearest_map(amp_t, s5_pc)
+            out["shimmer_apq11"] = _nearest_map(amp_t, s11_pc)
+
+            # Summary log: mean over nonzero values per metric (= local
+            # Praat scalar). Outside this whole-file scope, csv_writer's
+            # per-cell mean recovers per-region values.
+            def _mean_nz(a):
+                m = a > 0
+                return float(a[m].mean()) if m.any() else 0.0
+            logger.info("  Jitter local=%.3f%%  RAP=%.3f%%  PPQ5=%.3f%%",
+                        _mean_nz(out["jitter_local"]),
+                        _mean_nz(out["jitter_rap"]),
+                        _mean_nz(out["jitter_ppq5"]))
+            logger.info("  Shimmer local=%.3f%%  dB=%.3f  APQ11=%.3f%%",
+                        _mean_nz(out["shimmer_local"]),
+                        _mean_nz(out["shimmer_db"]),
+                        _mean_nz(out["shimmer_apq11"]))
+            return out
+
         # ── Whole-recording path (Praat-exact scalar broadcast) ──
-        if self.WINDOW_S is None or self.WINDOW_S <= 0:
+        if self.STRATEGY == 'global' or self.WINDOW_S is None or self.WINDOW_S <= 0:
             def _fin(x, mult=100.0):
                 return float(x) * mult if (x is not None and np.isfinite(x)) else 0.0
             jl = _fin(_ppt.jitter_local(t_points, self.PMIN_S, self.PMAX_S,
@@ -1986,14 +2078,9 @@ class PerturbationCalculator(MetricCalculator):
 
         # ── Sliding-window path (VRP spatial variation, Praat-biased) ──
         # For each EGG-trigger cycle k, build a time window around its
-        # *EGG-defined* centre and run the Praat formulas on the subset
-        # of (voice-derived Praat-cc) cycle marks inside that window.
-        # Using EGG centres keeps the output array aligned to the
-        # cycle_triggers index the rest of the analyzer pipeline uses;
-        # using Praat-cc marks INSIDE each window gives the closest
-        # achievable per-window match to Praat.
-        egg_centres_t = (idx[:-1].astype(np.float64) +
-                         idx[1:].astype(np.float64)) * 0.5 / fs
+        # *EGG-defined* centre (already computed above) and run the Praat
+        # formulas on the subset of (voice-derived Praat-cc) cycle marks
+        # inside that window.
         half_w = 0.5 * self.WINDOW_S
 
         for k in range(n):

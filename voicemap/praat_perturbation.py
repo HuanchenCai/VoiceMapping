@@ -752,3 +752,197 @@ def shimmer_dda(amp_times, amp_values, pmin=1e-4, pmax=0.02,
     """Praat: shimmer_dda = 3 * shimmer_apq3."""
     apq3 = shimmer_apq3(amp_times, amp_values, pmin, pmax, max_amplitude_factor)
     return 3.0 * apq3 if np.isfinite(apq3) else float('nan')
+
+
+# ---------------------------------------------------------------------------
+# Per-cycle decomposition of the Praat formulas.
+#
+# Each global Praat formula has the structure
+#     global = mean over accepted cycles of  ( per_cycle_contribution[i] )
+# so emitting `per_cycle_contribution[i]` per cycle (zero where rejected
+# or out-of-range) lets a downstream caller:
+#   - average all per-cycle values inside a VRP cell to get per-cell shimmer
+#   - average across the entire recording to recover the Praat global scalar
+# Rejected cycles produce 0.0 (matches the existing 0-pad convention so the
+# csv_writer's mean-including-zero behaves sensibly).
+# ---------------------------------------------------------------------------
+def jitter_local_per_cycle(t_points: np.ndarray,
+                            pmin: float = 1e-4, pmax: float = 0.02,
+                            max_period_factor: float = 1.3,
+                            ) -> np.ndarray:
+    """Per-cycle contributions of `jitter_local`. mean(out[out>0]) equals
+    the global jitter_local (in fraction; ×100 for %)."""
+    n = len(t_points)
+    out = np.zeros(n, dtype=np.float64)
+    if n < 3:
+        return out
+    mp = mean_period(t_points, pmin, pmax, max_period_factor)
+    if not np.isfinite(mp) or mp <= 0:
+        return out
+    for i in range(1, n - 1):
+        p1 = t_points[i] - t_points[i - 1]
+        p2 = t_points[i + 1] - t_points[i]
+        if p1 <= 0 or p2 <= 0:
+            continue
+        factor = (p1 / p2) if p1 > p2 else (p2 / p1)
+        if pmin == pmax or (pmin <= p1 <= pmax and pmin <= p2 <= pmax
+                             and factor <= max_period_factor):
+            out[i] = abs(p1 - p2) / mp
+    return out
+
+
+def jitter_rap_per_cycle(t_points: np.ndarray,
+                          pmin: float = 1e-4, pmax: float = 0.02,
+                          max_period_factor: float = 1.3,
+                          ) -> np.ndarray:
+    n = len(t_points)
+    out = np.zeros(n, dtype=np.float64)
+    if n < 4:
+        return out
+    mp = mean_period(t_points, pmin, pmax, max_period_factor)
+    if not np.isfinite(mp) or mp <= 0:
+        return out
+    for i in range(2, n - 1):
+        p1 = t_points[i - 1] - t_points[i - 2]
+        p2 = t_points[i]     - t_points[i - 1]
+        p3 = t_points[i + 1] - t_points[i]
+        if p1 <= 0 or p2 <= 0 or p3 <= 0:
+            continue
+        f1 = (p1 / p2) if p1 > p2 else (p2 / p1)
+        f2 = (p2 / p3) if p2 > p3 else (p3 / p2)
+        if pmin == pmax or (pmin <= p1 <= pmax and pmin <= p2 <= pmax
+                             and pmin <= p3 <= pmax
+                             and f1 <= max_period_factor
+                             and f2 <= max_period_factor):
+            out[i] = abs(p2 - (p1 + p2 + p3) / 3.0) / mp
+    return out
+
+
+def jitter_ppq5_per_cycle(t_points: np.ndarray,
+                           pmin: float = 1e-4, pmax: float = 0.02,
+                           max_period_factor: float = 1.3,
+                           ) -> np.ndarray:
+    n = len(t_points)
+    out = np.zeros(n, dtype=np.float64)
+    if n < 6:
+        return out
+    mp = mean_period(t_points, pmin, pmax, max_period_factor)
+    if not np.isfinite(mp) or mp <= 0:
+        return out
+    last = n - 1
+    for i in range(5, last + 1):
+        p1 = t_points[i - 4] - t_points[i - 5]
+        p2 = t_points[i - 3] - t_points[i - 4]
+        p3 = t_points[i - 2] - t_points[i - 3]
+        p4 = t_points[i - 1] - t_points[i - 2]
+        p5 = t_points[i]     - t_points[i - 1]
+        if p1 <= 0 or p2 <= 0 or p3 <= 0 or p4 <= 0 or p5 <= 0:
+            continue
+        f1 = (p1 / p2) if p1 > p2 else (p2 / p1)
+        f2 = (p2 / p3) if p2 > p3 else (p3 / p2)
+        f3 = (p3 / p4) if p3 > p4 else (p4 / p3)
+        f4 = (p4 / p5) if p4 > p5 else (p5 / p4)
+        if pmin == pmax or (pmin <= p1 <= pmax and pmin <= p2 <= pmax
+                             and pmin <= p3 <= pmax and pmin <= p4 <= pmax
+                             and pmin <= p5 <= pmax
+                             and f1 <= max_period_factor and f2 <= max_period_factor
+                             and f3 <= max_period_factor and f4 <= max_period_factor):
+            out[i] = abs(p3 - (p1 + p2 + p3 + p4 + p5) / 5.0) / mp
+    return out
+
+
+def shimmer_local_per_cycle(amp_times: np.ndarray, amp_values: np.ndarray,
+                             pmin: float = 1e-4, pmax: float = 0.02,
+                             max_amplitude_factor: float = 1.6,
+                             ) -> np.ndarray:
+    n = len(amp_values)
+    out = np.zeros(n, dtype=np.float64)
+    if n < 2:
+        return out
+    denom = float(np.mean(amp_values[:-1]))
+    if denom <= 0.0:
+        return out
+    for i in range(1, n):
+        p = amp_times[i] - amp_times[i - 1]
+        if pmin != pmax and not (pmin <= p <= pmax):
+            continue
+        a1, a2 = amp_values[i - 1], amp_values[i]
+        if a1 <= 0 or a2 <= 0:
+            continue
+        af = (a1 / a2) if a1 > a2 else (a2 / a1)
+        if af <= max_amplitude_factor:
+            out[i] = abs(a1 - a2) / denom
+    return out
+
+
+def shimmer_local_dB_per_cycle(amp_times: np.ndarray, amp_values: np.ndarray,
+                                pmin: float = 1e-4, pmax: float = 0.02,
+                                max_amplitude_factor: float = 1.6,
+                                ) -> np.ndarray:
+    n = len(amp_values)
+    out = np.zeros(n, dtype=np.float64)
+    if n < 2:
+        return out
+    for i in range(1, n):
+        p = amp_times[i] - amp_times[i - 1]
+        if pmin != pmax and not (pmin <= p <= pmax):
+            continue
+        a1, a2 = amp_values[i - 1], amp_values[i]
+        if a1 <= 0 or a2 <= 0:
+            continue
+        af = (a1 / a2) if a1 > a2 else (a2 / a1)
+        if af <= max_amplitude_factor:
+            out[i] = 20.0 * abs(np.log10(a1 / a2))
+    return out
+
+
+def _shimmer_apq_n_per_cycle(amp_times: np.ndarray, amp_values: np.ndarray,
+                              n_pts: int,
+                              pmin: float, pmax: float,
+                              max_amplitude_factor: float) -> np.ndarray:
+    if n_pts % 2 != 1:
+        raise ValueError("APQ window size must be odd")
+    half = n_pts // 2
+    n = len(amp_values)
+    out = np.zeros(n, dtype=np.float64)
+    if n < n_pts:
+        return out
+    denom = float(np.mean(amp_values[:-1]))
+    if denom <= 0.0:
+        return out
+    for i in range(half, n - half):
+        win_amps = amp_values[i - half: i + half + 1]
+        win_times = amp_times[i - half: i + half + 1]
+        periods = np.diff(win_times)
+        if np.any(periods <= 0):
+            continue
+        if pmin != pmax:
+            if np.any(periods < pmin) or np.any(periods > pmax):
+                continue
+        a1 = win_amps[:-1]; a2 = win_amps[1:]
+        with np.errstate(divide='ignore', invalid='ignore'):
+            factors = np.where(a1 > a2, a1 / np.maximum(a2, 1e-15),
+                                          a2 / np.maximum(a1, 1e-15))
+        if np.any(factors > max_amplitude_factor) or np.any(a1 <= 0) or np.any(a2 <= 0):
+            continue
+        n_avg = float(np.mean(win_amps))
+        out[i] = abs(amp_values[i] - n_avg) / denom
+    return out
+
+
+def shimmer_apq3_per_cycle(amp_times, amp_values,
+                            pmin=1e-4, pmax=0.02, max_amplitude_factor=1.6):
+    return _shimmer_apq_n_per_cycle(amp_times, amp_values, 3,
+                                     pmin, pmax, max_amplitude_factor)
+
+
+def shimmer_apq5_per_cycle(amp_times, amp_values,
+                            pmin=1e-4, pmax=0.02, max_amplitude_factor=1.6):
+    return _shimmer_apq_n_per_cycle(amp_times, amp_values, 5,
+                                     pmin, pmax, max_amplitude_factor)
+
+
+def shimmer_apq11_per_cycle(amp_times, amp_values,
+                             pmin=1e-4, pmax=0.02, max_amplitude_factor=1.6):
+    return _shimmer_apq_n_per_cycle(amp_times, amp_values, 11,
+                                     pmin, pmax, max_amplitude_factor)
