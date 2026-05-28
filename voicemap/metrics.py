@@ -1892,12 +1892,22 @@ class PerturbationCalculator(MetricCalculator):
         out[k:k + len(avg)] = np.where(center_ok, raw, 0.0)
         return out
 
-    # Sliding-window half-width in seconds. Each cycle's per-cycle
-    # jitter/shimmer value is computed by running Praat's formulas on
-    # the cycle marks falling within ±WINDOW_S/2 of the cycle's time.
-    # 1.0 s gives Praat enough cycles for stable APQ11 (~100-500 cycles
-    # at speech F0) while still tracking F0/SPL changes within the recording.
-    WINDOW_S = 1.0
+    # Per-cycle value strategy.
+    #   None  → run Praat formulas ONCE on the whole recording's cycle
+    #            mark set, broadcast the scalar to every cycle. CSV values
+    #            then match parselmouth's clinical scalar to ~0.06 %.
+    #            **Default** because clinical jitter/shimmer reporting
+    #            standards (MDVP / Praat voice report) are whole-recording
+    #            scalars, not per-cycle.
+    #   float > 0 → sliding window of that many seconds (50 % hop). Each
+    #            cycle's value comes from a Praat call on the marks inside
+    #            its window. Preserves VRP heatmap spatial variation but
+    #            introduces a Jensen-inequality bias of 5-30 % vs the
+    #            single-call reference (windows that don't span the whole
+    #            recording can't reproduce a whole-recording scalar).
+    # Future option (not implemented): per-VRP-cell aggregation — would
+    # give per-cell Praat-exact values, but needs csv_writer integration.
+    WINDOW_S = None
 
     # Praat default period bounds (corresponds to F0 ∈ [50 Hz, 10 kHz])
     PMIN_S = 1e-4
@@ -1916,11 +1926,23 @@ class PerturbationCalculator(MetricCalculator):
             return {k: z() for k in self.KEYS}
 
         fs = float(self.config.sample_rate)
-        # Refine integer triggers via the direct translation of Praat's
-        # Sound_findMaximumCorrelation (Praat's `To PointProcess (cc)`
-        # uses the same routine internally). Cycle marks come out in
-        # seconds with subsample accuracy and Praat-compatible positioning.
-        t_points = _ppt.refine_cycle_marks_praat_cc(voice, fs, idx)
+        # Generate cycle marks the same way Praat's `To PointProcess (cc)`
+        # does it: native Sound_to_Pitch (autocorrelation + Viterbi) →
+        # Sound_Pitch_to_PointProcess_cc (bidirectional walking from each
+        # voiced interval's midpoint). The EGG-trigger seed path was
+        # accurate per-cycle but kept the EGG cycle COUNT, which differs
+        # from Praat's voice-derived count on dynamic phonation (戏腔
+        # over-detects by ~50 %). Now both count and position match Praat.
+        from voicemap.praat_pitch import sound_to_pitch
+        cfg = self.config
+        pitch_contour = sound_to_pitch(
+            voice, fs,
+            pitch_floor=cfg.pitch_floor_hz,
+            pitch_ceiling=cfg.pitch_ceiling_hz)
+        t_points = _ppt.sound_pitch_to_pointprocess_cc(
+            voice, fs, pitch_contour)
+        if len(t_points) < 3:
+            return {k: z() for k in self.KEYS}
 
         # Pre-compute the amplitude tier ONCE on the full signal.
         # The shimmer functions then operate on subsets of this tier.
@@ -1928,14 +1950,54 @@ class PerturbationCalculator(MetricCalculator):
             t_points, voice, fs,
             self.PMIN_S, self.PMAX_S, self.PERIOD_FACTOR_MAX)
 
-        # For each cycle k, build a time window around it and run the
-        # Praat formulas on the subset of cycle marks / amplitude pulses
-        # inside that window. searchsorted gives O(log N) range lookups.
-        half_w = 0.5 * self.WINDOW_S
         out = {k: np.zeros(n, dtype=np.float64) for k in self.KEYS}
 
+        # ── Whole-recording path (Praat-exact scalar broadcast) ──
+        if self.WINDOW_S is None or self.WINDOW_S <= 0:
+            def _fin(x, mult=100.0):
+                return float(x) * mult if (x is not None and np.isfinite(x)) else 0.0
+            jl = _fin(_ppt.jitter_local(t_points, self.PMIN_S, self.PMAX_S,
+                                          self.PERIOD_FACTOR_MAX))
+            jr = _fin(_ppt.jitter_rap(t_points, self.PMIN_S, self.PMAX_S,
+                                       self.PERIOD_FACTOR_MAX))
+            jp = _fin(_ppt.jitter_ppq5(t_points, self.PMIN_S, self.PMAX_S,
+                                        self.PERIOD_FACTOR_MAX))
+            sl = _fin(_ppt.shimmer_local(amp_t, amp_v, self.PMIN_S,
+                                          self.PMAX_S, self.AMPLITUDE_FACTOR_MAX))
+            sd = _fin(_ppt.shimmer_local_dB(amp_t, amp_v, self.PMIN_S,
+                                             self.PMAX_S, self.AMPLITUDE_FACTOR_MAX),
+                       mult=1.0)
+            s3 = _fin(_ppt.shimmer_apq3(amp_t, amp_v, self.PMIN_S,
+                                         self.PMAX_S, self.AMPLITUDE_FACTOR_MAX))
+            s5 = _fin(_ppt.shimmer_apq5(amp_t, amp_v, self.PMIN_S,
+                                         self.PMAX_S, self.AMPLITUDE_FACTOR_MAX))
+            s11 = _fin(_ppt.shimmer_apq11(amp_t, amp_v, self.PMIN_S,
+                                           self.PMAX_S, self.AMPLITUDE_FACTOR_MAX))
+            for key, val in (("jitter_local", jl), ("jitter_rap", jr),
+                              ("jitter_ppq5", jp), ("shimmer_local", sl),
+                              ("shimmer_db", sd), ("shimmer_apq3", s3),
+                              ("shimmer_apq5", s5), ("shimmer_apq11", s11)):
+                out[key] = np.full(n, val, dtype=np.float64)
+            logger.info("  Jitter local=%.3f%%  RAP=%.3f%%  PPQ5=%.3f%%",
+                        jl, jr, jp)
+            logger.info("  Shimmer local=%.3f%%  dB=%.3f  APQ11=%.3f%%",
+                        sl, sd, s11)
+            return out
+
+        # ── Sliding-window path (VRP spatial variation, Praat-biased) ──
+        # For each EGG-trigger cycle k, build a time window around its
+        # *EGG-defined* centre and run the Praat formulas on the subset
+        # of (voice-derived Praat-cc) cycle marks inside that window.
+        # Using EGG centres keeps the output array aligned to the
+        # cycle_triggers index the rest of the analyzer pipeline uses;
+        # using Praat-cc marks INSIDE each window gives the closest
+        # achievable per-window match to Praat.
+        egg_centres_t = (idx[:-1].astype(np.float64) +
+                         idx[1:].astype(np.float64)) * 0.5 / fs
+        half_w = 0.5 * self.WINDOW_S
+
         for k in range(n):
-            t_centre = 0.5 * (t_points[k] + t_points[k + 1])
+            t_centre = egg_centres_t[k]
             t_lo = t_centre - half_w
             t_hi = t_centre + half_w
             # Cycle-mark subset

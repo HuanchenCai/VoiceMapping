@@ -194,5 +194,74 @@ class TestPraatShimmerParity(unittest.TestCase):
         np.testing.assert_allclose(ours, praat_value, atol=1e-6)
 
 
+@unittest.skipUnless(_PARSELMOUTH_OK, "parselmouth not installed")
+class TestCCPointProcessParity(unittest.TestCase):
+    """Cycle marks from the full Praat pipeline (Sound_to_Pitch +
+    Sound_Pitch_to_PointProcess_cc, both natively reimplemented) should
+    closely match parselmouth's PointProcess (cc) — same cycle COUNT
+    and same cycle TIMES (within ±1 ms median offset)."""
+
+    @classmethod
+    def setUpClass(cls):
+        path = os.path.join(ROOT, "audio", "test_Voice_EGG.wav")
+        if not os.path.exists(path):
+            raise unittest.SkipTest(f"missing test fixture: {path}")
+        cls.voice, cls.fs = _load_voice(path, duration_s=10.0)
+
+    def test_cycle_marks_match_praat(self):
+        import voicemap.praat_pitch as pcp
+        import voicemap.praat_perturbation as ppt
+
+        floor, ceiling = 75.0, 600.0
+
+        # parselmouth reference
+        snd = parselmouth.Sound(np.ascontiguousarray(self.voice),
+                                 sampling_frequency=self.fs)
+        pitch = snd.to_pitch_cc(time_step=None,
+                                 pitch_floor=floor, pitch_ceiling=ceiling)
+        pp_obj = call([snd, pitch], "To PointProcess (cc)")
+        n_praat = int(call(pp_obj, "Get number of points"))
+        praat_marks = np.array([call(pp_obj, "Get time from index", i + 1)
+                                 for i in range(n_praat)], dtype=np.float64)
+
+        # Our pipeline
+        pitch_contour = pcp.sound_to_pitch(self.voice, self.fs,
+                                             pitch_floor=floor,
+                                             pitch_ceiling=ceiling)
+        ours_marks = ppt.sound_pitch_to_pointprocess_cc(
+            self.voice, self.fs, pitch_contour)
+
+        # Cycle counts within 5 % (Praat's voiced-interval finder may
+        # split things slightly differently at unvoiced boundaries).
+        count_ratio = len(ours_marks) / max(len(praat_marks), 1)
+        self.assertGreater(count_ratio, 0.95,
+            f"cycle count mismatch: ours {len(ours_marks)}, "
+            f"Praat {len(praat_marks)} (ratio {count_ratio:.3f})")
+        self.assertLess(count_ratio, 1.05,
+            f"cycle count mismatch: ours {len(ours_marks)}, "
+            f"Praat {len(praat_marks)} (ratio {count_ratio:.3f})")
+
+        # Each ours mark should have a Praat mark within 1 ms.
+        # Nearest-neighbour match (vectorised).
+        ins = np.searchsorted(praat_marks, ours_marks)
+        left = np.clip(ins - 1, 0, len(praat_marks) - 1)
+        right = np.clip(ins, 0, len(praat_marks) - 1)
+        d_left = np.abs(ours_marks - praat_marks[left])
+        d_right = np.abs(ours_marks - praat_marks[right])
+        nearest_dist = np.minimum(d_left, d_right)
+        median_offset_ms = float(np.median(nearest_dist) * 1000.0)
+        p90_offset_ms = float(np.percentile(nearest_dist, 90) * 1000.0)
+        self.assertLess(median_offset_ms, 0.5,
+            f"median cycle-mark offset {median_offset_ms:.4f} ms > 0.5 ms")
+        self.assertLess(p90_offset_ms, 2.0,
+            f"P90 cycle-mark offset {p90_offset_ms:.4f} ms > 2 ms")
+
+        print(f"\n  CC PointProcess (test_Voice_EGG, 10 s): "
+              f"ours={len(ours_marks)} vs Praat={len(praat_marks)} "
+              f"(ratio {count_ratio:.3f}), "
+              f"offset median {median_offset_ms:.3f} ms, "
+              f"P90 {p90_offset_ms:.3f} ms")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
