@@ -339,6 +339,155 @@ def sound_find_maximum_correlation(voice: np.ndarray, fs: float,
     return max_corr, mid_time, peak_amp
 
 
+def sound_find_extremum(voice: np.ndarray, fs: float,
+                         tmin: float, tmax: float,
+                         include_maxima: bool = True,
+                         include_minima: bool = True) -> float:
+    """Direct translation of Praat's Sound_findExtremum
+    (Pitch_to_PointProcess.cpp:137).
+
+    Finds the position (parabolic-interpolated, subsample) of the extremum
+    of largest |value| in voice[tmin:tmax]. By default `include_maxima` and
+    `include_minima` are both True → look for either-sign extremum (max |x|).
+    """
+    dx = 1.0 / fs
+    x1 = 0.5 * dx
+    n = len(voice)
+    # Sampled_xToLowIndex (1-indexed: floor((t-x1)/dx)+1), 0-indexed equivalent
+    imin = int(np.floor((tmin - x1) / dx))
+    imax = int(np.ceil((tmax - x1) / dx))
+    imin = max(0, imin)
+    imax = min(n - 1, imax)
+    if imax - imin < 2:
+        # < 3 samples → fall back to window midpoint
+        return 0.5 * (tmin + tmax)
+
+    seg = voice[imin: imax + 1]
+    include_all = (include_maxima == include_minima)
+    if include_all:
+        scores = np.abs(seg)
+    elif include_maxima:
+        scores = seg
+    else:
+        scores = -seg
+    iextr = int(np.argmax(scores))
+
+    if iextr == 0:
+        return x1 + (imin + iextr) * dx
+    if iextr == len(seg) - 1:
+        return x1 + (imin + iextr) * dx
+
+    # Parabolic interpolation on the SIGNED values (Praat: line 134)
+    v_mid = float(seg[iextr])
+    v_left = float(seg[iextr - 1])
+    v_right = float(seg[iextr + 1])
+    denom = 2.0 * v_mid - v_left - v_right
+    if denom == 0.0:
+        return x1 + (imin + iextr) * dx
+    iextr_real = iextr + 0.5 * (v_right - v_left) / denom
+    return x1 + (imin + iextr_real) * dx
+
+
+def sound_pitch_to_pointprocess_cc(voice: np.ndarray, fs: float,
+                                     pitch_contour,
+                                     ) -> np.ndarray:
+    """Direct translation of Praat's Sound_Pitch_to_PointProcess_cc
+    (Pitch_to_PointProcess.cpp:250).
+
+    Iterates over each voiced interval in the pitch contour:
+      1. Place an initial cycle mark near the voiced interval's midpoint
+         (the global extremum within ±0.5 / f0_mid).
+      2. Walk backward, snapping each new mark to the position of best
+         cross-correlation alignment with the current one. Validity
+         gates: corr > 0.3 AND |peak| > 0.01·global_peak AND
+         mark spacing > 0.8 / f0.
+      3. Walk forward similarly.
+    Cycle marks from all voiced intervals are collected and sorted.
+
+    Returns
+    -------
+    np.ndarray
+        Sorted cycle mark times (seconds).
+    """
+    n = len(voice)
+    if n == 0:
+        return np.zeros(0, dtype=np.float64)
+    global_peak = float(np.max(np.abs(voice - np.mean(voice))))
+    if global_peak <= 0.0:
+        return np.zeros(0, dtype=np.float64)
+
+    points: list = []
+    added_right = -1e308
+    t = pitch_contour.xmin
+
+    while True:
+        iv = pitch_contour.get_voiced_interval_after(t)
+        if iv is None:
+            break
+        tleft, tright = iv
+        tmid = 0.5 * (tleft + tright)
+        f0_mid = pitch_contour.get_value_at_time(tmid)
+        if not np.isfinite(f0_mid) or f0_mid <= 0.0:
+            t = tright
+            continue
+
+        # 1. Seed cycle mark near interval midpoint
+        tmax = sound_find_extremum(voice, fs,
+                                     tmid - 0.5 / f0_mid,
+                                     tmid + 0.5 / f0_mid,
+                                     include_maxima=True,
+                                     include_minima=True)
+        points.append(tmax)
+        tsave = tmax
+
+        # 2. Walk backward
+        while True:
+            f0 = pitch_contour.get_value_at_time(tmax)
+            if not np.isfinite(f0) or f0 <= 0.0:
+                break
+            corr, tmax_new, peak = sound_find_maximum_correlation(
+                voice, fs, tmax, 1.0 / f0,
+                tmax - 1.25 / f0, tmax - 0.8 / f0)
+            tmax = tmax_new
+            if corr == -1.0:
+                tmax -= 1.0 / f0   # this period drops out
+            if tmax < tleft:
+                if (corr > 0.7 and peak > 0.023333 * global_peak
+                        and tmax - added_right > 0.8 / f0):
+                    points.append(tmax)
+                break
+            if corr > 0.3 and (peak == 0.0 or peak > 0.01 * global_peak):
+                if tmax - added_right > 0.8 / f0:
+                    points.append(tmax)
+
+        # 3. Walk forward
+        tmax = tsave
+        while True:
+            f0 = pitch_contour.get_value_at_time(tmax)
+            if not np.isfinite(f0) or f0 <= 0.0:
+                break
+            corr, tmax_new, peak = sound_find_maximum_correlation(
+                voice, fs, tmax, 1.0 / f0,
+                tmax + 0.8 / f0, tmax + 1.25 / f0)
+            tmax = tmax_new
+            if corr == -1.0:
+                tmax += 1.0 / f0
+            if tmax > tright:
+                if corr > 0.7 and peak > 0.023333 * global_peak:
+                    points.append(tmax)
+                    added_right = tmax
+                break
+            if corr > 0.3 and (peak == 0.0 or peak > 0.01 * global_peak):
+                points.append(tmax)
+                added_right = tmax
+
+        t = tright
+
+    if not points:
+        return np.zeros(0, dtype=np.float64)
+    return np.sort(np.asarray(points, dtype=np.float64))
+
+
 def refine_cycle_marks_praat_cc(voice: np.ndarray, fs: float,
                                  seed_idx: np.ndarray,
                                  ) -> np.ndarray:
