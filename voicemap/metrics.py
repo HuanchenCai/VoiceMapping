@@ -1892,85 +1892,108 @@ class PerturbationCalculator(MetricCalculator):
         out[k:k + len(avg)] = np.where(center_ok, raw, 0.0)
         return out
 
+    # Sliding-window half-width in seconds. Each cycle's per-cycle
+    # jitter/shimmer value is computed by running Praat's formulas on
+    # the cycle marks falling within ±WINDOW_S/2 of the cycle's time.
+    # 1.0 s gives Praat enough cycles for stable APQ11 (~100-500 cycles
+    # at speech F0) while still tracking F0/SPL changes within the recording.
+    WINDOW_S = 1.0
+
+    # Praat default period bounds (corresponds to F0 ∈ [50 Hz, 10 kHz])
+    PMIN_S = 1e-4
+    PMAX_S = 0.02
+
     def calculate(self, voice: np.ndarray,
                   cycle_triggers: np.ndarray) -> Dict[str, np.ndarray]:
+        import voicemap.praat_perturbation as _ppt
         logger.info("Calculating jitter + shimmer "
-                    "(Praat-algorithm reimpl: xcorr cycle alignment + "
-                    "subsample period + parabolic peak amplitude)...")
+                    "(Praat formula direct translation, sliding window=%.1fs)...",
+                    self.WINDOW_S)
         idx = np.where(cycle_triggers > 0.5)[0]
         n = max(len(idx) - 1, 0)
         z = lambda: np.zeros(n)
         if n < 3:
             return {k: z() for k in self.KEYS}
 
-        # Refine each integer trigger to a subsample position by
-        # cross-correlating its voice waveform window against the previous
-        # cycle's window. This locks onto the same waveform shape across
-        # cycles regardless of which formant peak is locally dominant —
-        # the fix that simple peak-picking can't deliver.
-        refined_idx = self._refine_via_xcorr(voice, idx)
+        fs = float(self.config.sample_rate)
+        # Refine integer triggers via the direct translation of Praat's
+        # Sound_findMaximumCorrelation (Praat's `To PointProcess (cc)`
+        # uses the same routine internally). Cycle marks come out in
+        # seconds with subsample accuracy and Praat-compatible positioning.
+        t_points = _ppt.refine_cycle_marks_praat_cc(voice, fs, idx)
 
-        # Period series: subsample-accurate diff of refined positions.
-        T = np.diff(refined_idx)
+        # Pre-compute the amplitude tier ONCE on the full signal.
+        # The shimmer functions then operate on subsets of this tier.
+        amp_t, amp_v = _ppt.point_process_to_amplitude_tier(
+            t_points, voice, fs,
+            self.PMIN_S, self.PMAX_S, self.PERIOD_FACTOR_MAX)
 
-        # Amplitude per cycle: parabolic-interpolated |voice| peak in a
-        # ±T/4 window around each cycle midpoint. Pass refined float
-        # boundaries so the search centre + window scale exactly with
-        # the subsample-accurate cycle length.
-        A = self._amp_per_cycle(voice, refined_idx)
-        # Both T and A have length n (one perturbation value per cycle).
-        A_safe = np.maximum(A, 1e-15)
-        m = len(T)
+        # For each cycle k, build a time window around it and run the
+        # Praat formulas on the subset of cycle marks / amplitude pulses
+        # inside that window. searchsorted gives O(log N) range lookups.
+        half_w = 0.5 * self.WINDOW_S
+        out = {k: np.zeros(n, dtype=np.float64) for k in self.KEYS}
 
-        # Praat outlier masks
-        ok_T = self._adjacent_ok(T, self.PERIOD_FACTOR_MAX)
-        ok_A = self._adjacent_ok(A, self.AMPLITUDE_FACTOR_MAX)
+        for k in range(n):
+            t_centre = 0.5 * (t_points[k] + t_points[k + 1])
+            t_lo = t_centre - half_w
+            t_hi = t_centre + half_w
+            # Cycle-mark subset
+            i0 = int(np.searchsorted(t_points, t_lo, side='left'))
+            i1 = int(np.searchsorted(t_points, t_hi, side='right'))
+            t_sub = t_points[i0:i1]
+            if len(t_sub) < 3:
+                continue
 
-        jitter_local  = self._local_perturb(T, ok_T)
-        jitter_rap    = self._npq_perturb  (T, 3,  ok_T)
-        jitter_ppq5   = self._npq_perturb  (T, 5,  ok_T)
+            # Jitter family (Praat returns fractions; ×100 → %)
+            jl = _ppt.jitter_local(t_sub, self.PMIN_S, self.PMAX_S,
+                                    self.PERIOD_FACTOR_MAX)
+            jr = _ppt.jitter_rap  (t_sub, self.PMIN_S, self.PMAX_S,
+                                    self.PERIOD_FACTOR_MAX)
+            jp = _ppt.jitter_ppq5 (t_sub, self.PMIN_S, self.PMAX_S,
+                                    self.PERIOD_FACTOR_MAX)
+            out["jitter_local"][k] = jl * 100.0 if np.isfinite(jl) else 0.0
+            out["jitter_rap"][k]   = jr * 100.0 if np.isfinite(jr) else 0.0
+            out["jitter_ppq5"][k]  = jp * 100.0 if np.isfinite(jp) else 0.0
 
-        shimmer_local = self._local_perturb(A, ok_A)
-        shimmer_db    = np.zeros(m)
-        shimmer_db[1:] = np.where(
-            ok_A[1:], np.abs(20.0 * np.log10(A_safe[1:] / A_safe[:-1])), 0.0)
-        shimmer_apq3  = self._npq_perturb(A, 3,  ok_A)
-        shimmer_apq5  = self._npq_perturb(A, 5,  ok_A)
-        shimmer_apq11 = self._npq_perturb(A, 11, ok_A)
+            # Amplitude tier subset (same time window)
+            j0 = int(np.searchsorted(amp_t, t_lo, side='left'))
+            j1 = int(np.searchsorted(amp_t, t_hi, side='right'))
+            a_t = amp_t[j0:j1]
+            a_v = amp_v[j0:j1]
+            if len(a_v) < 2:
+                continue
 
-        # Pad to length n if a trailing zero is needed so each result
-        # aligns 1:1 with the input cycle count expected by analyzer.py.
-        def _pad(arr):
-            if len(arr) == n:
-                return arr
-            if len(arr) > n:
-                return arr[:n]
-            return np.concatenate([arr, np.zeros(n - len(arr))])
-
-        result = {
-            "jitter_local":  _pad(jitter_local),
-            "jitter_rap":    _pad(jitter_rap),
-            "jitter_ppq5":   _pad(jitter_ppq5),
-            "shimmer_local": _pad(shimmer_local),
-            "shimmer_db":    _pad(shimmer_db),
-            "shimmer_apq3":  _pad(shimmer_apq3),
-            "shimmer_apq5":  _pad(shimmer_apq5),
-            "shimmer_apq11": _pad(shimmer_apq11),
-        }
+            sl = _ppt.shimmer_local(a_t, a_v, self.PMIN_S, self.PMAX_S,
+                                     self.AMPLITUDE_FACTOR_MAX)
+            sd = _ppt.shimmer_local_dB(a_t, a_v, self.PMIN_S, self.PMAX_S,
+                                        self.AMPLITUDE_FACTOR_MAX)
+            s3 = _ppt.shimmer_apq3(a_t, a_v, self.PMIN_S, self.PMAX_S,
+                                    self.AMPLITUDE_FACTOR_MAX)
+            s5 = _ppt.shimmer_apq5(a_t, a_v, self.PMIN_S, self.PMAX_S,
+                                    self.AMPLITUDE_FACTOR_MAX)
+            s11 = _ppt.shimmer_apq11(a_t, a_v, self.PMIN_S, self.PMAX_S,
+                                      self.AMPLITUDE_FACTOR_MAX)
+            out["shimmer_local"][k] = sl * 100.0 if np.isfinite(sl) else 0.0
+            out["shimmer_db"][k]    = sd         if np.isfinite(sd) else 0.0
+            out["shimmer_apq3"][k]  = s3 * 100.0 if np.isfinite(s3) else 0.0
+            out["shimmer_apq5"][k]  = s5 * 100.0 if np.isfinite(s5) else 0.0
+            out["shimmer_apq11"][k] = s11* 100.0 if np.isfinite(s11)else 0.0
 
         # Summary log
-        jl = result["jitter_local"]
-        sl = result["shimmer_local"]
-        sdb = result["shimmer_db"]
+        jl = out["jitter_local"]
+        sl = out["shimmer_local"]
+        sdb = out["shimmer_db"]
+        def _mean_nz(a):
+            mask = a > 0
+            return float(a[mask].mean()) if mask.any() else 0.0
         logger.info("  Jitter local=%.3f%%  RAP=%.3f%%  PPQ5=%.3f%%",
-                    float(jl[jl > 0].mean() or 0.0),
-                    float(result["jitter_rap"][result["jitter_rap"] > 0].mean() or 0.0),
-                    float(result["jitter_ppq5"][result["jitter_ppq5"] > 0].mean() or 0.0))
+                    _mean_nz(jl), _mean_nz(out["jitter_rap"]),
+                    _mean_nz(out["jitter_ppq5"]))
         logger.info("  Shimmer local=%.3f%%  dB=%.3f  APQ11=%.3f%%",
-                    float(sl[sl > 0].mean() or 0.0),
-                    float(sdb[sdb > 0].mean() or 0.0),
-                    float(result["shimmer_apq11"][result["shimmer_apq11"] > 0].mean() or 0.0))
-        return result
+                    _mean_nz(sl), _mean_nz(sdb),
+                    _mean_nz(out["shimmer_apq11"]))
+        return out
 
 
 
