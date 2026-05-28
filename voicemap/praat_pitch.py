@@ -285,18 +285,210 @@ def find_candidates_parabolic(r: np.ndarray,
 
 
 # ---------------------------------------------------------------------------
+# Sinc interpolation (commit 2 — Praat's NUM_interpolate_sinc with RAISED_COSINE
+# window) + Brent search for maximum refinement (NUMimproveMaximum).
+# Source: praat/melder/NUMinterpol.cpp.
+# ---------------------------------------------------------------------------
+def sinc_interpolate_raised_cosine(y: np.ndarray, x: float,
+                                     max_depth: int) -> float:
+    """Praat-style sinc interpolation with raised-cosine window.
+
+    Computes y(x) where x is a fractional 0-indexed position into y, using:
+        y(x) = Σ y[i] · sinc(x - i) · 0.5 · (1 + cos(π(x - i)/(maxDepth + 0.5)))
+    summed over i ∈ [midright - maxDepth, midleft + maxDepth].
+
+    Matches Praat's RAISED_COSINE branch (NUMinterpol.cpp line 143-228).
+    """
+    n = len(y)
+    if n < 1:
+        return float('nan')
+    if x < 0.0:
+        return float(y[0])
+    if x > n - 1:
+        return float(y[-1])
+    midleft = int(np.floor(x))
+    if x == float(midleft):
+        return float(y[midleft])
+    midright = midleft + 1
+
+    # Clip depth to fit in array
+    max_depth = min(max_depth, midright)         # so left ≥ 0
+    max_depth = min(max_depth, n - 1 - midleft)  # so right ≤ n - 1
+    if max_depth <= 0:
+        # Fall back to linear interp
+        return float(y[midleft] + (x - midleft) * (y[midright] - y[midleft]))
+
+    left = midright - max_depth
+    right = midleft + max_depth
+    i_arr = np.arange(left, right + 1, dtype=np.float64)
+    delta = x - i_arr                  # may be ≠ 0 because x is not integer
+    pi_delta = np.pi * delta
+    sinc = np.sin(pi_delta) / pi_delta
+    win_depth = max_depth + 0.5
+    win = 0.5 * (1.0 + np.cos(np.pi * delta / win_depth))
+    return float(np.sum(y[left: right + 1] * sinc * win))
+
+
+def improve_maximum_sinc(y: np.ndarray, ix_mid: int,
+                          depth: int = 70) -> tuple[float, float]:
+    """Praat's NUMimproveMaximum: Brent search for the maximum of the
+    sinc-interpolated y curve near integer index ix_mid.
+
+    Returns
+    -------
+    y_max : float
+        Refined peak height (sinc-interpolated).
+    x_max : float
+        Subsample position where the peak occurs (in y's 0-based indexing).
+    """
+    n = len(y)
+    if ix_mid <= 0:
+        return float(y[0]), 0.0
+    if ix_mid >= n - 1:
+        return float(y[-1]), float(n - 1)
+    if depth <= 0:
+        return float(y[ix_mid]), float(ix_mid)
+    if depth == 1:
+        # Praat's NUM_PEAK_INTERPOLATE_LINEAR — also degenerate
+        return float(y[ix_mid]), float(ix_mid)
+    if depth == 2:
+        # Parabolic
+        dy = 0.5 * (y[ix_mid + 1] - y[ix_mid - 1])
+        d2y = 2.0 * y[ix_mid] - y[ix_mid - 1] - y[ix_mid + 1]
+        if d2y == 0.0:
+            return float(y[ix_mid]), float(ix_mid)
+        x_max = ix_mid + dy / d2y
+        y_max = y[ix_mid] + 0.5 * dy * dy / d2y
+        return float(y_max), float(x_max)
+
+    # Sinc (depth 70 / 700): Brent on negated sinc-interpolation
+    from scipy.optimize import minimize_scalar
+
+    def neg_y(x):
+        return -sinc_interpolate_raised_cosine(y, x, depth)
+
+    res = minimize_scalar(neg_y,
+                           bracket=(ix_mid - 1, ix_mid, ix_mid + 1),
+                           method='brent',
+                           options={'xtol': 1e-10})
+    return float(-res.fun), float(res.x)
+
+
+# ---------------------------------------------------------------------------
+# Sinc-refined candidate finding (commit 2)
+# ---------------------------------------------------------------------------
+def find_candidates_sinc(r: np.ndarray,
+                          setup: PitchAnalysisSetup,
+                          voicing_threshold: float = 0.45,
+                          octave_cost: float = 0.01,
+                          max_n_candidates: int = 15,
+                          depth: int = 70,
+                          ) -> list[tuple[float, float]]:
+    """Same logic as find_candidates_parabolic, but with two refinements
+    that match Praat's first/second-pass exactly:
+
+      1. First pass uses parabolic for F0 (fast) but sinc-30 for strength
+         (so the candidate ranking matches Praat's even before refinement).
+      2. Second pass refines each non-voiceless candidate's F0 + strength
+         via NUMimproveMaximum (Brent search on sinc-70 interpolated r).
+
+    Source: Sound_to_Pitch.cpp lines 184-261.
+    """
+    candidates: list[tuple[float, float]] = [(0.0, 0.0)]
+    minLag = setup.minimumLag
+    maxLag = min(setup.maximumLag, setup.brent_ixmax)
+    fs = setup.fs
+    threshold = 0.5 * voicing_threshold
+
+    if maxLag <= minLag:
+        return candidates
+
+    # First pass: parabolic F0, sinc-30 strength
+    for i in range(max(1, minLag), maxLag):
+        ri = r[i]
+        if ri <= threshold:
+            continue
+        if not (ri > r[i - 1] and ri >= r[i + 1]):
+            continue
+        dr = 0.5 * (r[i + 1] - r[i - 1])
+        d2r = (ri - r[i - 1]) + (ri - r[i + 1])
+        if d2r <= 0.0:
+            continue
+        lag_subsample = i + dr / d2r
+        if lag_subsample <= 0:
+            continue
+        F0_cand = fs / lag_subsample
+        if F0_cand < setup.pitch_floor or F0_cand > setup.pitch_ceiling:
+            continue
+        # Praat first pass: sinc-30 strength using the parabolic-refined lag
+        strength = sinc_interpolate_raised_cosine(r, lag_subsample, 30)
+        if not np.isfinite(strength):
+            strength = ri + 0.5 * dr * dr / d2r
+        if strength > 1.0:
+            strength = 1.0 / strength
+
+        if len(candidates) < max_n_candidates:
+            candidates.append((F0_cand, strength))
+        else:
+            weakest_idx = -1
+            weakest_score = 2.0
+            for j in range(1, len(candidates)):
+                F_j, S_j = candidates[j]
+                if F_j <= 0:
+                    continue
+                local_strength = S_j - octave_cost * np.log2(
+                    setup.pitch_floor / F_j)
+                if local_strength < weakest_score:
+                    weakest_score = local_strength
+                    weakest_idx = j
+            new_local_strength = strength - octave_cost * np.log2(
+                setup.pitch_floor / F0_cand)
+            if weakest_idx > 0 and new_local_strength > weakest_score:
+                candidates[weakest_idx] = (F0_cand, strength)
+
+    # Second pass: refine each candidate via sinc-70 Brent search
+    refined: list[tuple[float, float]] = [(0.0, 0.0)]
+    for F_cand, S_cand in candidates[1:]:
+        if F_cand <= 0:
+            continue
+        lag = fs / F_cand
+        ix_mid = int(round(lag))
+        if ix_mid < 1 or ix_mid >= len(r) - 1:
+            refined.append((F_cand, S_cand))
+            continue
+        # Praat uses SINC700 only for frequency > 0.3 * fs (≈ 13 kHz @ 44.1k),
+        # which never triggers for pitch. SINC70 is the operative depth.
+        y_new, x_new = improve_maximum_sinc(r, ix_mid, depth)
+        if x_new > 0:
+            F_new = fs / x_new
+            if y_new > 1.0:
+                y_new = 1.0 / y_new
+            refined.append((F_new, y_new))
+        else:
+            refined.append((F_cand, S_cand))
+    return refined
+
+
+# ---------------------------------------------------------------------------
 # Top-level convenience: per-frame strongest F0 across whole signal
 # ---------------------------------------------------------------------------
-def sound_to_pitch_frames_parabolic(voice: np.ndarray, fs: float,
-                                      pitch_floor: float = 75.0,
-                                      pitch_ceiling: float = 600.0,
-                                      time_step: float | None = None,
-                                      voicing_threshold: float = 0.45,
-                                      octave_cost: float = 0.01,
-                                      max_n_candidates: int = 15,
-                                      ) -> tuple[np.ndarray, np.ndarray, list]:
-    """Run AC-Hanning analysis on every frame and return parabolic-stage
-    candidate lists. **No Viterbi yet** — for parity tests in commit 1.
+def sound_to_pitch_frames(voice: np.ndarray, fs: float,
+                            pitch_floor: float = 75.0,
+                            pitch_ceiling: float = 600.0,
+                            time_step: float | None = None,
+                            voicing_threshold: float = 0.45,
+                            octave_cost: float = 0.01,
+                            max_n_candidates: int = 15,
+                            method: str = 'sinc',
+                            ) -> tuple[np.ndarray, np.ndarray, list]:
+    """Run AC-Hanning analysis on every frame and return candidate lists.
+
+    Parameters
+    ----------
+    method : str
+        'parabolic' — first-pass only, fast (commit 1 default).
+        'sinc'      — first pass + sinc-70 Brent refinement (commit 2),
+                       matches Praat second-pass output.
 
     Returns
     -------
@@ -330,11 +522,24 @@ def sound_to_pitch_frames_parabolic(voice: np.ndarray, fs: float,
             continue
         intensity[k] = (1.0 if local_peak > global_peak
                          else local_peak / global_peak)
-        candidates_per_frame[k] = find_candidates_parabolic(
-            r, setup,
-            voicing_threshold=voicing_threshold,
-            octave_cost=octave_cost,
-            max_n_candidates=max_n_candidates,
-        )
+        if method == 'sinc':
+            candidates_per_frame[k] = find_candidates_sinc(
+                r, setup,
+                voicing_threshold=voicing_threshold,
+                octave_cost=octave_cost,
+                max_n_candidates=max_n_candidates,
+            )
+        else:
+            candidates_per_frame[k] = find_candidates_parabolic(
+                r, setup,
+                voicing_threshold=voicing_threshold,
+                octave_cost=octave_cost,
+                max_n_candidates=max_n_candidates,
+            )
 
     return frame_t, intensity, candidates_per_frame
+
+
+# Backwards-compat alias used by commit 1's parity test
+sound_to_pitch_frames_parabolic = lambda *a, **kw: sound_to_pitch_frames(
+    *a, method='parabolic', **kw)
