@@ -1921,9 +1921,16 @@ class PerturbationCalculator(MetricCalculator):
     def calculate(self, voice: np.ndarray,
                   cycle_triggers: np.ndarray) -> Dict[str, np.ndarray]:
         import voicemap.praat_perturbation as _ppt
-        logger.info("Calculating jitter + shimmer "
-                    "(Praat formula direct translation, sliding window=%.1fs)...",
-                    self.WINDOW_S)
+        if self.STRATEGY == 'per_cycle':
+            logger.info("Calculating jitter + shimmer "
+                        "(Praat formula per-cycle decomposition, "
+                        "voice-derived cc marks → EGG nearest-neighbour)")
+        elif self.STRATEGY == 'global' or self.WINDOW_S is None or self.WINDOW_S <= 0:
+            logger.info("Calculating jitter + shimmer "
+                        "(Praat whole-recording scalar, broadcast)")
+        else:
+            logger.info("Calculating jitter + shimmer "
+                        "(sliding window = %.1f s)", float(self.WINDOW_S))
         idx = np.where(cycle_triggers > 0.5)[0]
         n = max(len(idx) - 1, 0)
         z = lambda: np.zeros(n)
