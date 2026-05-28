@@ -875,8 +875,21 @@ class VoiceMapAnalyzer:
             cycle_triggers = self.voice_only_cycle_detection(voice_p)
         else:
             cycle_triggers = self.phase_portrait_cycle_detection(egg_p)
-            self._glottal_flow = None
-            self._glottal_flow_derivative = None
+            # Optional cross-validation: also reconstruct glottal flow from
+            # voice so the _voice metric columns get populated alongside
+            # the EGG-derived ones. Cycle boundaries still come from EGG
+            # (gold standard), so the two metric sets are computed on the
+            # exact same cycles and can be paired 1-to-1 for comparison.
+            if self.config.iaif_always_run:
+                from voicemap.inverse_filtering import iaif
+                logger.info("iaif_always_run=True — computing glottal flow "
+                            "on voice for _voice column cross-validation")
+                g, dg = iaif(voice_p, self.config.sample_rate)
+                self._glottal_flow = g
+                self._glottal_flow_derivative = dg
+            else:
+                self._glottal_flow = None
+                self._glottal_flow_derivative = None
         cycle_count = int(np.sum(cycle_triggers > 0.5))
         logger.info("Detected cycles: %d", cycle_count)
 
