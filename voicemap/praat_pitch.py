@@ -543,3 +543,247 @@ def sound_to_pitch_frames(voice: np.ndarray, fs: float,
 # Backwards-compat alias used by commit 1's parity test
 sound_to_pitch_frames_parabolic = lambda *a, **kw: sound_to_pitch_frames(
     *a, method='parabolic', **kw)
+
+
+# ---------------------------------------------------------------------------
+# Commit 3 — Pitch_pathFinder (Viterbi DP over per-frame candidates) and
+# the lightweight Pitch object holding the selected F0 contour.
+#
+# Source: praat/fon/Pitch.cpp Pitch_pathFinder (lines 524-655).
+# ---------------------------------------------------------------------------
+def _is_voiced(f: float, ceiling: float) -> bool:
+    """Praat's Pitch_util_frequencyIsVoiced: voiced iff 0 < f < ceiling."""
+    return 0.0 < f < ceiling
+
+
+def pitch_path_finder(candidates_per_frame: list,
+                       intensity: np.ndarray,
+                       ceiling: float,
+                       dt: float,
+                       silence_threshold: float = 0.03,
+                       voicing_threshold: float = 0.45,
+                       octave_cost: float = 0.01,
+                       octave_jump_cost: float = 0.35,
+                       voiced_unvoiced_cost: float = 0.14,
+                       pull_formants: bool = False,
+                       ) -> list[tuple[float, float]]:
+    """Viterbi DP over per-frame candidate lists. Picks one (F0, strength)
+    per frame minimising total cost.
+
+    Direct translation of Pitch_pathFinder. Returns the selected candidate
+    per frame as a list of (frequency, strength) tuples — the same shape
+    as Praat's `frame.candidates[1]` after the path swap.
+
+    Parameters mirror Praat's defaults from Sound_to_Pitch (75/600 path):
+        silence_threshold = 0.03
+        voicing_threshold = 0.45
+        octave_cost       = 0.01
+        octave_jump_cost  = 0.35
+        voiced_unvoiced_cost = 0.14
+    """
+    n_frames = len(candidates_per_frame)
+    if n_frames == 0:
+        return []
+
+    # Praat applies a time-step correction so the cost scales sensibly
+    # when dt deviates from the canonical 10 ms.
+    time_step_correction = 0.01 / dt
+    octave_jump_cost = octave_jump_cost * time_step_correction
+    voiced_unvoiced_cost = voiced_unvoiced_cost * time_step_correction
+    ceiling2 = (2.0 * ceiling) if pull_formants else ceiling
+
+    max_n = max(len(c) for c in candidates_per_frame)
+    # delta = log-likelihood-like score per (frame, candidate); higher = better
+    delta = np.full((n_frames, max_n), -np.inf, dtype=np.float64)
+    psi = np.zeros((n_frames, max_n), dtype=np.int32)
+
+    # Pad candidates to uniform width for vectorised inner loop
+    freq = np.zeros((n_frames, max_n), dtype=np.float64)
+    strength = np.zeros((n_frames, max_n), dtype=np.float64)
+    n_cand = np.zeros(n_frames, dtype=np.int32)
+    for k, cands in enumerate(candidates_per_frame):
+        n_cand[k] = len(cands)
+        for j, (f, s) in enumerate(cands):
+            freq[k, j] = f
+            strength[k, j] = s
+
+    # ── Local cost (delta[k,j] = strength − octaveCost·log2(ceiling/F) for
+    # voiced; voicingThreshold + max(0, 2 − intensity·(1+voicing)/silence)
+    # for voiceless).
+    for k in range(n_frames):
+        if silence_threshold <= 0.0:
+            unvoiced_strength = voicing_threshold
+        else:
+            shifted = 2.0 - intensity[k] / (silence_threshold
+                                              / (1.0 + voicing_threshold))
+            unvoiced_strength = voicing_threshold + max(0.0, shifted)
+        for j in range(n_cand[k]):
+            f = freq[k, j]
+            if _is_voiced(f, ceiling2):
+                delta[k, j] = strength[k, j] - octave_cost * np.log2(ceiling / f)
+            else:
+                delta[k, j] = unvoiced_strength
+
+    # ── Forward DP
+    for k in range(1, n_frames):
+        prev = delta[k - 1]
+        for j2 in range(n_cand[k]):
+            f2 = freq[k, j2]
+            cur_voiceless = not _is_voiced(f2, ceiling2)
+            best_val = -np.inf
+            best_idx = 0
+            for j1 in range(n_cand[k - 1]):
+                f1 = freq[k - 1, j1]
+                prev_voiceless = not _is_voiced(f1, ceiling2)
+                if cur_voiceless:
+                    trans = 0.0 if prev_voiceless else voiced_unvoiced_cost
+                else:
+                    if prev_voiceless:
+                        trans = voiced_unvoiced_cost
+                    else:
+                        trans = octave_jump_cost * abs(np.log2(f1 / f2))
+                value = prev[j1] - trans + delta[k, j2]
+                if value > best_val:
+                    best_val = value
+                    best_idx = j1
+            delta[k, j2] = best_val
+            psi[k, j2] = best_idx
+
+    # ── Backtrack: argmax in last frame, then follow psi
+    end_n = n_cand[n_frames - 1]
+    end_argmax = int(np.argmax(delta[n_frames - 1, :end_n]))
+    selected = [0] * n_frames
+    selected[n_frames - 1] = end_argmax
+    for k in range(n_frames - 1, 0, -1):
+        selected[k - 1] = int(psi[k, selected[k]])
+
+    return [(float(freq[k, selected[k]]), float(strength[k, selected[k]]))
+            for k in range(n_frames)]
+
+
+class PitchContour:
+    """Lightweight Pitch object: per-frame selected F0 + helpers needed by
+    Sound_Pitch_to_PointProcess_cc.
+
+    Holds the post-Viterbi selected (frequency, strength) per frame plus
+    the frame time grid (t1, dt). Provides:
+
+      - ``get_value_at_time(t)``    — F0 in Hz with linear interpolation
+      - ``is_voiced_i(iframe)``     — voicing status of frame i
+      - ``get_voiced_interval_after(t)`` — for the cc PointProcess loop
+    """
+
+    def __init__(self, frame_t: np.ndarray, selected_F0: np.ndarray,
+                 selected_strength: np.ndarray, ceiling: float):
+        self.frame_t = np.asarray(frame_t, dtype=np.float64)
+        self.F0 = np.asarray(selected_F0, dtype=np.float64)
+        self.strength = np.asarray(selected_strength, dtype=np.float64)
+        self.ceiling = float(ceiling)
+        self.xmin = float(self.frame_t[0] - 0.5 * (self.frame_t[1] - self.frame_t[0])) \
+            if len(self.frame_t) >= 2 else float(self.frame_t[0])
+        self.xmax = float(self.frame_t[-1] + 0.5 * (self.frame_t[1] - self.frame_t[0])) \
+            if len(self.frame_t) >= 2 else float(self.frame_t[0])
+        self.dx = float(self.frame_t[1] - self.frame_t[0]) if len(self.frame_t) >= 2 else 1.0
+        self.nx = len(self.frame_t)
+
+    def is_voiced_i(self, iframe: int) -> bool:
+        if iframe < 0 or iframe >= self.nx:
+            return False
+        return _is_voiced(self.F0[iframe], self.ceiling)
+
+    def get_value_at_time(self, t: float, interpolate: bool = True) -> float:
+        """Praat's Pitch_getValueAtTime. Returns NaN at unvoiced frames or
+        when both neighbours are unvoiced. Linear interp between adjacent
+        voiced frames when ``interpolate=True``."""
+        if t < self.xmin or t > self.xmax or self.nx == 0:
+            return float('nan')
+        # x = (t - frame_t[0]) / dx in 0-based frame index space
+        x = (t - self.frame_t[0]) / self.dx
+        i_lo = int(np.floor(x))
+        i_hi = i_lo + 1
+        if i_lo < 0:
+            return float(self.F0[0]) if self.is_voiced_i(0) else float('nan')
+        if i_hi >= self.nx:
+            return float(self.F0[-1]) if self.is_voiced_i(self.nx - 1) else float('nan')
+        lo_v = self.is_voiced_i(i_lo)
+        hi_v = self.is_voiced_i(i_hi)
+        if not (lo_v or hi_v):
+            return float('nan')
+        if not interpolate:
+            return float(self.F0[i_lo]) if lo_v else float(self.F0[i_hi])
+        if lo_v and hi_v:
+            frac = x - i_lo
+            return float(self.F0[i_lo] + frac * (self.F0[i_hi] - self.F0[i_lo]))
+        # Only one side voiced: use it
+        return float(self.F0[i_lo] if lo_v else self.F0[i_hi])
+
+    def get_voiced_interval_after(self, after: float
+                                    ) -> tuple[float, float] | None:
+        """Praat's Pitch_getVoicedIntervalAfter. Returns (tleft, tright) of
+        the next contiguous voiced run after ``after``, or None if past end."""
+        # ileft = HighIndex(after): smallest frame index with frame_t >= after
+        ileft = int(np.searchsorted(self.frame_t, after, side='left'))
+        if ileft >= self.nx:
+            return None
+        if ileft < 0:
+            ileft = 0
+        # First voiced frame ≥ ileft
+        while ileft < self.nx and not self.is_voiced_i(ileft):
+            ileft += 1
+        if ileft >= self.nx:
+            return None
+        # Last voiced frame in this run
+        iright = ileft
+        while iright < self.nx and self.is_voiced_i(iright):
+            iright += 1
+        iright -= 1
+        # The whole frame is voiced ⇒ extend by ±dx/2
+        tleft = self.frame_t[ileft] - 0.5 * self.dx
+        tright = self.frame_t[iright] + 0.5 * self.dx
+        if tleft >= self.xmax - 0.5 * self.dx:
+            return None
+        tleft = max(tleft, self.xmin)
+        tright = min(tright, self.xmax)
+        if tright <= after:
+            return None
+        return float(tleft), float(tright)
+
+
+def sound_to_pitch(voice: np.ndarray, fs: float,
+                    pitch_floor: float = 75.0,
+                    pitch_ceiling: float = 600.0,
+                    time_step: float | None = None,
+                    silence_threshold: float = 0.03,
+                    voicing_threshold: float = 0.45,
+                    octave_cost: float = 0.01,
+                    octave_jump_cost: float = 0.35,
+                    voiced_unvoiced_cost: float = 0.14,
+                    max_n_candidates: int = 15,
+                    method: str = 'sinc',
+                    ) -> PitchContour:
+    """End-to-end translation of Praat's Sound_to_Pitch (= rawAc, AC_HANNING):
+    per-frame analysis (sinc-refined candidates) + Viterbi path finder →
+    one F0 value per frame.
+
+    Direct counterpart of parselmouth's ``snd.to_pitch_ac(time_step=...,
+    pitch_floor=75, pitch_ceiling=600)``.
+    """
+    frame_t, intensity, cands = sound_to_pitch_frames(
+        voice, fs, pitch_floor, pitch_ceiling, time_step=time_step,
+        voicing_threshold=voicing_threshold, octave_cost=octave_cost,
+        max_n_candidates=max_n_candidates, method=method)
+    if len(frame_t) < 2:
+        return PitchContour(np.zeros(0), np.zeros(0), np.zeros(0),
+                             pitch_ceiling)
+    dt = float(frame_t[1] - frame_t[0])
+
+    selected = pitch_path_finder(
+        cands, intensity, ceiling=pitch_ceiling, dt=dt,
+        silence_threshold=silence_threshold,
+        voicing_threshold=voicing_threshold,
+        octave_cost=octave_cost,
+        octave_jump_cost=octave_jump_cost,
+        voiced_unvoiced_cost=voiced_unvoiced_cost)
+    F0 = np.array([s[0] for s in selected], dtype=np.float64)
+    strength = np.array([s[1] for s in selected], dtype=np.float64)
+    return PitchContour(frame_t, F0, strength, pitch_ceiling)

@@ -234,5 +234,84 @@ class TestPraatPitchSincAgainstParselmouth(unittest.TestCase):
               f"median F0 err {median_err_pct:.4f}%, P90 {p90_err_pct:.4f}%")
 
 
+@unittest.skipUnless(_PARSELMOUTH_OK, "parselmouth not installed")
+class TestPitchPathFinderAgainstParselmouth(unittest.TestCase):
+    """End-to-end Sound_to_Pitch (sinc + Viterbi) vs parselmouth's
+    selected F0 contour. With Viterbi octave/voicing costs in place,
+    we should now match Praat on voiced classification as well as F0
+    value (the dynamic-recording octave error that the bare argmax
+    can't fix in commit 1/2)."""
+
+    @classmethod
+    def setUpClass(cls):
+        path = os.path.join(ROOT, "audio", "test_Voice_EGG.wav")
+        if not os.path.exists(path):
+            raise unittest.SkipTest(f"missing test fixture: {path}")
+        cls.voice, cls.fs = _load_voice(path, duration_s=10.0)
+
+    def test_full_pipeline_F0_matches_praat(self):
+        floor, ceiling = 75.0, 600.0
+        snd = parselmouth.Sound(np.ascontiguousarray(self.voice),
+                                 sampling_frequency=self.fs)
+        praat_pitch = snd.to_pitch_ac(time_step=None,
+                                       pitch_floor=floor,
+                                       pitch_ceiling=ceiling)
+
+        ours = pp.sound_to_pitch(self.voice, self.fs,
+                                   pitch_floor=floor, pitch_ceiling=ceiling)
+
+        # Sample on a common time grid
+        t_probe = np.linspace(0.1, 9.9, 200)
+        ours_F0 = np.array([ours.get_value_at_time(t) for t in t_probe])
+        praat_F0 = np.array([praat_pitch.get_value_at_time(t) for t in t_probe])
+
+        ours_voiced = np.isfinite(ours_F0) & (ours_F0 > 0)
+        praat_voiced = np.isfinite(praat_F0) & (praat_F0 > 0)
+
+        # Voicing classification agreement
+        voicing_agree = (ours_voiced == praat_voiced).mean()
+        self.assertGreater(voicing_agree, 0.85,
+            f"voicing agreement only {voicing_agree*100:.1f} %")
+
+        # F0 agreement on jointly-voiced
+        both = ours_voiced & praat_voiced
+        n = int(both.sum())
+        self.assertGreater(n, 50, f"only {n} jointly-voiced sample points")
+        rel_err = np.abs(ours_F0[both] - praat_F0[both]) / praat_F0[both]
+        median_err_pct = float(np.median(rel_err) * 100.0)
+        p90_err_pct = float(np.percentile(rel_err, 90) * 100.0)
+
+        self.assertLess(median_err_pct, 0.5,
+            f"median F0 err {median_err_pct:.4f}% > 0.5%")
+        self.assertLess(p90_err_pct, 5.0,
+            f"P90 F0 err {p90_err_pct:.4f}% > 5%")
+
+        print(f"\n  test_Voice_EGG (10 s, full pipeline): "
+              f"voicing agreement {voicing_agree*100:.1f}%, "
+              f"F0 median err {median_err_pct:.4f}%, P90 {p90_err_pct:.4f}% "
+              f"on {n} probe points")
+
+    def test_voiced_interval_finder(self):
+        """get_voiced_interval_after should advance correctly and stop
+        at signal end."""
+        ours = pp.sound_to_pitch(self.voice, self.fs,
+                                   pitch_floor=75., pitch_ceiling=600.)
+        intervals = []
+        t = 0.0
+        for _ in range(50):
+            iv = ours.get_voiced_interval_after(t)
+            if iv is None:
+                break
+            intervals.append(iv)
+            t = iv[1] + 1e-6   # advance past this interval
+        # On a voiced 10 s recording we expect at least one voiced interval
+        self.assertGreater(len(intervals), 0,
+                            "no voiced intervals found in 10 s vowel")
+        # Intervals strictly increase
+        for i in range(1, len(intervals)):
+            self.assertGreater(intervals[i][0], intervals[i - 1][1],
+                f"intervals overlap: {intervals[i-1]} and {intervals[i]}")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
