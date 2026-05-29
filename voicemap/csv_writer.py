@@ -131,17 +131,6 @@ def _build_cycle_dataframe(config, metrics: Dict[str, np.ndarray],
         'OQ':             _pad(metrics.get('oq'),  base_n),
         'SPQ':            _pad(metrics.get('spq'), base_n),
         'CIQ':            _pad(metrics.get('ciq'), base_n),
-        # Voice-derived equivalents of the EGG-shape metrics (IAIF path).
-        # Populated only when the input file lacked an EGG channel and the
-        # mono pipeline reconstructed the glottal flow from voice alone.
-        'Qcontact_voice': _pad(metrics.get('qcontact_voice'), base_n),
-        'dEGGmax_voice':  _pad(metrics.get('deggmax_voice'),  base_n),
-        'Icontact_voice': _pad(metrics.get('icontact_voice'), base_n),
-        'Entropy_voice':  _pad(metrics.get('entropy_voice'),  base_n),
-        'HRFegg_voice':   _pad(metrics.get('hrf_voice'),      base_n),
-        'OQ_voice':       _pad(metrics.get('oq_voice'),       base_n),
-        'SPQ_voice':      _pad(metrics.get('spq_voice'),      base_n),
-        'CIQ_voice':      _pad(metrics.get('ciq_voice'),      base_n),
         '_cluster': cluster.astype(int),
         '_phon':    phon.astype(int),
     })
@@ -239,10 +228,6 @@ def write_vrp(analyzer: "VoiceMapAnalyzer",
         'SingersFormant': 'mean',
         'H1H2': 'mean', 'H1H3': 'mean',
         'OQ': 'mean', 'SPQ': 'mean', 'CIQ': 'mean',
-        'Qcontact_voice': 'mean', 'dEGGmax_voice': 'mean',
-        'Icontact_voice': 'mean', 'Entropy_voice':  'mean',
-        'HRFegg_voice':   'mean', 'OQ_voice':       'mean',
-        'SPQ_voice':      'mean', 'CIQ_voice':      'mean',
         'Total': 'sum',
     }).reset_index()
 
@@ -282,10 +267,6 @@ def write_vrp(analyzer: "VoiceMapAnalyzer",
         'dEGGmax', 'Qcontact', 'Icontact', 'HRFegg',
         # P3 (EGG timing)
         'OQ', 'SPQ', 'CIQ',
-        # IAIF voice-derived equivalents (mono-mode only, all zero otherwise)
-        'Qcontact_voice', 'dEGGmax_voice', 'Icontact_voice',
-        'Entropy_voice',  'HRFegg_voice',
-        'OQ_voice', 'SPQ_voice', 'CIQ_voice',
         # P1
         'Jitter', 'JitterRAP', 'JitterPPQ5',
         'Shimmer', 'ShimmerDB',

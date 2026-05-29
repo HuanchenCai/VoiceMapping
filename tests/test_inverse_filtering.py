@@ -196,8 +196,10 @@ class TestAnalyzerIntegration(unittest.TestCase):
         self.assertEqual(len(a._glottal_flow), len(x))
 
     def test_end_to_end_mono_csv(self):
-        """Full pipeline on synthetic mono → CSV with populated _voice columns
-        and zero EGG-original columns."""
+        """Full pipeline on a synthetic mono recording: CSV is written and
+        all EGG-derived columns are zero (no EGG channel means no Qcontact
+        etc.). The voice cycle detection (IAIF GCI) still drives every
+        acoustic metric — those columns must be populated."""
         import pandas as pd
         from voicemap.analyzer import VoiceMapAnalyzer
         from voicemap.config import VoiceMapConfig
@@ -218,21 +220,25 @@ class TestAnalyzerIntegration(unittest.TestCase):
 
             df = pd.read_csv(out_file, sep=';')
 
-            for col in ('Qcontact_voice', 'dEGGmax_voice', 'Icontact_voice',
-                        'Entropy_voice', 'HRFegg_voice',
-                        'OQ_voice', 'SPQ_voice', 'CIQ_voice'):
-                self.assertIn(col, df.columns, f"{col} missing from CSV")
-                self.assertTrue((df[col] != 0).any(),
-                                f"{col} is all zero — IAIF didn't run?")
-
+            # EGG-derived columns must be all zero in mono mode.
             for col in ('Qcontact', 'dEGGmax', 'Icontact',
                         'Entropy', 'HRFegg', 'OQ', 'SPQ', 'CIQ'):
                 self.assertTrue((df[col] == 0).all(),
-                    f"mono mode but EGG-original {col} is non-zero")
+                    f"mono mode but EGG-derived {col} is non-zero")
 
-            qc_mean = df['Qcontact_voice'].mean()
-            self.assertTrue(0.2 < qc_mean < 0.9,
-                f"Qcontact_voice mean {qc_mean:.3f} outside plausible range")
+            # The 8 IAIF *_voice columns the old code added are now
+            # explicitly NOT in the CSV — they were removed because only
+            # 3/8 had useful agreement with EGG ground truth.
+            for col in ('Qcontact_voice', 'dEGGmax_voice', 'Icontact_voice',
+                        'Entropy_voice', 'HRFegg_voice',
+                        'OQ_voice', 'SPQ_voice', 'CIQ_voice'):
+                self.assertNotIn(col, df.columns,
+                    f"{col} should have been removed (low EGG agreement)")
+
+            # An acoustic metric should still be populated (cycle detection
+            # via voice-only IAIF GCI worked).
+            self.assertTrue((df['CPP'] != 0).any(),
+                            "CPP should be non-zero even in mono mode")
 
 
 if __name__ == "__main__":

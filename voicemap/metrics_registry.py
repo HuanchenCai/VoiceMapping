@@ -276,57 +276,12 @@ def _populate_builtins():
         cmap="viridis",
         description="(T_closing - T_opening) / T_open."))
 
-    # ── EGG-shape analogs derived from IAIF-reconstructed glottal flow ──
-    # Populated only on mono inputs (no EGG channel). Same numeric formulas
-    # as the EGG versions above, but applied to the negated glottal flow
-    # (-g is "high when closed", mirroring EGG's contact semantics). Color
-    # ranges intentionally match their EGG twins so the two heatmaps are
-    # visually comparable when both are available.
-    register(MetricSpec(
-        key="Qcontact_voice", category="EGG", label="Qci (voice-derived)",
-        vmin=0.1, vmax=0.6, unit="", cmap="fd_qci",
-        待验证=True,
-        description="Qcontact computed on -glottal_flow (IAIF). "
-                    "Mono-mode equivalent of Qcontact when EGG is absent."))
-    register(MetricSpec(
-        key="dEGGmax_voice", category="EGG", label="Qdelta (voice-derived)",
-        vmin=1.0, vmax=20.0, unit="slope", cmap="fd_degg",
-        norm=LogNorm(vmin=1.0, vmax=20.0, clip=True),
-        待验证=True,
-        description="Peak negative dG/dt — closure speed proxy from IAIF."))
-    register(MetricSpec(
-        key="Icontact_voice", category="EGG", label="Ic (voice-derived)",
-        vmin=0.0, vmax=0.7, unit="", cmap="fd_ic",
-        待验证=True,
-        description="log10(dEGGmax_voice) · Qcontact_voice."))
-    register(MetricSpec(
-        key="Entropy_voice", category="EGG", label="CSE (voice-derived)",
-        vmin=0.0, vmax=10.0, unit="", cmap="fd_entropy",
-        待验证=True,
-        description="Sample Entropy on per-cycle DFT of -glottal_flow."))
-    register(MetricSpec(
-        key="HRFegg_voice", category="EGG", label="HRF (voice-derived)",
-        vmin=-30.0, vmax=10.0, unit="dB", cmap="fd_hrf",
-        待验证=True,
-        description="Harmonic Richness Factor on per-cycle DFT of glottal flow."))
-    register(MetricSpec(
-        key="OQ_voice", category="EGG", label="OQ (voice-derived)",
-        vmin=0.2, vmax=0.8, unit="",
-        cmap="viridis",
-        待验证=True,
-        description="Open Quotient timing from glottal flow derivative."))
-    register(MetricSpec(
-        key="SPQ_voice", category="EGG", label="SPQ (voice-derived)",
-        vmin=0.3, vmax=3.0, unit="",
-        cmap="viridis",
-        待验证=True,
-        description="Speed Quotient from glottal flow derivative."))
-    register(MetricSpec(
-        key="CIQ_voice", category="EGG", label="CIQ (voice-derived)",
-        vmin=-0.6, vmax=0.6, unit="",
-        cmap="viridis",
-        待验证=True,
-        description="Contact Index from glottal flow derivative."))
+    # ── EGG-shape voice-derived analogs were removed (2026): the IAIF
+    # `*_voice` versions had only Qcontact / Icontact / dEGGmax with
+    # moderate agreement (r 0.44-0.59) vs EGG ground truth; HRF / SPQ /
+    # CIQ were uncorrelated or negative-correlated. Without an EGG
+    # channel these metrics simply do not exist — the GUI greys out the
+    # whole EGG category for mono recordings instead.
 
     # ── Singing ────────────────────────────────────────────────────────────
     register(MetricSpec(
