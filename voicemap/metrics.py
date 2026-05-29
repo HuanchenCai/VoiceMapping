@@ -1108,17 +1108,22 @@ class VibratoCalculator(MetricCalculator):
         rate_win[bad]   = 0.0
         extent_win[bad] = 0.0
 
-        # Assign each cycle to its centred window; pad edges with nearest
+        # Assign each cycle to its centred window. The first `half` and
+        # last `half` cycles don't have a centred window — leave them at
+        # 0 (i.e. "not measured"). Earlier versions of this code copied
+        # `rate_win[0]` to all leading cycles and `rate_win[-1]` to all
+        # trailing cycles; that produced visible vertical bars on the VRP
+        # heatmap whenever the first or last window happened to detect
+        # vibrato (≈ 6 Hz) — because ~40 leading/trailing cycles would
+        # all carry the same value and dominate whichever (MIDI, dB)
+        # cell they landed in. Padding with 0 is mathematically honest
+        # (we don't have vibrato data outside the centred-window region)
+        # and lets the downstream cell-mean treat them as "no vibrato".
         half = W // 2
         rate = np.zeros(n)
         extent = np.zeros(n)
         rate[half:half + n_wins]   = rate_win
         extent[half:half + n_wins] = extent_win
-        if n_wins:
-            rate[:half]             = rate_win[0]
-            extent[:half]           = extent_win[0]
-            rate[half + n_wins:]    = rate_win[-1]
-            extent[half + n_wins:]  = extent_win[-1]
 
         good = rate > 0
         if good.any():
@@ -1555,12 +1560,12 @@ class VibratoJitterCalculator(MetricCalculator):
             mu = periods.mean()
             sd = periods.std()
             out[i + W // 2] = 100.0 * sd / max(mu, 1e-9)
-        # Edge padding
-        if (out > 0).any():
-            first_nz = np.argmax(out > 0)
-            last_nz  = n - 1 - np.argmax((out > 0)[::-1])
-            out[:first_nz] = out[first_nz]
-            out[last_nz + 1:] = out[last_nz]
+        # Edge cycles outside the centred-window region: leave at 0
+        # rather than copying the first / last computed value to them.
+        # The old "fill leading / trailing region with nearest value"
+        # caused the same vertical-bar VRP artifact as VibratoCalculator
+        # — ~W/2 leading and trailing cycles all received the same value
+        # and dominated whichever (MIDI, dB) cell they fell into.
 
         good = out > 0
         if good.any():
