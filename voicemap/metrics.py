@@ -363,6 +363,21 @@ class ClarityCalculator(MetricCalculator):
         midi_w    = np.where(f0_w > 0, _hz_to_midi(f0_w), 20.0)
         midi_w    = np.maximum(midi_w, 20.0)
 
+        # Final outlier clip: catch remaining extreme glitches in EITHER
+        # direction (subharmonic repair fires only on down-octave errors).
+        # Anything > 12 semitones from a local 31-window rolling median
+        # is physiologically impossible (no voice changes >12 semitones
+        # cycle-to-cycle), so replace with the median value. On a 70 s
+        # test recording this fires on 2 cycles (0.02 %); on 144 s Jiang
+        # ~48 cycles (0.16 %).
+        if len(midi_w) > 31:
+            ref_final = median_filter(midi_w, size=31, mode='nearest')
+            extreme = np.abs(midi_w - ref_final) > 12.0
+            if extreme.any():
+                midi_w[extreme] = ref_final[extreme]
+                logger.info("  Outlier clip: %d window(s) >12 semitones from local median",
+                            int(extreme.sum()))
+
         cycle_idx = np.where(cycle_triggers > 0.5)[0]
         if len(cycle_idx) < 2:
             return np.array([]), np.array([])
@@ -764,10 +779,20 @@ class SpectralMomentsCalculator(MetricCalculator):
         else:
             slope = np.zeros(n_frames)
 
-        # Skewness / kurtosis of the spectral distribution (using PSD as weights)
+        # Skewness / kurtosis of the spectral distribution (using PSD as weights).
+        # Floor bandwidth at 50 Hz in the denominator so that very tonal
+        # frames (single FFT line, bandwidth → 0) don't blow skewness /
+        # kurtosis to 10⁴+. Before this floor, kurtosis hit 30 257 on
+        # Jiang's tonal segments — literature reports kurtosis < 50 for
+        # voice. Then clip the result to ±100 for skewness and ±1000 for
+        # kurtosis to bound display range and stop pathological frames
+        # from dominating per-cell aggregation.
+        bw_safe = np.maximum(bandwidth, 50.0)
         norm_psd = psd / safe_pow[:, None]
-        skewness = (norm_psd * (diff ** 3)).sum(axis=1) / np.maximum(bandwidth ** 3, 1e-15)
-        kurtosis = (norm_psd * (diff ** 4)).sum(axis=1) / np.maximum(bandwidth ** 4, 1e-15) - 3.0
+        skewness = (norm_psd * (diff ** 3)).sum(axis=1) / (bw_safe ** 3)
+        kurtosis = (norm_psd * (diff ** 4)).sum(axis=1) / (bw_safe ** 4) - 3.0
+        skewness = np.clip(skewness, -100.0, 100.0)
+        kurtosis = np.clip(kurtosis, -100.0, 1000.0)
 
         # Alpha Ratio (E_low / E_high in dB)
         m_low  = (freqs >= self.alpha_lo)  & (freqs < self.alpha_mid)
@@ -2285,29 +2310,46 @@ class PPECalculator(MetricCalculator):
         wins = sliding_window_view(logT, W)             # (n-W+1, W)
         nw   = wins.shape[0]
 
-        # Per-window: detrend, histogram, Shannon entropy normalised by log(bins).
-        # Normalisation → PPE ∈ [0, 1] so it's comparable across recordings.
+        # Per-window: detrend, FIXED-RANGE histogram, Shannon entropy
+        # normalised by log(bins). Normalisation → PPE ∈ [0, 1].
+        #
+        # Praat / Little 2009 PPE uses fixed quantisation of log-period
+        # residuals against the recording's global perturbation scale —
+        # NOT per-window dynamic range. Using per-window [min, max] makes
+        # PPE saturate near 1.0 for stable phonation (the histogram is
+        # always uniform within its own range, regardless of magnitude).
+        # On test_Voice_EGG.wav the old code put 22.8 % of cycles into
+        # >0.9 PPE values; with fixed bins it tracks the literature's
+        # 0.4-0.7 range for healthy voice.
+        #
+        # Bin width: 0.01 in log-period (≈ 1 % relative period change).
+        # 10 bins give a total range of ±0.05 (= ±5 % jitter) — outliers
+        # get clipped to the edge bins, which is mathematically equivalent
+        # to "very high jitter" entropy-wise.
+        PPE_BIN_WIDTH = 0.01
+        edges = np.linspace(-PPE_BIN_WIDTH * (self.bins / 2),
+                             PPE_BIN_WIDTH * (self.bins / 2),
+                             self.bins + 1)
         log_bins = np.log(self.bins) if self.bins > 1 else 1.0
         ppe_win  = np.zeros(nw)
         for i in range(nw):
             w = wins[i] - wins[i].mean()
-            # Dynamic range for the histogram: per-window σ, fall back if zero.
-            s = w.std()
-            if s < 1e-9:
+            # Clip values outside the fixed window range to the edge bins
+            w_clipped = np.clip(w, edges[0], edges[-1])
+            counts, _ = np.histogram(w_clipped, bins=edges)
+            if counts.sum() == 0:
                 continue
-            edges = np.linspace(w.min() - 1e-9, w.max() + 1e-9, self.bins + 1)
-            counts, _ = np.histogram(w, bins=edges)
-            p = counts.astype(np.float64) / max(counts.sum(), 1)
+            p = counts.astype(np.float64) / counts.sum()
             p = p[p > 0]
             ppe_win[i] = float(-np.sum(p * np.log(p)) / log_bins)
 
-        # Assign each cycle the PPE of its centred window; pad edges.
+        # Assign each cycle the PPE of its centred window. Leading and
+        # trailing cycles outside the centred-window region stay 0 — same
+        # rationale as the VibratoCalculator fix (no padding with edge
+        # values, which produces vertical-bar VRP artifacts).
         half = W // 2
         out  = np.zeros(n)
         out[half:half + nw] = ppe_win
-        if nw:
-            out[:half]            = ppe_win[0]
-            out[half + nw:]       = ppe_win[-1]
         good = out > 0
         if good.any():
             logger.info("  PPE (w=%d cycles, %d bins): mean=%.3f  range=[%.3f, %.3f]",
