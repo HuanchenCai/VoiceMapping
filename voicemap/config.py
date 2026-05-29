@@ -96,6 +96,19 @@ class VoiceMapConfig:
     # default to cover children, female singing, and Peking-opera highs.
     pitch_floor_hz:   float = 60.0
     pitch_ceiling_hz: float = 1500.0
+
+    # Analysis mode — controls whether the EGG-shape metrics
+    # (Qcontact, dEGGmax, Icontact, Entropy, HRFegg, OQ, SPQ, CIQ, EGG
+    # cluster) get computed and shown.
+    #   'auto'     → pick based on channel count: mono = 'acoustic',
+    #                stereo = 'full' (assumes channel 2 is EGG).
+    #   'full'     → expect channel 2 to be EGG, compute everything.
+    #   'acoustic' → ignore any second channel, only compute voice-side
+    #                metrics. EGG columns stay all-zero, EGG plots and
+    #                GUI menu entries are greyed out.
+    # Set by the GUI dialog after the user confirms what channel 2 holds,
+    # or by the CLI --mode flag.
+    analysis_mode: str = 'auto'
     
     # File paths
     audio_file: str = "audio/test_Voice_EGG.wav"

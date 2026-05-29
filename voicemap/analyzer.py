@@ -321,6 +321,15 @@ class VoiceMapAnalyzer:
             voice, egg = signal[:, 0], signal[:, 1]
         else:
             voice, egg = signal, None
+        # Honour analysis_mode: 'acoustic' discards the EGG channel even
+        # if it's present (the GUI sets this when the user confirms
+        # channel 2 isn't actually EGG, or when they explicitly want a
+        # voice-only analysis on a stereo file).
+        mode = getattr(self.config, 'analysis_mode', 'auto')
+        if mode == 'acoustic' and egg is not None:
+            logger.info("analysis_mode='acoustic' — channel 2 will be ignored "
+                        "and EGG-derived metrics suppressed")
+            egg = None
         duration = len(signal) / sr
         logger.info("Duration %.1fs  SR=%dHz  Samples=%d", duration, sr, len(signal))
         return voice, egg, sr, duration
@@ -819,13 +828,19 @@ class VoiceMapAnalyzer:
         _cb(1)   # "加载音频"
         voice, egg, sr, duration = self.load_audio(audio_file)
 
-        # 单声道模式：文件没有 EGG 通道。周期检测改用嗓音通道，
-        # 所有依赖 EGG 的指标输出为 0（GUI 会自动隐藏全零 metric）。
+        # Acoustic-only mode: either the file was mono, or the user
+        # explicitly chose acoustic-only on a stereo file (load_audio
+        # discards channel 2 when analysis_mode='acoustic'). Either way,
+        # downstream EGG-derived metrics output 0 and the GUI hides them.
         mono = egg is None
         if mono:
-            logger.warning("单声道文件：无 EGG 通道 — 进入单声道模式。"
-                           "周期检测改用嗓音通道；EGG 类指标"
-                           "(Qcontact/OQ/SPQ/CIQ/EGG聚类/Entropy/HRFegg)将输出为 0")
+            mode = getattr(self.config, 'analysis_mode', 'auto')
+            reason = ("user selected acoustic-only mode"
+                       if mode == 'acoustic'
+                       else "file has no EGG channel")
+            logger.warning("Acoustic-only analysis (%s) — "
+                           "EGG metrics (Qcontact/dEGGmax/Icontact/Entropy/HRFegg/"
+                           "OQ/SPQ/CIQ/EGG-cluster) will be all zero", reason)
 
         _cb(2)   # "预处理 (HPF / 带通滤波)"
         voice_p = self.preprocess_voice(voice)

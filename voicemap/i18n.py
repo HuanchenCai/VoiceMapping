@@ -184,6 +184,15 @@ STRINGS: dict[str, dict[str, str]] = {
         # ── filedialog titles ──
         "fd.pick_audio":        "选择音频文件",
         "fd.pick_folder":       "选择音频文件夹",
+        # 模式选择对话框（音频载入时）
+        "mode.dlg.title":          "选择分析模式",
+        "mode.dlg.stereo_question": "检测到双声道文件。声道 2 是 EGG 通道吗？",
+        "mode.dlg.stereo_yes":      "是 — 完整分析（含 EGG 指标）",
+        "mode.dlg.stereo_no":       "不是 — 仅嗓音分析（跳过 EGG 指标）",
+        "mode.dlg.mono_info":       "单声道文件 — 仅嗓音分析模式。EGG 指标不可用。",
+        "mode.dlg.mono_ok":         "确定",
+        "log.mode_full":            "分析模式：完整（嗓音 + EGG）",
+        "log.mode_acoustic":        "分析模式：仅嗓音（EGG 指标不计算）",
         "fd.pick_outdir":       "选择输出目录",
         "fd.pick_centroid":     "加载 centroid CSV",
         "fd.pick_train_wavs":   "选择多个 .wav 做联合 centroid 训练",
@@ -572,6 +581,15 @@ STRINGS: dict[str, dict[str, str]] = {
         # ── filedialog titles ──
         "fd.pick_audio":        "Pick an audio file",
         "fd.pick_folder":       "Pick an audio folder",
+        # Mode dialog at audio load time
+        "mode.dlg.title":          "Choose analysis mode",
+        "mode.dlg.stereo_question": "Stereo file detected. Is channel 2 an EGG signal?",
+        "mode.dlg.stereo_yes":      "Yes — full analysis (with EGG metrics)",
+        "mode.dlg.stereo_no":       "No — acoustic only (skip EGG metrics)",
+        "mode.dlg.mono_info":       "Mono file — acoustic-only analysis. EGG metrics are not available.",
+        "mode.dlg.mono_ok":         "OK",
+        "log.mode_full":            "Analysis mode: full (voice + EGG)",
+        "log.mode_acoustic":        "Analysis mode: acoustic only (no EGG metrics)",
         "fd.pick_outdir":       "Pick output folder",
         "fd.pick_centroid":     "Load centroid CSV",
         "fd.pick_train_wavs":   "Pick multiple .wav for joint centroid training",
