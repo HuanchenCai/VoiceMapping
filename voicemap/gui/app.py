@@ -1989,6 +1989,42 @@ class VoiceMapApp(_TkBase):
         if path:
             self.output_dir_var.set(path)
 
+    def _ask_analysis_mode(self, path: Path):
+        """Pick analysis mode for this recording.
+
+        Returns 'full' (voice + EGG) or 'acoustic' (voice only).
+
+        Behaviour:
+          - Mono file → 'acoustic' with no dialog (the choice is forced).
+          - Stereo file → ask the user whether channel 2 is an EGG signal.
+            'Yes' → 'full'; 'No' → 'acoustic' (and we'll discard channel 2).
+        """
+        import soundfile as sf
+        from tkinter import messagebox
+        try:
+            info = sf.info(str(path))
+        except Exception:
+            return 'full'
+
+        if info.channels < 2:
+            # Mono: tell the user and continue. Could be hidden behind a
+            # config flag later; for now an informational popup makes the
+            # mode change explicit.
+            messagebox.showinfo(tr("mode.dlg.title"),
+                                  tr("mode.dlg.mono_info"))
+            return 'acoustic'
+
+        # Stereo: ask the user. messagebox.askyesno is the lightest
+        # widget that fits — Yes = full / EGG present, No = acoustic.
+        # The window title carries the question prompt so it's visible
+        # even before the user reads the body.
+        wants_egg = messagebox.askyesno(
+            tr("mode.dlg.title"),
+            tr("mode.dlg.stereo_question") +
+            "\n\nYes — " + tr("mode.dlg.stereo_yes").split(' — ', 1)[-1] +
+            "\nNo — "  + tr("mode.dlg.stereo_no").split(' — ', 1)[-1])
+        return 'full' if wants_egg else 'acoustic'
+
     def _check_audio_channels(self, path: Path):
         """运行前校验音频通道。VoiceMap 约定双声道 WAV：
         声道 1 = 嗓音(mic)，声道 2 = EGG。
@@ -2092,6 +2128,13 @@ class VoiceMapApp(_TkBase):
             self._update_start_btn()
             return
 
+        # Ask the user what mode to use (mono = forced acoustic, stereo
+        # = ask). The dialog also handles the mono info-popup so the
+        # user always sees the mode they're getting.
+        self._analysis_mode = self._ask_analysis_mode(p)
+        self._append_log("META", tr("log.mode_full") if self._analysis_mode == 'full'
+                                  else tr("log.mode_acoustic"))
+
         self.audio_path = p
         # The drop_zone label updates only matter for the empty-state
         # text — in multi-file mode the active row already shows the
@@ -2132,6 +2175,7 @@ class VoiceMapApp(_TkBase):
             clarity_threshold=self._analysis_clarity,
             output_dir=out_dir,
             cycle_log=True,   # per-cycle log feeds the F0-trend tab
+            analysis_mode=getattr(self, '_analysis_mode', 'auto'),
         )
         audio = str(p)
 
