@@ -1086,11 +1086,51 @@ class VibratoCalculator(MetricCalculator):
         band = (freqs >= self.vib_f_min) & (freqs <= self.vib_f_max)
         has_band = band.any(axis=1)
 
+        # Voicing density gate: a window straddling voiced/unvoiced cycles
+        # (MIDI==0 for unvoiced) doesn't see vibrato, it sees the voicing
+        # onset/offset spectrum. Demand ≥ 80 % voiced cycles per window or
+        # the result is meaningless. Without this, recordings with rapid
+        # voicing transitions (Peking opera, expressive singing) lose
+        # ~80 % of cycles to spurious onset-spectrum FFT peaks.
+        voiced_frac = (midi_wins > 0).mean(axis=1)
+        has_band = has_band & (voiced_frac >= 0.8)
+
         # Peak magnitude and freq in band
         mag_in_band = np.where(band, mag, -np.inf)
         peak_bin = mag_in_band.argmax(axis=1)
         peak_mag = mag[np.arange(n_wins), peak_bin]
-        peak_freq = freqs[np.arange(n_wins), peak_bin]
+        peak_freq_int = freqs[np.arange(n_wins), peak_bin]
+
+        # Parabolic interpolation around the peak bin for sub-bin precision.
+        # FFT bin width in this analysis is 1 / window_duration ≈ 3-5 Hz for
+        # W=40 cycles, which is wider than the vibrato 4-8 Hz band. Without
+        # interpolation, argmax quantises rate to the same bin for every
+        # cycle in a sustained note region — producing identical vibrato
+        # values across all SPL rows of that MIDI column on the VRP
+        # heatmap (the 'vertical stripe' artifact).
+        bw = freqs[:, 1] - freqs[:, 0]                       # per-window bin width
+        n_bins = mag.shape[1]
+        prev_bin = np.clip(peak_bin - 1, 0, n_bins - 1)
+        next_bin = np.clip(peak_bin + 1, 0, n_bins - 1)
+        y0 = mag[np.arange(n_wins), prev_bin]
+        y1 = peak_mag
+        y2 = mag[np.arange(n_wins), next_bin]
+        denom = (y0 - 2.0 * y1 + y2)
+        # Standard parabolic vertex formula. Guard against denom=0.
+        with np.errstate(divide='ignore', invalid='ignore'):
+            delta = 0.5 * (y0 - y2) / denom
+        delta = np.where(np.isfinite(delta) & (np.abs(delta) < 1.0), delta, 0.0)
+        # Only refine when we have proper left + right neighbours
+        edge = (peak_bin == 0) | (peak_bin == n_bins - 1)
+        delta = np.where(edge, 0.0, delta)
+        peak_freq = peak_freq_int + delta * bw
+        # Refined peak magnitude (parabolic vertex height)
+        peak_mag = y1 + 0.25 * (y0 - y2) * delta
+        # Clip refined frequency back to the vibrato band — parabolic
+        # interpolation can push the peak slightly outside [vib_f_min,
+        # vib_f_max] when the true peak sits near a band edge, producing
+        # spurious 0.01 Hz / 14 Hz values.
+        peak_freq = np.clip(peak_freq, self.vib_f_min, self.vib_f_max)
 
         # SNR gate — peak must be > min_snr × median of full-spectrum mag.
         # Windows without vibrato (pure tone or random drift) get 0.
