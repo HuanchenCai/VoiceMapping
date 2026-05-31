@@ -303,4 +303,12 @@ Format per entry:
 - Validation: metrics/vibrato.md  (PASS, 8/8; rate now ±0.3 Hz)
 - Tests: vibrato harness 8/8; validate_params.py 48 PASS / 4 WARN / 0 FAIL.
 
+## 2026-05-31  session=validation-bootstrap  commit=pending  [PHASE 2]
+- Touched: scripts/validate_metric.py (+validate_crest), metrics/crest.md (new)
+- Why: Phase 2 (P1) start — Crest factor, the cleanest secondary-acoustic
+  metric (analytic per-shape constant).
+- Phase 2 / Crest (harness 3/3 PASS): (B) synthetic GT — sine 1.4158 (√2),
+  square 1.0000, sawtooth 1.7301 (√3); all <0.2 % from the analytic constant.
+- Validation: metrics/crest.md (PASS, 3/3). No metric code changed.
+
 <!-- next-session-anchor -->
