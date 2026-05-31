@@ -92,4 +92,28 @@ Format per entry:
 - Tests: harness 13/13; pitch parity unittest 9/9 OK; perturbation parity
   21/21 green; validate_params.py 48 PASS / 0 FAIL baseline intact.
 
+## 2026-05-31  session=validation-bootstrap  commit=pending
+- Touched: scripts/validate_metric.py (+validate_hnr, +_cc_trigger_array /
+  +_our_hnr_median / +_praat_hnr_median helpers, +aliases),
+  docs/validation/metrics/hnr.md (new, 8 sections)
+- Why: Phase 1.4 — validate HNR + NHR. Parity was NOT pre-existing (unlike
+  jitter/shimmer/f0); built it here.
+- Method insight: VoiceMap's HNR is Praat-STYLE (autocorr) but independently
+  parameterised (fixed 40 ms window vs Praat's 4.5 periods), so a raw
+  real-audio parity is not the right bar. The rigorous anchor is PHYSICAL:
+  for harmonic+white-noise, p/(1-p) = 10^(SNR/10) ⇒ HNR_dB == SNR_dB exactly.
+- Phase 1.4 results (harness 13/13 PASS):
+  · (B) HNR == imposed SNR over 5/10/15/20/25 dB → recovered to <0.3 dB.
+  · (A) Praat to_harmonicity_cc on the SAME stationary signals agrees to
+    <0.3 dB → ground truth and parity coincide.
+  · committed breathy fixture (SNR=15): HNR 15.12 dB. NHR == 1/H_linear
+    (0.0308) exact. Clean modal saturates at the 40 dB cap.
+- Documented limitations (md §7): ~6 dB divergence from Praat on
+  NON-stationary real voice (test_Voice_EGG 24.4 vs 17.7 dB) — window length
+  + aggregation differences, both valid, frozen; 40 dB ceiling; [60,400] Hz
+  pitch search.
+- Before / After: hnr.md Status UNKNOWN → PASS.
+- Validation: metrics/hnr.md  (PASS, 13/13 checks)
+- Tests: harness 13/13; validate_params.py 48 PASS / 4 WARN / 0 FAIL intact.
+
 <!-- next-session-anchor -->
