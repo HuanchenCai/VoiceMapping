@@ -359,4 +359,20 @@ Format per entry:
   tones coincide (validated); real voice differs from a corrected value.
 - Validation: metrics/h1h2.md (PASS, 3/3). No metric code changed.
 
+## 2026-05-31  session=validation-bootstrap  commit=pending  [PHASE 2]
+- Touched: scripts/validate_metric.py (+validate_cphon), metrics/cphon.md (new)
+- Why: Phase 2 option-1 — cPhon (phonation-type K-means). ML-pipeline metric.
+- Phase 2 / cPhon (harness 3/3 PASS): (A) z-score normalisation byte-identical
+  to sklearn StandardScaler (Δ 0); (B) recovers 5 separable synthetic blobs at
+  Adjusted Rand 1.0; deterministic under fixed random_state=0.
+- §7: labels are arbitrary integers (grouping validated, not a semantic label);
+  empty-cluster rescue perturbs the pure K-means (deliberate, CLAUDE.md §8.7);
+  centroid physical meaning is a frozen research question.
+- Validation: metrics/cphon.md (PASS, 3/3). No metric code changed.
+- ►► Phase 2 option-1 (clean secondary acoustic) DONE: Crest, CSE, SPL,
+  SpecBal, H1-H2/H1-H3, cPhon — 6/6 PASS. Next: EGG family (Qcontact/dEGGmax/
+  Icontact/OQ/SPQ/CIQ/HRFegg) — needs synthetic-EGG infra + the standard-vs-
+  non-standard split (user: standard first, add-if-missing, then Qcontact).
+  Remaining non-EGG: SFE/SPR (need a singer corpus).
+
 <!-- next-session-anchor -->
