@@ -438,4 +438,21 @@ Format per entry:
   Next: Phase 3 (待验证 metrics: ZCR/GNE/MPT/VoicingRatio/DUV/VibratoJitter)
   or Phase 4 (end-to-end + performance).
 
+## 2026-05-31  session=validation-bootstrap  commit=pending  [PHASE 3]
+- Touched: scripts/validate_metric.py (+validate_zcr, +aliases, _ascii += ×½–),
+  metrics/zcr.md (new)
+- Why: Phase 3 (待验证) start — ZCR (per-cycle zero-crossing rate). First of
+  the six experimental metrics; (B) synthetic GT suffices.
+- Phase 3 / ZCR (harness 6/6 PASS): (B) white-noise ZCR → 0.5 (window-
+  independent analytic value — P(opposite signs of two i.i.d. zero-mean
+  samples) = ½); ZCR ×2 per octave (ratio 2.04 / 2.02); pure tone ≪ noise
+  (75×); higher harmonics raise it (pure < +3rd < +5th); silence → 0.
+- §7 finding: the per-cycle ABSOLUTE crossing count is alignment-sensitive —
+  the half-open window [s,e) drops the boundary zero, so a clean tone reads
+  ≈ ½ the conventional full-signal 2·f0/fs. librosa's per-frame ZCR is equally
+  alignment-sensitive (1 crossing/period at 100 Hz, 2 at 200/400 Hz), so it is
+  NOT a stable parity reference. ZCR is a relative HF/noisiness index.
+- Validation: metrics/zcr.md (PASS, 6/6). No metric code changed.
+- Tests: harness 6/6; validate_params.py 48 PASS / 4 WARN / 0 FAIL intact.
+
 <!-- next-session-anchor -->
