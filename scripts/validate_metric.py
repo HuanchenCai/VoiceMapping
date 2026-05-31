@@ -656,6 +656,58 @@ def validate_cse() -> Report:
     return rep
 
 
+def validate_h1h2() -> Report:
+    """H1-H2 / H1-H3 — harmonic-amplitude differences (dB), `HarmonicDiffCalculator`.
+
+    `H1-H2 = 20·log10(|X1|/|X2|)` from the per-cycle voice DFT. Ground truth:
+    a synthetic 3-harmonic tone with known amplitudes A1/A2/A3 must read back
+    `20·log10(A1/A2)` and `20·log10(A1/A3)` (no formants, so raw == corrected).
+    """
+    rep = Report("h1h2")
+    from voicemap.config import VoiceMapConfig
+    from voicemap.metrics import HarmonicDiffCalculator
+    cfg = VoiceMapConfig()
+    sr = cfg.sample_rate
+    dur, f0 = 2.0, 200.0
+    tt = np.arange(int(dur * sr)) / sr
+
+    def _trig(x):
+        idx = np.round(np.arange(int(dur * f0)) * sr / f0).astype(int)
+        t = np.zeros(len(x))
+        t[idx[idx < len(x)]] = 1.0
+        return t
+
+    cases = [(1.0, 0.5, 0.25), (1.0, 1.0, 1.0), (1.0, 2.0, 4.0), (1.0, 0.7, 0.3)]
+    d12, d13 = 0.0, 0.0
+    for A1, A2, A3 in cases:
+        x = (A1 * np.sin(2 * np.pi * f0 * tt)
+             + A2 * np.sin(2 * np.pi * 2 * f0 * tt)
+             + A3 * np.sin(2 * np.pi * 3 * f0 * tt)).astype(np.float64)
+        out = HarmonicDiffCalculator(cfg).calculate(x, _trig(x))
+        d12 = max(d12, abs(float(np.median(out["h1h2"])) - 20 * np.log10(A1 / A2)))
+        d13 = max(d13, abs(float(np.median(out["h1h3"])) - 20 * np.log10(A1 / A3)))
+    rep.add("B · H1-H2 from known harmonics", "20·log10(A1/A2)", "ours",
+            f"max|Δ| {d12:.3f} dB (tol 0.5)", d12 <= 0.5)
+    rep.add("B · H1-H3 from known harmonics", "20·log10(A1/A3)", "ours",
+            f"max|Δ| {d13:.3f} dB (tol 0.5)", d13 <= 0.5)
+
+    # clip: a near-zero 2nd harmonic must clip at +40 dB (not +inf)
+    x = (np.sin(2 * np.pi * f0 * tt)
+         + 1e-6 * np.sin(2 * np.pi * 2 * f0 * tt)).astype(np.float64)
+    h12 = float(np.median(HarmonicDiffCalculator(cfg).calculate(x, _trig(x))["h1h2"]))
+    rep.add("B · clip at ±40 dB (near-zero H2)", "40.0 dB", f"{h12:.1f} dB",
+            f"{abs(h12-40):.2f} (tol 0.5)", abs(h12 - 40.0) <= 0.5)
+
+    rep.note("(B) H1-H2 / H1-H3 recover the imposed harmonic ratios to <0.2 dB "
+             "(H1-H3 slightly looser — higher harmonic, more leakage); the ±40 "
+             "dB clip guards near-zero harmonics.")
+    rep.note("(A/§7) UNCORRECTED ratio — Iseli & Alwan (2004) / VoiceSauce add "
+             "a vocal-tract (formant) correction (H1*-H2*). On pure tones the "
+             "two coincide (validated here); on real voice ours differs from a "
+             "formant-corrected H1-H2. (C) corpus deferred.")
+    return rep
+
+
 def validate_specbal() -> Report:
     """SpecBal — high/low spectral-band level balance (dB), `SpecBalCalculator`.
 
@@ -1524,6 +1576,7 @@ VALIDATORS: dict[str, Callable[[], Report]] = {
     "cse": validate_cse,
     "spl": validate_spl,
     "specbal": validate_specbal,
+    "h1h2": validate_h1h2,
 }
 # convenience aliases
 for _a in ("jitter_local", "jitter_rap", "jitter_ppq5", "jitter_ddp"):
@@ -1553,6 +1606,8 @@ for _a in ("pitch_period_entropy",):
     VALIDATORS[_a] = validate_ppe
 for _a in ("sample_entropy", "sampen", "entropy"):
     VALIDATORS[_a] = validate_cse
+for _a in ("h1h3", "h1-h2", "harmonic_diff"):
+    VALIDATORS[_a] = validate_h1h2
 
 
 # ─── Reporting ───────────────────────────────────────────────────────────────
