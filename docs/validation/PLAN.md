@@ -192,7 +192,7 @@ def validate(metric_name, *, references=['praat'], signals=['all'],
 |---|---|
 | ZCR ✅ | 合成信号验证 — PASS：(B) 白噪声 ZCR→0.5 锚 + ×2/八度缩放 + 谐波单调；§7 记半开窗减半约定；metrics/zcr.md |
 | GNE | 跟 Praat GNE 比；若实现差太多就删 |
-| MPT / VoicingRatio / DUV | corpus 验证（typical MPT > 15s for healthy）|
+| MPT / VoicingRatio / DUV ✅ | PASS：(B) 合成 grid 机器精度恢复（MPT=最长 voiced run×T、VR=voiced/total、DUV=100·(1−VR)）+ (C) 真实录音 VR=1.0/MPT 67s；§7 记非临床 MPT；metrics/integrative.md |
 | VibratoJitter | corpus 验证（流行歌手 vs 美声）|
 | cPhon ✅ | 已在 Phase 2 验证（z-score==StandardScaler + 合成簇 ARI=1.0）；metrics/cphon.md |
 
