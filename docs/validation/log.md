@@ -138,4 +138,23 @@ Format per entry:
 - Validation: metrics/cpp.md  (PASS, 5/5 checks)
 - Tests: harness 5/5; validate_params.py 48 PASS / 4 WARN / 0 FAIL intact.
 
+## 2026-05-31  session=validation-bootstrap  commit=pending
+- Touched: scripts/validate_metric.py (+validate_formants + helpers),
+  docs/validation/metrics/formants.md (new)
+- Why: Phase 1.6 — validate F1/F2/F3. Implementation IS a faithful Praat
+  To Formant (burg) translation, so the bar is Praat parity.
+- Phase 1.6 results (harness 5/5 PASS):
+  · (A) per-cycle F1/F2/F3 vs Praat to_formant_burg on real 10 s: median
+    |Δf/f| = 1.3 / 2.4 / 0.8 %; medians match Praat to ~1 Hz.
+  · (B) synthetic F1 corroboration (Klatt a/e): 740 vs 730, 542 vs 530
+    (<3 %).
+- Finding: synthetic Klatt F2/F3 is NOT a usable GT — at F0=150 Hz the
+  voicing harmonics collide with the formants and shift the order-10 LPC
+  poles (spurious ~768 Hz pole on 'a'); Praat misreads them the same way
+  (a-F3 ≈ 1914 vs 2440). LPC-at-high-F0 property, not a defect. Documented
+  in §7; real-audio parity is the trustworthy evidence.
+- Before / After: formants.md Status UNKNOWN → PASS.
+- Validation: metrics/formants.md  (PASS, 5/5 checks)
+- Tests: harness 5/5; validate_params.py 48 PASS / 4 WARN / 0 FAIL intact.
+
 <!-- next-session-anchor -->
