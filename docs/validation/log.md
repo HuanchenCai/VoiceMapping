@@ -45,4 +45,25 @@ Format per entry:
 - Validation: metrics/jitter.md  (PASS, 10/10 checks)
 - Tests: harness 10/10; unittest 21/21 perturbation + pitch parity green.
 
+## 2026-05-31  session=validation-bootstrap  commit=pending
+- Touched: scripts/validate_metric.py (+validate_shimmer, +aliases),
+  docs/validation/metrics/shimmer.md (new, 8 sections)
+- Why: Phase 1.2 — validate Shimmer (local / local_dB / APQ3 / APQ5 / APQ11
+  / DDA). Parity already existed in tests; this lifts it into the harness +
+  8-section doc and adds synthetic ground truth.
+- Phase 1.2 (shimmer): A parity (amplitude-tier IDENTITY to Praat — count +
+  times atol 1e-9 + values atol 1e-6 — then all five forms atol 1e-6,
+  d≈1e-17) + B synthetic GT (alternating ±d_a amps → shimmer_local recovers
+  imposed 5%→5.0000%, dB matches closed form, modal→0). Harness 12/12 PASS.
+- Finding: end-to-end SOURCE shimmer of the synthetic wav over-reports
+  (5%→8.9%), but ours==Praat byte-for-byte (8.9151%). Root cause is
+  formant-cascade inter-cycle memory (resonator τ≈5 ms ≈ one period at
+  200 Hz), not a code defect — the amplitude-domain mirror of jitter's
+  marker-smoothing limit. Documented in shimmer.md §7; clean GT lives at the
+  formula layer (§5 B).
+- Before / After: shimmer.md Status UNKNOWN → PASS.
+- Validation: metrics/shimmer.md  (PASS, 12/12 checks)
+- Tests: harness 12/12; unittest 21/21 perturbation parity green;
+  validate_params.py 48 PASS / 0 FAIL baseline intact.
+
 <!-- next-session-anchor -->

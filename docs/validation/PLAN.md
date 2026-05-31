@@ -9,7 +9,7 @@
   - 0.3 ✅ CI（`.github/workflows/validate.yml` + `requirements-validation.txt`）
   - 0.4 ✅ 文档框架（`_template.md` / `log.md` / `conventions.md`）
   - 0.5 ⚠ corpus：本地 `audio/` stand-in 就位；真实 Saarbrücken 下载 deferred（仅阻塞 PPE/SFE/MPT 的 (C) 测试）
-- 🔄 **Phase 1 — P0 指标**：1 ✅ Jitter (PASS, A+B)；2–12 待做
+- 🔄 **Phase 1 — P0 指标**：1 ✅ Jitter (PASS, A+B)；2 ✅ Shimmer (PASS, A+B)；3–12 待做
 
 ---
 
@@ -147,7 +147,7 @@ def validate(metric_name, *, references=['praat'], signals=['all'],
 | 序 | 指标 | 参考标准 | 当前状态 | 待做 |
 |---|---|---|---|---|
 | 1 | **Jitter** (local/RAP/PPQ5) | Praat VoiceAnalysis.cpp | ✅ PASS (A parity 1e-9 + B 合成GT) | ✅ docs/metrics/jitter.md 8 节完成 |
-| 2 | **Shimmer** (local/dB/APQ3/5/11) | Praat AmplitudeTier.cpp | ✅ atol=1e-6 parity | 补 docs/metrics/shimmer.md |
+| 2 | **Shimmer** (local/dB/APQ3/5/11) | Praat AmplitudeTier.cpp | ✅ PASS (A parity 1e-6 + amp-tier identity + B 合成GT) | ✅ docs/metrics/shimmer.md 8 节完成 |
 | 3 | **F0 / Clarity** | Praat Sound_to_Pitch (AC) | ✅ 99.5% voicing agreement | 补 docs/metrics/f0_clarity.md + octave-error stress test |
 | 4 | **HNR / NHR** | Praat To Harmonicity (cc) | ⚠ parity 未做 | parity vs `snd.to_harmonicity_cc()`. 容差 |Δ| < 0.5 dB |
 | 5 | **CPP / CPPS** | Hillenbrand 1996; Praat Cepstrum | ⚠ parity 未做 | parity vs Praat。容差 |Δ| < 0.3 dB |
