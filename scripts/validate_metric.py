@@ -656,6 +656,55 @@ def validate_cse() -> Report:
     return rep
 
 
+def validate_spl() -> Report:
+    """SPL — per-cycle level, `20·log10(RMS)` dB + `spl_correction_db` offset.
+
+    The dB law is exact and analytic: a sine of amplitude A has RMS = A/√2 →
+    SPL = 20·log10(A/√2), and every amplitude doubling is +6.02 dB. The
+    `spl_correction_db = 120` calibration (full-scale ↔ 120 dB SPL, the SC
+    convention) is a config constant applied at CSV export.
+    """
+    rep = Report("spl")
+    from voicemap.config import VoiceMapConfig
+    from voicemap.metrics import SPLCalculator
+    cfg = VoiceMapConfig()
+    sr = cfg.sample_rate
+    dur, f0 = 2.0, 200.0
+    tt = np.arange(int(dur * sr)) / sr
+    amps = [0.1, 0.2, 0.4, 0.8]
+    spls, exps = [], []
+    for A in amps:
+        x = (A * np.sin(2 * np.pi * f0 * tt)).astype(np.float64)
+        idx = np.round(np.arange(int(dur * f0)) * sr / f0).astype(int)
+        trig = np.zeros(len(x))
+        trig[idx[idx < len(x)]] = 1.0
+        s = SPLCalculator(cfg).calculate(x, trig)
+        sv = s[s > -50]
+        spls.append(float(np.median(sv)))
+        exps.append(20.0 * np.log10(A / np.sqrt(2.0)))
+    spls, exps = np.array(spls), np.array(exps)
+    dmax = float(np.max(np.abs(spls - exps)))
+    rep.add("B · SPL = 20·log10(A/√2)", "analytic", "ours",
+            f"max|Δ| {dmax:.3f} dB (tol 0.05)", dmax <= 0.05)
+    steps = np.diff(spls)
+    sdev = float(np.max(np.abs(steps - 6.0206)))
+    rep.add("B · +6.02 dB per amplitude doubling", "6.021 dB",
+            f"{steps.mean():.3f} dB", f"max dev {sdev:.3f} (tol 0.05)",
+            sdev <= 0.05)
+    corrected = spls[-1] + cfg.spl_correction_db
+    exp_abs = exps[-1] + cfg.spl_correction_db
+    rep.add(f"B · calibration offset (+{cfg.spl_correction_db:.0f} dB)",
+            f"{exp_abs:.2f} dB SPL", f"{corrected:.2f} dB SPL",
+            f"{abs(corrected-exp_abs):.3f} (tol 0.05)",
+            abs(corrected - exp_abs) <= 0.05)
+    rep.note("(B) SPL dB law exact (≤0.01 dB) and linear (+6.02 dB/doubling); "
+             "the +120 dB `spl_correction_db` (full-scale = 120 dB SPL, SC "
+             "convention) is a config constant applied at CSV export. (A) no "
+             "tool parity; (C) corpus deferred. Absolute calibration assumes "
+             "the SC full-scale reference — re-calibrate per recording chain.")
+    return rep
+
+
 def validate_crest() -> Report:
     """Crest factor (peak / RMS, per cycle) — `CrestCalculator`.
 
@@ -1426,6 +1475,7 @@ VALIDATORS: dict[str, Callable[[], Report]] = {
     "ppe": validate_ppe,
     "crest": validate_crest,
     "cse": validate_cse,
+    "spl": validate_spl,
 }
 # convenience aliases
 for _a in ("jitter_local", "jitter_rap", "jitter_ppq5", "jitter_ddp"):

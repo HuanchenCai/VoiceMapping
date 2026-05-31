@@ -328,4 +328,14 @@ Format per entry:
   (SC predecessor), no external reference.
 - Validation: metrics/cse.md (PASS, 5/5). No metric code changed.
 
+## 2026-05-31  session=validation-bootstrap  commit=pending  [PHASE 2]
+- Touched: scripts/validate_metric.py (+validate_spl), metrics/spl.md (new)
+- Why: Phase 2 option-1 (clean secondary acoustic) — SPL.
+- Phase 2 / SPL (harness 3/3 PASS): (B) per-cycle SPL = 20·log10(A/√2) to
+  ≤0.01 dB over a 4-level sine sweep; +6.021 dB per amplitude doubling
+  (exact); calibration offset (raw + spl_correction_db=120) → absolute dB SPL.
+- §7: absolute SPL is calibration-dependent (the +120 assumes SC full-scale =
+  120 dB SPL); only the relative level + dB law are intrinsically validated.
+- Validation: metrics/spl.md (PASS, 3/3). No metric code changed.
+
 <!-- next-session-anchor -->
