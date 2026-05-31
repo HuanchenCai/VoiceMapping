@@ -420,4 +420,22 @@ Format per entry:
   (signature) + HRFegg. Remaining Phase 2: SFE / SPR (band-energy ratios —
   doable via synthetic GT, no singer corpus strictly needed for (B)).
 
+## 2026-05-31  session=validation-bootstrap  commit=pending  [PHASE 2]
+- Touched: scripts/validate_metric.py (+validate_singer), metrics/
+  singer_formant.md (new)
+- Why: Phase 2 — SFE + SPR (singer's-formant band measures), the last P1.
+- Phase 2 / SFE+SPR (harness 5/5 PASS): (B) SFE rises monotonically with
+  singer-band (2.8–3.4 kHz) energy (−52 dB none → ≈0 dB dominant); SPR linear
+  in the hi/lo band ratio (slope 0.9996, r 1.0000). 0.97 pre-emphasis offset
+  documented.
+- §7: the singer-vs-speech corpus discrimination is the (C) test, deferred
+  (needs a singer corpus; VOICED/SVD have no classical singing).
+- Validation: metrics/singer_formant.md (PASS, 5/5). No metric code changed.
+- ►►►► PHASE 2 COMPLETE. All P1 metrics validated (A or B as applicable):
+  Crest, CSE, SPL, SpecBal, H1-H2/H1-H3, cPhon, OQ/SPQ/CIQ, Qcontact/dEGGmax/
+  Icontact, HRFegg, SFE/SPR. Deferred (C) corpus items: EGG quotient typical
+  ranges + SFE/SPR singer discrimination (need EGG / singer corpora).
+  Next: Phase 3 (待验证 metrics: ZCR/GNE/MPT/VoicingRatio/DUV/VibratoJitter)
+  or Phase 4 (end-to-end + performance).
+
 <!-- next-session-anchor -->
