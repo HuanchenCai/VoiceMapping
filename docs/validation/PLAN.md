@@ -10,7 +10,7 @@
   - 0.4 ✅ 文档框架（`_template.md` / `log.md` / `conventions.md`）
   - 0.5 ⚠ corpus：本地 `audio/` stand-in 就位；真实 Saarbrücken 下载 deferred（仅阻塞 PPE/SFE/MPT 的 (C) 测试）
 - ✅ **Phase 1 — P0 指标 (12/12 PASS, 完成)**：1 ✅ Jitter；2 ✅ Shimmer；3 ✅ F0/Clarity；4 ✅ HNR/NHR；5 ✅ CPP/CPPS；6 ✅ Formants；7 ✅ B1/B2/B3；8 ✅ Spectral moments；9 ✅ Alpha/Hammarberg；10 ✅ Vibrato (rate+extent,已修)；11 ✅ PPE (VOICED 语料 AUC 0.73)；12 ✅ MFCC。**全部 P0 完成,A/B/C 按适用性各就位**
-- 🔄 **Phase 2 — P1 EGG + 次要 acoustic (进行中)**：P1 验收 = A 或 B 至少一项。EGG 有真实 test_Voice_EGG/Jiang + 合成 EGG 可做 (B)。
+- ✅ **Phase 2 — P1 EGG + 次要 acoustic (完成)**：Crest / CSE / SPL / SpecBal / H1-H2,H1-H3 / cPhon / OQ,SPQ,CIQ / Qcontact,dEGGmax,Icontact / HRFegg / SFE,SPR —— 全部 PASS（A 或 B 各就位）。EGG 全族已验；SFE/SPR/EGG 的 (C) 语料判别待 SVD/歌手语料。
 
 ---
 
@@ -179,8 +179,8 @@ def validate(metric_name, *, references=['praat'], signals=['all'],
 | **SpecBal** ✅ | SC `PV_SpecCentroid` 等 | ✅ PASS — 合成双音 SpecBal 线性于 band ratio (slope 1.00, r 1.00)；docs/metrics/specbal.md |
 | **Crest** ✅ | (peak / RMS) 标准定义 | ✅ PASS — 合成 sine=√2 / square=1 / sawtooth=√3 (<0.2%)；docs/metrics/crest.md |
 | **H1-H2 / H1-H3** ✅ | Iseli & Alwan 2004 | ✅ PASS — 合成 3 谐波 20log10(A1/A2) <0.2dB + ±40 截断；§7 记未做声道校正；docs/metrics/h1h2.md |
-| **Singer's Formant (SFE)** | Sundberg 1974 | corpus（古典歌手 vs 普通说话）|
-| **SPR** | Omori 1996 | corpus 验证范围 |
+| **Singer's Formant (SFE)** ✅ | Sundberg 1974 | ✅ PASS — 合成 GT：SFE 单调于歌手带能量；docs/metrics/singer_formant.md。(C) 歌手语料 deferred |
+| **SPR** ✅ | Omori 1996 | ✅ PASS — 合成 GT：SPR 线性于 band ratio (slope 1.0)；同上 doc。(C) 语料 deferred |
 
 ---
 

@@ -903,6 +903,73 @@ def _synth_egg(fs, f0, dur, cq, ramp=0.15):
     return egg, trig
 
 
+def validate_singer() -> Report:
+    """SFE (Singer's Formant Energy) + SPR (Singing Power Ratio).
+
+    Band-energy measures of the 2.8–3.4 kHz "singer's formant". Validated by
+    synthetic tones rather than a singer corpus (which would be the (C) test):
+      SFE = 10·log10(E[2.8–3.4 kHz] / E_total) — rises with in-band energy.
+      SPR = 10·log10(E[2–4 kHz] / E[0–2 kHz]) — linear in the band ratio.
+    Both apply a 0.97 pre-emphasis, so absolute values carry a fixed offset;
+    the validated properties are monotonicity (SFE) and slope-1 linearity (SPR).
+    """
+    rep = Report("singer_formant")
+    from voicemap.config import VoiceMapConfig
+    from voicemap.metrics import FormantCalculator, FormantExtrasCalculator
+    cfg = VoiceMapConfig()
+    sr = cfg.sample_rate
+    dur, f0 = 2.0, 150.0
+    tt = np.arange(int(dur * sr)) / sr
+
+    def _trig(x):
+        idx = np.round(np.arange(int(dur * f0)) * sr / f0).astype(int)
+        t = np.zeros(len(x))
+        t[idx[idx < len(x)]] = 1.0
+        return t
+
+    # ── SFE: sweep singer-band tone amplitude vs a fixed out-of-band tone ────
+    sfe_vals = []
+    for a_in in (0.0, 0.5, 1.0, 2.0):
+        x = (np.sin(2 * np.pi * 500 * tt)
+             + a_in * np.sin(2 * np.pi * 3000 * tt)).astype(np.float64)
+        sfe_vals.append(float(np.median(
+            FormantCalculator(cfg).calculate(x, _trig(x))["sfe"])))
+    sfe_vals = np.array(sfe_vals)
+    rep.add("B · SFE rises with singer-band energy (monotone)",
+            "increasing", f"{sfe_vals[0]:.0f}→{sfe_vals[-1]:.0f} dB",
+            "strictly increasing", bool(np.all(np.diff(sfe_vals) > 0)))
+    rep.add("B · SFE ≈ 0 when band dominates", "> −3 dB",
+            f"{sfe_vals[-1]:.2f} dB", f"{sfe_vals[-1]:.2f}", sfe_vals[-1] > -3.0)
+    rep.add("B · SFE ≪ 0 with no singer-band energy", "< −40 dB",
+            f"{sfe_vals[0]:.1f} dB", f"{sfe_vals[0]:.1f}", sfe_vals[0] < -40.0)
+
+    # ── SPR: linear in the hi/lo band amplitude ratio ────────────────────────
+    ratios = [0.25, 0.5, 1.0, 2.0, 4.0]
+    spr_ours, spr_true = [], []
+    for r in ratios:
+        x = (np.sin(2 * np.pi * 1000 * tt)
+             + r * np.sin(2 * np.pi * 3000 * tt)).astype(np.float64)
+        spr_ours.append(float(np.median(
+            FormantExtrasCalculator(cfg).calculate(x, _trig(x))["spr"])))
+        spr_true.append(20 * np.log10(r))
+    spr_ours, spr_true = np.array(spr_ours), np.array(spr_true)
+    slope = float(np.polyfit(spr_true, spr_ours, 1)[0])
+    corr = float(np.corrcoef(spr_ours, spr_true)[0, 1])
+    rep.add("B · SPR linear in band ratio (slope)", "1.00", f"{slope:.4f}",
+            f"{abs(slope-1)*100:.1f}% (0.95–1.05)", 0.95 <= slope <= 1.05)
+    rep.add("B · SPR corr with 20·log10(A_hi/A_lo)", "r >= 0.99",
+            f"r={corr:.4f}", f"{corr:.4f} (min 0.99)", corr >= 0.99)
+
+    rep.note("(B) SFE rises monotonically with singer-band (2.8–3.4 kHz) energy "
+             "(≪0 with none, ≈0 when it dominates); SPR is linear in the hi/lo "
+             "band ratio (slope ~1, r ~1). A 0.97 pre-emphasis adds a fixed "
+             "offset to both absolute values.")
+    rep.note("(C) The classical-singer-vs-speech discrimination (the PLAN's "
+             "corpus test) needs a singer corpus — deferred; the synthetic "
+             "band-energy GT satisfies the P1 (A-or-B) bar.")
+    return rep
+
+
 def validate_hrf() -> Report:
     """HRFegg — EGG Harmonic Richness Factor (dB), `HRFCalculator`.
 
@@ -1823,6 +1890,7 @@ VALIDATORS: dict[str, Callable[[], Report]] = {
     "oq": validate_oq,
     "qcontact": validate_qcontact,
     "hrf": validate_hrf,
+    "singer_formant": validate_singer,
 }
 # convenience aliases
 for _a in ("jitter_local", "jitter_rap", "jitter_ppq5", "jitter_ddp"):
@@ -1862,6 +1930,8 @@ for _a in ("deggmax", "icontact", "qci"):
     VALIDATORS[_a] = validate_qcontact
 for _a in ("hrfegg", "harmonic_richness"):
     VALIDATORS[_a] = validate_hrf
+for _a in ("sfe", "spr", "singer", "singers_formant"):
+    VALIDATORS[_a] = validate_singer
 
 
 # ─── Reporting ───────────────────────────────────────────────────────────────
