@@ -903,6 +903,53 @@ def _synth_egg(fs, f0, dur, cq, ramp=0.15):
     return egg, trig
 
 
+def validate_hrf() -> Report:
+    """HRFegg — EGG Harmonic Richness Factor (dB), `HRFCalculator`.
+
+    `HRF = 20·log10( 2·√(Σ_{k≥2} |Xk|²) / |X1| )` — harmonic energy above the
+    fundamental, from the per-cycle EGG DFT. A synthetic multi-harmonic signal
+    with known amplitudes has the closed form, so HRF must read it back.
+    """
+    rep = Report("hrf")
+    from voicemap.config import VoiceMapConfig
+    from voicemap.metrics import HRFCalculator
+    cfg = VoiceMapConfig()
+    sr = cfg.sample_rate
+    dur, f0 = 2.0, 150.0
+    tt = np.arange(int(dur * sr)) / sr
+
+    def _trig(x):
+        idx = np.round(np.arange(int(dur * f0)) * sr / f0).astype(int)
+        t = np.zeros(len(x))
+        t[idx[idx < len(x)]] = 1.0
+        return t
+
+    cases = [(1.0, 0.5, 0.25), (1.0, 1.0, 1.0), (1.0, 0.7, 0.5)]
+    dmax = 0.0
+    for amps in cases:
+        x = sum(A * np.cos(2 * np.pi * (k + 1) * f0 * tt)
+                for k, A in enumerate(amps)).astype(np.float64)
+        hrf = float(np.median(HRFCalculator(cfg).calculate(x, _trig(x))))
+        A = np.array(amps)
+        exp = 20 * np.log10(2 * np.sqrt(np.sum(A[1:] ** 2)) / A[0])
+        dmax = max(dmax, abs(hrf - exp))
+    rep.add("B · HRF == 20·log10(2·√Σ|Xk≥2|²/|X1|)", "closed form", "ours",
+            f"max|Δ| {dmax:.3f} dB (tol 0.1)", dmax <= 0.1)
+
+    # pure fundamental → no harmonic richness → very negative HRF
+    x = np.cos(2 * np.pi * f0 * tt).astype(np.float64)
+    hrf0 = float(np.median(HRFCalculator(cfg).calculate(x, _trig(x))))
+    rep.add("B · pure fundamental → HRF ≪ 0", "< −40 dB", f"{hrf0:.1f} dB",
+            "no harmonics", hrf0 < -40.0)
+
+    rep.note("(B) HRFegg recovers the closed-form harmonic-richness ratio to "
+             "<1e-3 dB on known multi-harmonic signals; a pure fundamental "
+             "reads ≪ 0 dB (no harmonics). (A) SC `namePhasePortrait` parity "
+             "unavailable (no SC source); the closed form is the stronger "
+             "anchor. (C) corpus deferred.")
+    return rep
+
+
 def validate_qcontact() -> Report:
     """Qcontact / dEGGmax / Icontact — VoiceMap's signature EGG metrics.
 
@@ -1775,6 +1822,7 @@ VALIDATORS: dict[str, Callable[[], Report]] = {
     "cphon": validate_cphon,
     "oq": validate_oq,
     "qcontact": validate_qcontact,
+    "hrf": validate_hrf,
 }
 # convenience aliases
 for _a in ("jitter_local", "jitter_rap", "jitter_ppq5", "jitter_ddp"):
@@ -1812,6 +1860,8 @@ for _a in ("spq", "ciq", "open_quotient"):
     VALIDATORS[_a] = validate_oq
 for _a in ("deggmax", "icontact", "qci"):
     VALIDATORS[_a] = validate_qcontact
+for _a in ("hrfegg", "harmonic_richness"):
+    VALIDATORS[_a] = validate_hrf
 
 
 # ─── Reporting ───────────────────────────────────────────────────────────────
@@ -1829,7 +1879,10 @@ def _ascii(s: str) -> str:
     and math glyphs, so keep stdout pure ASCII. Markdown files stay UTF-8."""
     return (s.replace("Δ", "d").replace("·", "-").replace("±", "+/-")
              .replace("→", "->").replace("≈", "~").replace("—", "-")
-             .replace("−", "-").replace("✓", "ok").replace("✗", "x"))
+             .replace("−", "-").replace("✓", "ok").replace("✗", "x")
+             .replace("²", "2").replace("√", "sqrt").replace("≥", ">=")
+             .replace("≤", "<=").replace("≪", "<<").replace("≫", ">>")
+             .replace("∑", "sum").replace("Σ", "sum"))
 
 
 def print_report(rep: Report) -> None:

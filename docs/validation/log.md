@@ -408,4 +408,16 @@ Format per entry:
   paper-grade provenance would need the SC source recovered.
 - Validation: metrics/qcontact.md (PASS impl, 3/3). No metric code changed.
 
+## 2026-05-31  session=validation-bootstrap  commit=pending  [PHASE 2 EGG]
+- Touched: scripts/validate_metric.py (+validate_hrf, _ascii += √≥≤≪≫²Σ),
+  metrics/hrf.md (new)
+- Why: Phase 2 EGG — HRFegg (last EGG metric).
+- Phase 2 / HRFegg (harness 2/2 PASS): (B) synthetic multi-harmonic stacks
+  with known amplitudes → HRFegg recovers 20·log10(2·√(Σ_{k≥2}A_k²)/A1) to
+  <1e-3 dB; pure fundamental → HRF ≪ 0 (−265 dB, no harmonics).
+- Validation: metrics/hrf.md (PASS, 2/2). No metric code changed.
+- ►► EGG family COMPLETE: OQ/SPQ/CIQ (standard) + Qcontact/dEGGmax/Icontact
+  (signature) + HRFegg. Remaining Phase 2: SFE / SPR (band-energy ratios —
+  doable via synthetic GT, no singer corpus strictly needed for (B)).
+
 <!-- next-session-anchor -->

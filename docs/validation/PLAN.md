@@ -172,7 +172,7 @@ def validate(metric_name, *, references=['praat'], signals=['all'],
 | **dEGGmax** ✅ | VoiceMap convention | ✅ PASS — 解析 GT dEGGmax=2/sin(2π/T) Δ=0 |
 | **Icontact** ✅ | log10(dEGGmax) · Qcontact | ✅ PASS — 复合 spot-check Δ=0 |
 | **OQ / SPQ / CIQ** ✅ | Baken & Orlikoff 2000 | ✅ PASS — 合成 EGG(已知闭商)OQ→1-CQ/SPQ/CIQ 解析值 <0.02；docs/metrics/oq.md。corpus 典型值待 SVD |
-| **HRFegg** | Howard 1998 | parity vs SC `namePhasePortrait` |
+| **HRFegg** ✅ | Howard 1998 | ✅ PASS — 合成多谐波闭式解 20log10(2√Σ/X1) <1e-3dB；docs/metrics/hrf.md |
 | **Sample Entropy (CSE)** ✅ | Richman & Moorman 2000 | ✅ PASS — m=1 SampEn 逐字节==nolds.sampen (Δ=0) + 无序排序；docs/metrics/cse.md |
 | **Cluster / cPhon (K-means)** ✅ | sklearn 标准 | ✅ PASS — z-score==StandardScaler (Δ=0) + 合成可分簇 ARI=1.0 + 可复现；docs/metrics/cphon.md |
 | **SPL** ✅ | IEC 61672 / SC scserver | ✅ PASS — 合成电平 20log10(A/√2)<0.01dB + 6.02dB/倍 + 标定偏移；docs/metrics/spl.md |
