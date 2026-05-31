@@ -1,0 +1,9 @@
+{
+  "corpus": "local-standin",
+  "note": "Plumbing-only stand-in for Saarbruecken (see saarbruecken.md). All recordings are essentially healthy voice; NOT usable for class-separation (AUC) tests, only value-range / adapter smoke tests.",
+  "sample_rate": null,
+  "recordings": [
+    {"path": "../../../audio/test_Voice_EGG.wav",  "label": "healthy", "egg": true},
+    {"path": "../../../audio/Jiang_Voice_EGG.wav", "label": "healthy", "egg": true}
+  ]
+}
