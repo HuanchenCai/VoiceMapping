@@ -327,9 +327,179 @@ def validate_shimmer() -> Report:
     return rep
 
 
+def _hz_from_midi(m: float) -> float:
+    return 440.0 * 2.0 ** ((m - 69.0) / 12.0)
+
+
+def _nsdf_f0_clarity(fname: str, cfg) -> tuple:
+    """Run the shipped Tartini-NSDF ClarityCalculator on a synthetic wav.
+
+    Returns (median_in_range_F0_Hz, median_clarity, frac_voiced, n_cycles).
+    Cycle triggers come from Praat's cc PointProcess (a stand-in for the
+    EGG/voice trigger the analyzer would supply); the per-window NSDF pitch
+    — the quantity under test — is independent of them.
+    """
+    import numpy as _np
+    import soundfile as sf
+    import parselmouth
+    from parselmouth.praat import call
+    from voicemap.metrics import ClarityCalculator
+
+    sig, fsr = sf.read(os.path.join(TS_DIR, fname))
+    v = (sig[:, 0] if sig.ndim == 2 else sig).astype(np.float64)
+    sd = parselmouth.Sound(_np.ascontiguousarray(v), sampling_frequency=float(fsr))
+    try:
+        pit = sd.to_pitch_cc(time_step=None, pitch_floor=50.0, pitch_ceiling=900.0)
+        po = call([sd, pit], "To PointProcess (cc)")
+        nn = int(call(po, "Get number of points"))
+        mk = np.array([call(po, "Get time from index", i + 1) for i in range(nn)])
+    except Exception:
+        mk = np.zeros(0)
+    trig = np.zeros(len(v))
+    if len(mk):
+        trig[np.clip((mk * fsr).astype(int), 0, len(v) - 1)] = 1.0
+    cmidi, cclar = ClarityCalculator(cfg).calculate(v, trig)
+    if len(cmidi) == 0:
+        return float("nan"), float("nan"), 0.0, 0
+    voiced = cmidi > 20.1
+    med_f0 = (_hz_from_midi(float(np.median(cmidi[voiced])))
+              if voiced.any() else float("nan"))
+    return med_f0, float(np.median(cclar)), float(voiced.mean()), len(cmidi)
+
+
+def validate_f0_clarity() -> Report:
+    """F0 (pitch) + Clarity. Two distinct subsystems, two references:
+
+      Part 1 — the cycle-marker F0 (`praat_pitch.py`, a native Praat
+      Sound_to_Pitch AC reimplementation) that drives jitter/shimmer cycle
+      marking. Validated by (A) parity vs Praat AC: voicing agreement, F0
+      error, and cycle-mark count + timing.
+
+      Part 2 — the VRP **Clarity** + **MIDI/F0_Hz** that ship in the map,
+      produced by the Tartini-style NSDF (`ClarityCalculator`, McLeod &
+      Wyvill 2005 / SC `Tartini.cpp`) — NOT Praat. Validated by (B)
+      synthetic ground truth (octave-error stress) within the designed
+      singing range; out-of-range corners are documented in md §7.
+    """
+    rep = Report("f0_clarity")
+    try:
+        import soundfile as sf
+        import parselmouth
+        from parselmouth.praat import call
+    except ImportError as e:
+        rep.skipped = True
+        rep.skip_reason = f"missing dependency: {e.name}"
+        return rep
+    import voicemap.praat_pitch as ppt
+    import voicemap.praat_perturbation as pert
+
+    # ── Part 1 (A): cycle-marker F0 vs Praat AC on real audio ────────────────
+    audio = os.path.join(AUDIO_DIR, "test_Voice_EGG.wav")
+    if os.path.exists(audio):
+        sig, sr = sf.read(audio)
+        voice = (sig[:, 0] if sig.ndim == 2 else sig)[: int(10 * sr)]
+        voice = np.ascontiguousarray(voice.astype(np.float64))
+        snd = parselmouth.Sound(voice, sampling_frequency=float(sr))
+        praat_ac = snd.to_pitch_ac(time_step=None,
+                                   pitch_floor=75.0, pitch_ceiling=600.0)
+        ours = ppt.sound_to_pitch(voice, float(sr),
+                                  pitch_floor=75.0, pitch_ceiling=600.0)
+        tp = np.linspace(0.1, 9.9, 400)
+        oF = np.array([ours.get_value_at_time(t) for t in tp])
+        pF = np.array([praat_ac.get_value_at_time(t) for t in tp])
+        ov = np.isfinite(oF) & (oF > 0)
+        pv = np.isfinite(pF) & (pF > 0)
+        agree = float((ov == pv).mean())
+        both = ov & pv
+        rel = np.abs(oF[both] - pF[both]) / pF[both]
+        med = float(np.median(rel) * 100.0)
+        p90 = float(np.percentile(rel, 90) * 100.0)
+        rep.add("A · voicing agreement vs Praat AC (real 10 s)", "100%",
+                f"{agree*100:.2f}%", f"{(1-agree)*100:.2f}% (max 5%)",
+                agree >= 0.95)
+        rep.add("A · F0 median error vs Praat AC", "0%", f"{med:.4f}%",
+                f"{med:.4f}% (max 0.5%)", med <= 0.5)
+        rep.add("A · F0 P90 error vs Praat AC", "0%", f"{p90:.4f}%",
+                f"{p90:.4f}% (max 5%)", p90 <= 5.0)
+
+        # cycle-mark count + timing vs Praat PointProcess (cc)
+        pitch_cc = snd.to_pitch_cc(time_step=None,
+                                   pitch_floor=75.0, pitch_ceiling=600.0)
+        po = call([snd, pitch_cc], "To PointProcess (cc)")
+        npts = int(call(po, "Get number of points"))
+        pmarks = np.array([call(po, "Get time from index", i + 1)
+                           for i in range(npts)], dtype=np.float64)
+        pc = ppt.sound_to_pitch(voice, float(sr),
+                                pitch_floor=75.0, pitch_ceiling=600.0)
+        omarks = pert.sound_pitch_to_pointprocess_cc(voice, float(sr), pc)
+        ratio = len(omarks) / max(len(pmarks), 1)
+        ins = np.searchsorted(pmarks, omarks)
+        lo = np.clip(ins - 1, 0, len(pmarks) - 1)
+        hi = np.clip(ins, 0, len(pmarks) - 1)
+        nd = np.minimum(np.abs(omarks - pmarks[lo]), np.abs(omarks - pmarks[hi]))
+        off_med = float(np.median(nd) * 1000.0)
+        off_p90 = float(np.percentile(nd, 90) * 1000.0)
+        rep.add("A · cycle-mark count ratio vs Praat PP", "1.00",
+                f"{ratio:.4f}", f"{abs(ratio-1)*100:.2f}% (max 5%)",
+                0.95 <= ratio <= 1.05)
+        rep.add("A · cycle-mark offset median (ms)", "0", f"{off_med:.4f}",
+                f"{off_med:.4f} ms (max 0.5)", off_med <= 0.5)
+        rep.add("A · cycle-mark offset P90 (ms)", "0", f"{off_p90:.4f}",
+                f"{off_p90:.4f} ms (max 2.0)", off_p90 <= 2.0)
+        rep.note("(A) Part 1 — cycle-marker F0 = native Praat Sound_to_Pitch "
+                 "(AC); parity is the rigorous bar that jitter/shimmer rely on.")
+    else:
+        rep.note(f"(A) skipped — fixture not found: {audio}")
+
+    # ── Part 2 (B): Tartini-NSDF VRP F0/Clarity, octave stress in range ──────
+    _ensure_signals()
+    from voicemap.config import VoiceMapConfig
+    cfg = VoiceMapConfig()
+    in_range = [("vowel_modal_200Hz_5s.wav",        200.0),
+                ("vowel_high_pitch_800Hz.wav",       800.0),
+                ("vowel_breathy_200Hz_SNR15dB.wav",  200.0),
+                ("vowel_vibrato_6Hz_100cent.wav",    200.0)]
+    modal_clar = None
+    breathy_clar = None
+    for fname, true_f0 in in_range:
+        f0, clar, frac, _n = _nsdf_f0_clarity(fname, cfg)
+        cents = 1200.0 * np.log2(f0 / true_f0) if np.isfinite(f0) else 9999.0
+        rep.add(f"B · NSDF F0 {fname}", f"{true_f0:.0f} Hz",
+                f"{f0:.1f} Hz", f"{cents:+.0f} cents (max +/-50)",
+                abs(cents) <= 50.0)
+        if fname.startswith("vowel_modal"):
+            modal_clar = clar
+        if fname.startswith("vowel_breathy"):
+            breathy_clar = clar
+    if modal_clar is not None:
+        rep.add("B · NSDF clarity modal (clean)", ">= 0.95",
+                f"{modal_clar:.3f}", f"{modal_clar:.3f} (min 0.95)",
+                modal_clar >= 0.95)
+    if breathy_clar is not None:
+        rep.add("B · NSDF clarity breathy < clean", f"< {modal_clar:.3f}",
+                f"{breathy_clar:.3f}",
+                "noise lowers clarity", breathy_clar < (modal_clar or 1.0))
+
+    # silence → no voiced cycles (boundary handling)
+    f0s, clars, fracs, ns = _nsdf_f0_clarity("silent_5s.wav", cfg)
+    rep.add("B · NSDF silent -> no voiced cycles", "0 voiced", f"{ns} cycles",
+            "must be empty/unvoiced", ns == 0)
+
+    rep.note("(B) Part 2 — VRP Clarity/MIDI = Tartini NSDF (McLeod & Wyvill "
+             "2005 / SC Tartini.cpp). In the designed singing range it recovers "
+             "F0 to within a quarter-tone (no octave errors) with clarity ~1.")
+    rep.note("(C)+limits: F0 < ~78 Hz (MIDI 39) is forced up an octave by the "
+             "NSDF low-pitch fallback (70 Hz reads ~1002 Hz) — below the "
+             "designed VRP range; and a pure chirp false-locks (clarity is not "
+             "a voicing gate). Both documented in md §7. Corpus distribution "
+             "deferred to the corpus phase.")
+    return rep
+
+
 VALIDATORS: dict[str, Callable[[], Report]] = {
     "jitter": validate_jitter,
     "shimmer": validate_shimmer,
+    "f0_clarity": validate_f0_clarity,
 }
 # convenience aliases
 for _a in ("jitter_local", "jitter_rap", "jitter_ppq5", "jitter_ddp"):
@@ -337,6 +507,8 @@ for _a in ("jitter_local", "jitter_rap", "jitter_ppq5", "jitter_ddp"):
 for _a in ("shimmer_local", "shimmer_local_dB", "shimmer_apq3",
            "shimmer_apq5", "shimmer_apq11", "shimmer_dda"):
     VALIDATORS[_a] = validate_shimmer
+for _a in ("f0", "f0_hz", "clarity", "midi", "pitch"):
+    VALIDATORS[_a] = validate_f0_clarity
 
 
 # ─── Reporting ───────────────────────────────────────────────────────────────
