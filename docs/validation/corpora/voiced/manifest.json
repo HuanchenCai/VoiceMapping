@@ -1,0 +1,562 @@
+{
+  "corpus": "voiced",
+  "source": "https://physionet.org/files/voiced/1.0.0/",
+  "license": "ODC-BY 1.0 (PhysioNet)",
+  "sample_rate": 8000,
+  "n_healthy": 42,
+  "n_pathological": 50,
+  "recordings": [
+    {
+      "path": "healthy/voice002.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice002"
+    },
+    {
+      "path": "pathological/voice004.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice004"
+    },
+    {
+      "path": "pathological/voice010.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice010"
+    },
+    {
+      "path": "pathological/voice011.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice011"
+    },
+    {
+      "path": "pathological/voice012.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice012"
+    },
+    {
+      "path": "pathological/voice013.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice013"
+    },
+    {
+      "path": "pathological/voice014.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice014"
+    },
+    {
+      "path": "pathological/voice015.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice015"
+    },
+    {
+      "path": "pathological/voice016.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice016"
+    },
+    {
+      "path": "pathological/voice017.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice017"
+    },
+    {
+      "path": "pathological/voice018.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice018"
+    },
+    {
+      "path": "healthy/voice019.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice019"
+    },
+    {
+      "path": "pathological/voice020.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice020"
+    },
+    {
+      "path": "pathological/voice021.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice021"
+    },
+    {
+      "path": "pathological/voice022.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice022"
+    },
+    {
+      "path": "pathological/voice023.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice023"
+    },
+    {
+      "path": "healthy/voice024.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice024"
+    },
+    {
+      "path": "healthy/voice025.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice025"
+    },
+    {
+      "path": "pathological/voice027.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice027"
+    },
+    {
+      "path": "pathological/voice031.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice031"
+    },
+    {
+      "path": "healthy/voice032.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice032"
+    },
+    {
+      "path": "healthy/voice034.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice034"
+    },
+    {
+      "path": "pathological/voice035.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice035"
+    },
+    {
+      "path": "pathological/voice036.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice036"
+    },
+    {
+      "path": "pathological/voice037.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice037"
+    },
+    {
+      "path": "pathological/voice038.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice038"
+    },
+    {
+      "path": "pathological/voice039.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice039"
+    },
+    {
+      "path": "pathological/voice041.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice041"
+    },
+    {
+      "path": "pathological/voice042.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice042"
+    },
+    {
+      "path": "pathological/voice043.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice043"
+    },
+    {
+      "path": "pathological/voice044.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice044"
+    },
+    {
+      "path": "healthy/voice045.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice045"
+    },
+    {
+      "path": "pathological/voice046.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice046"
+    },
+    {
+      "path": "pathological/voice047.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice047"
+    },
+    {
+      "path": "pathological/voice048.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice048"
+    },
+    {
+      "path": "pathological/voice050.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice050"
+    },
+    {
+      "path": "pathological/voice052.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice052"
+    },
+    {
+      "path": "pathological/voice053.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice053"
+    },
+    {
+      "path": "pathological/voice054.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice054"
+    },
+    {
+      "path": "pathological/voice055.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice055"
+    },
+    {
+      "path": "pathological/voice056.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice056"
+    },
+    {
+      "path": "pathological/voice057.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice057"
+    },
+    {
+      "path": "pathological/voice065.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice065"
+    },
+    {
+      "path": "pathological/voice066.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice066"
+    },
+    {
+      "path": "healthy/voice067.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice067"
+    },
+    {
+      "path": "pathological/voice068.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice068"
+    },
+    {
+      "path": "pathological/voice069.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice069"
+    },
+    {
+      "path": "healthy/voice070.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice070"
+    },
+    {
+      "path": "pathological/voice071.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice071"
+    },
+    {
+      "path": "pathological/voice072.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice072"
+    },
+    {
+      "path": "pathological/voice073.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice073"
+    },
+    {
+      "path": "pathological/voice074.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice074"
+    },
+    {
+      "path": "pathological/voice075.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice075"
+    },
+    {
+      "path": "pathological/voice076.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice076"
+    },
+    {
+      "path": "pathological/voice077.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice077"
+    },
+    {
+      "path": "pathological/voice078.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice078"
+    },
+    {
+      "path": "pathological/voice079.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice079"
+    },
+    {
+      "path": "pathological/voice080.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice080"
+    },
+    {
+      "path": "pathological/voice081.wav",
+      "label": "pathological",
+      "egg": false,
+      "id": "voice081"
+    },
+    {
+      "path": "healthy/voice085.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice085"
+    },
+    {
+      "path": "healthy/voice090.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice090"
+    },
+    {
+      "path": "healthy/voice091.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice091"
+    },
+    {
+      "path": "healthy/voice092.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice092"
+    },
+    {
+      "path": "healthy/voice095.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice095"
+    },
+    {
+      "path": "healthy/voice096.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice096"
+    },
+    {
+      "path": "healthy/voice097.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice097"
+    },
+    {
+      "path": "healthy/voice098.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice098"
+    },
+    {
+      "path": "healthy/voice099.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice099"
+    },
+    {
+      "path": "healthy/voice100.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice100"
+    },
+    {
+      "path": "healthy/voice101.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice101"
+    },
+    {
+      "path": "healthy/voice102.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice102"
+    },
+    {
+      "path": "healthy/voice110.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice110"
+    },
+    {
+      "path": "healthy/voice111.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice111"
+    },
+    {
+      "path": "healthy/voice114.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice114"
+    },
+    {
+      "path": "healthy/voice115.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice115"
+    },
+    {
+      "path": "healthy/voice120.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice120"
+    },
+    {
+      "path": "healthy/voice123.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice123"
+    },
+    {
+      "path": "healthy/voice125.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice125"
+    },
+    {
+      "path": "healthy/voice134.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice134"
+    },
+    {
+      "path": "healthy/voice139.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice139"
+    },
+    {
+      "path": "healthy/voice158.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice158"
+    },
+    {
+      "path": "healthy/voice176.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice176"
+    },
+    {
+      "path": "healthy/voice177.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice177"
+    },
+    {
+      "path": "healthy/voice178.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice178"
+    },
+    {
+      "path": "healthy/voice179.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice179"
+    },
+    {
+      "path": "healthy/voice180.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice180"
+    },
+    {
+      "path": "healthy/voice181.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice181"
+    },
+    {
+      "path": "healthy/voice182.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice182"
+    },
+    {
+      "path": "healthy/voice183.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice183"
+    },
+    {
+      "path": "healthy/voice184.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice184"
+    },
+    {
+      "path": "healthy/voice195.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice195"
+    },
+    {
+      "path": "healthy/voice196.wav",
+      "label": "healthy",
+      "egg": false,
+      "id": "voice196"
+    }
+  ]
+}
