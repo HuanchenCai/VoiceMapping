@@ -348,4 +348,15 @@ Format per entry:
   Hz crossover notch; no SC bit-parity (rq=1.4 empirically matched).
 - Validation: metrics/specbal.md (PASS, 3/3). No metric code changed.
 
+## 2026-05-31  session=validation-bootstrap  commit=pending  [PHASE 2]
+- Touched: scripts/validate_metric.py (+validate_h1h2), metrics/h1h2.md (new)
+- Why: Phase 2 option-1 — H1-H2 / H1-H3 (harmonic amplitude differences).
+- Phase 2 / H1-H2 (harness 3/3 PASS): (B) synthetic 3-harmonic tones with
+  known A1/A2/A3 → H1-H2 recovers 20·log10(A1/A2) to max |Δ| 0.046 dB, H1-H3
+  to 0.185 dB; near-zero 2nd harmonic clips at +40 dB exactly.
+- §2/§7 distinction: ours is the UNCORRECTED harmonic ratio; Iseli & Alwan
+  2004 / VoiceSauce add a vocal-tract (formant) correction (H1*-H2*). Pure
+  tones coincide (validated); real voice differs from a corrected value.
+- Validation: metrics/h1h2.md (PASS, 3/3). No metric code changed.
+
 <!-- next-session-anchor -->

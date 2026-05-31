@@ -178,7 +178,7 @@ def validate(metric_name, *, references=['praat'], signals=['all'],
 | **SPL** ✅ | IEC 61672 / SC scserver | ✅ PASS — 合成电平 20log10(A/√2)<0.01dB + 6.02dB/倍 + 标定偏移；docs/metrics/spl.md |
 | **SpecBal** ✅ | SC `PV_SpecCentroid` 等 | ✅ PASS — 合成双音 SpecBal 线性于 band ratio (slope 1.00, r 1.00)；docs/metrics/specbal.md |
 | **Crest** ✅ | (peak / RMS) 标准定义 | ✅ PASS — 合成 sine=√2 / square=1 / sawtooth=√3 (<0.2%)；docs/metrics/crest.md |
-| **H1-H2 / H1-H3** | Iseli & Alwan 2004 | parity vs VoiceSauce |
+| **H1-H2 / H1-H3** ✅ | Iseli & Alwan 2004 | ✅ PASS — 合成 3 谐波 20log10(A1/A2) <0.2dB + ±40 截断；§7 记未做声道校正；docs/metrics/h1h2.md |
 | **Singer's Formant (SFE)** | Sundberg 1974 | corpus（古典歌手 vs 普通说话）|
 | **SPR** | Omori 1996 | corpus 验证范围 |
 
