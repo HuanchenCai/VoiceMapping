@@ -490,4 +490,31 @@ Format per entry:
 - Validation: metrics/vibrato_jitter.md (PASS, 5/5). No metric code changed.
 - Tests: harness 5/5; validate_params.py 48 PASS / 4 WARN / 0 FAIL intact.
 
+## 2026-05-31  session=validation-bootstrap  commit=pending  [PHASE 3]
+- Touched: scripts/validate_metric.py (+_praat_gne, +validate_gne, +aliases,
+  _ascii += ∈), metrics/gne.md (new)
+- Why: Phase 3 — GNE (FormantExtrasCalculator['gne'], metrics.py:1539). The
+  PLAN's "compare to Praat GNE; flag if too different" item.
+- DISCOVERY: Praat DOES have GNE — `Sound: To Harmonicity (gne)` (bands
+  500–4500 / bw 1000 / step 80) → `Get maximum` (Michaelis 1997). Used it as
+  the reference.
+- FINDING (harness 4/5, intentional FAIL — exits 1): the shipped `GNE` is
+  `min(E[500–1500],E[1500–2500])/max(…)`, a band-energy SYMMETRY ratio, NOT
+  GNE. Over a breathy→clean SNR sweep it is ANTI-correlated with the real Praat
+  GNE (r=−0.977): Praat GNE rises toward 1 for clean voice (r(GNE,SNR)=+0.827)
+  while the proxy falls toward 0. Unlike CPP (order-preserving, r=+0.98,
+  re-scalable) this REVERSES order — not salvageable by re-scaling. Reads ≈0
+  on clean voice (near-flat VRP column).
+- Decision: FROZEN pre-copyright (CLAUDE.md §1) — formula NOT changed. The
+  registry label already hedges ("GNE-like (simplified)"). Post-freeze fix
+  (tracked PLAN §6): rename to a band-symmetry descriptor, OR replace with the
+  real GNE (Praat's is a parselmouth-backed drop-in). Status: FAIL as GNE.
+- Validation: metrics/gne.md (FAIL as GNE, 4/5). No metric code changed.
+- Tests: gne harness exits 1 (by design); validate_params.py 48 PASS / 4 WARN
+  / 0 FAIL intact.
+- ►►►► PHASE 3 COMPLETE (5 metric groups). PASS: ZCR, MPT/VoicingRatio/DUV,
+  VibratoJitter (cPhon already Phase 2). FAIL-as-labeled (documented + frozen):
+  GNE. Next: Phase 4 (end-to-end 3-mode CSV regression + performance benchmark
+  + cross-platform reproducibility + batch stability).
+
 <!-- next-session-anchor -->

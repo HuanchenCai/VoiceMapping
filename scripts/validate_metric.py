@@ -2127,6 +2127,110 @@ def validate_vibrato_jitter() -> Report:
     return rep
 
 
+def _praat_gne(x, fs) -> float:
+    """Praat GNE = max of the `To Harmonicity (gne)` cross-correlation matrix
+    (Michaelis, Gramss & Strube 1997). High (→1) for clean glottal excitation,
+    low for noise. Default bands 500–4500 Hz / 1000 Hz bandwidth / 80 Hz step."""
+    import parselmouth
+    from parselmouth.praat import call
+    snd = parselmouth.Sound(np.ascontiguousarray(np.asarray(x, np.float64)),
+                            sampling_frequency=float(fs))
+    m = call(snd, "To Harmonicity (gne)...", 500, 4500, 1000, 80)
+    return float(call(m, "Get maximum"))
+
+
+def validate_gne() -> Report:
+    """GNE — FAILS as Glottal-to-Noise Excitation; it is a mislabeled band-ratio.
+
+    `FormantExtrasCalculator['gne']` computes
+    `min(E[500–1500], E[1500–2500]) / max(…)` — a band-energy *symmetry* ratio,
+    explicitly tagged "GNE-like (simplified)". The real GNE (Michaelis 1997) is
+    a cross-band Hilbert-envelope correlation that Praat exposes as
+    `To Harmonicity (gne)`. We compare the two over a breathy→clean SNR sweep:
+    the proxy is STRONGLY ANTI-CORRELATED with the true Praat GNE (r ≈ −0.98)
+    and even points the wrong way w.r.t. noise, so it does NOT validate as GNE.
+    The implementation is frozen pre-copyright (CLAUDE.md §1); the fix
+    (rename, or replace with Praat's GNE) is a post-freeze action — see §7.
+    """
+    rep = Report("gne")
+    try:
+        import parselmouth  # noqa: F401
+    except ImportError as e:
+        rep.skipped = True
+        rep.skip_reason = f"missing dependency: {e.name}"
+        return rep
+    from voicemap.config import VoiceMapConfig
+    from voicemap.metrics import FormantExtrasCalculator
+    cfg = VoiceMapConfig()
+    mk = _load_make_signals()
+    sr = mk.SR
+
+    def _proxy_median(x, fs):
+        trig = _cc_trigger_array(x, float(fs))
+        g = FormantExtrasCalculator(cfg).calculate(np.asarray(x, np.float64),
+                                                   trig)["gne"]
+        gv = g[g > 0]
+        return float(np.median(gv)) if len(gv) else float("nan")
+
+    # ── breathy → clean SNR sweep: Praat GNE vs the proxy ────────────────────
+    snrs = [0.0, 5.0, 10.0, 15.0, 20.0, 25.0, 40.0]
+    praat, proxy = [], []
+    for snr in snrs:
+        y = mk.normalize(mk.synth_vowel(3.0, lambda t: 200.0, "neutral",
+                                        snr_db=(None if snr >= 40 else snr),
+                                        seed=7)).astype(np.float64)
+        praat.append(_praat_gne(y, sr))
+        proxy.append(_proxy_median(y, sr))
+    praat, proxy = np.array(praat), np.array(proxy)
+    r_pg = float(np.corrcoef(proxy, praat)[0, 1])
+    r_gs = float(np.corrcoef(praat, snrs)[0, 1])
+
+    # (A) the reference is valid: Praat GNE rises with SNR (noise lowers GNE)
+    rep.add("A · Praat GNE reference valid (rises with SNR)", "r ≥ +0.70",
+            f"r={r_gs:+.3f}", f"{r_gs:+.3f} (min +0.70)", r_gs >= 0.70)
+    # (A) VERDICT — does the proxy track real GNE? It must, to be GNE. It does NOT.
+    rep.add("A · proxy POSITIVELY tracks Praat GNE (clean→high)", "r ≥ +0.50",
+            f"r={r_pg:+.3f}", f"{r_pg:+.3f} (FAILS — anti-correlated)",
+            r_pg >= 0.50)
+    # (A) quantify the wrong direction: strong NEGATIVE correlation
+    rep.add("A · proxy is ANTI-correlated with Praat GNE", "r ≤ −0.90",
+            f"r={r_pg:+.3f}", f"{r_pg:+.3f} (min |r| 0.90)", r_pg <= -0.90)
+
+    # ── (B) characterise what the proxy ACTUALLY is: a [0,1] band-balance ratio
+    dur, tt = 2.0, np.arange(int(2.0 * sr)) / sr
+    idx = np.round(np.arange(int(dur * 200)) * sr / 200).astype(int)
+    trig = np.zeros(len(tt)); trig[idx[idx < len(tt)]] = 1.0
+    bal = []
+    for ratio in (1.0, 0.5, 0.25, 0.1, 0.01):
+        x = (np.sin(2*np.pi*1000*tt) + ratio*np.sin(2*np.pi*2000*tt)).astype(np.float64)
+        g = FormantExtrasCalculator(cfg).calculate(x, trig)["gne"]
+        gv = g[g > 0]
+        bal.append(float(np.median(gv)) if len(gv) else 0.0)
+    bal = np.array(bal)
+    rep.add("B · proxy = [0,1] band-symmetry ratio (balanced → ~1)", "≈ 1",
+            f"{bal.max():.3f}", f"max {bal.max():.3f} (min 0.80)", bal.max() >= 0.80)
+    rep.add("B · proxy → 0 when one band dominates", "≈ 0", f"{bal.min():.4f}",
+            f"min {bal.min():.4f} (max 0.05)", bal.min() <= 0.05)
+
+    rep.note(f"(A) VERDICT: the `GNE` column does NOT measure Glottal-to-Noise "
+             f"Excitation. Over a breathy→clean SNR sweep it is anti-correlated "
+             f"with the true Praat GNE (r={r_pg:+.3f}) — Praat GNE rises toward 1 "
+             f"for clean voice (r(GNE,SNR)={r_gs:+.3f}) while the proxy falls "
+             f"toward 0. It points the WRONG way; it is not a re-scalable proxy "
+             f"(unlike CPP, which tracks Praat CPPS at r=+0.98).")
+    rep.note("(B) What it IS: a [500–1500]/[1500–2500] Hz band-energy symmetry "
+             "ratio (min/max ∈ [0,1]); ≈1 when the two bands are balanced, ≈0 "
+             "when one dominates. On clean voiced vowels the bands are very "
+             "asymmetric so it reads ≈0 almost everywhere (a near-zero VRP "
+             "column).")
+    rep.note("(§7) Frozen pre-copyright (CLAUDE.md §1) — formula not changed. "
+             "Post-freeze fix: rename to a band-symmetry descriptor, OR replace "
+             "with the real GNE (Praat's `To Harmonicity (gne)` is available, so "
+             "a faithful parselmouth-backed GNE is a drop-in). Status: FAIL as "
+             "GNE; characterised and documented.")
+    return rep
+
+
 VALIDATORS: dict[str, Callable[[], Report]] = {
     "jitter": validate_jitter,
     "shimmer": validate_shimmer,
@@ -2153,6 +2257,7 @@ VALIDATORS: dict[str, Callable[[], Report]] = {
     "zcr": validate_zcr,
     "integrative": validate_integrative,
     "vibrato_jitter": validate_vibrato_jitter,
+    "gne": validate_gne,
 }
 # convenience aliases
 for _a in ("jitter_local", "jitter_rap", "jitter_ppq5", "jitter_ddp"):
@@ -2201,6 +2306,8 @@ for _a in ("mpt", "voicing_ratio", "voicingratio", "duv",
     VALIDATORS[_a] = validate_integrative
 for _a in ("vibratojitter", "vibrato_jitter_cv", "vjitter"):
     VALIDATORS[_a] = validate_vibrato_jitter
+for _a in ("glottal_to_noise", "gne_proxy", "glottal_noise_excitation"):
+    VALIDATORS[_a] = validate_gne
 
 
 # ─── Reporting ───────────────────────────────────────────────────────────────
@@ -2222,7 +2329,8 @@ def _ascii(s: str) -> str:
              .replace("²", "2").replace("√", "sqrt").replace("≥", ">=")
              .replace("≤", "<=").replace("≪", "<<").replace("≫", ">>")
              .replace("∑", "sum").replace("Σ", "sum").replace("×", "x")
-             .replace("½", "1/2").replace("–", "-").replace("δ", "d"))
+             .replace("½", "1/2").replace("–", "-").replace("δ", "d")
+             .replace("∈", "in"))
 
 
 def print_report(rep: Report) -> None:
