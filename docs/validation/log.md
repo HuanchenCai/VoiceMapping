@@ -473,4 +473,21 @@ Format per entry:
 - Validation: metrics/integrative.md (PASS, 9/9). No metric code changed.
 - Tests: harness 9/9; validate_params.py 48 PASS / 4 WARN / 0 FAIL intact.
 
+## 2026-05-31  session=validation-bootstrap  commit=pending  [PHASE 3]
+- Touched: scripts/validate_metric.py (+validate_vibrato_jitter, +aliases,
+  _ascii += δ), metrics/vibrato_jitter.md (new)
+- Why: Phase 3 — VibratoJitter (VibratoJitterCalculator, metrics.py:1618).
+  Sliding-window CV (%) of the vibrato period; consumes VibratoCalculator's
+  per-cycle rate (rate was un-frozen + fixed earlier this session line).
+- Phase 3 / vibrato_jitter (harness 5/5 PASS): (B) formula GT — constant rate
+  → 0 %, alternating period p0(1±δ) → CV=100·δ exactly (Δ 0 over δ 5/10/20 %);
+  end-to-end — steady 6 Hz vibrato 0.18 % (estimator noise floor) vs a vibrato
+  whose rate wobbles 3.5–8.5 Hz reads 7.18 % → 40× separation (steady ≪ wobbly).
+- §7: magnitude compressed for realistic vibrato (rate can't change faster than
+  the oscillation, so within the ~40-cycle window the period CV is small) — it
+  separates steady from wobbly reliably but is not an absolute % of rate
+  scatter; inherits VibratoCalculator's resolution; edge cycles 0 by design.
+- Validation: metrics/vibrato_jitter.md (PASS, 5/5). No metric code changed.
+- Tests: harness 5/5; validate_params.py 48 PASS / 4 WARN / 0 FAIL intact.
+
 <!-- next-session-anchor -->

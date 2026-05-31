@@ -2047,6 +2047,86 @@ def validate_integrative() -> Report:
     return rep
 
 
+def validate_vibrato_jitter() -> Report:
+    """VibratoJitter — sliding-window CV (%) of the vibrato period,
+    `VibratoJitterCalculator`.
+
+    Measures how STEADY the vibrato rate is: the coefficient of variation
+    (100·std/mean) of the vibrato period (1/rate) over a centred window of
+    cycles. A high value means a wobbly, irregular vibrato. Validated by (B):
+      • formula GT — a constant rate → 0 %, and an alternating period p0(1±δ)
+        → CV = 100·δ exactly;
+      • end-to-end — a steady 6 Hz vibrato reads ≈ 0, while a vibrato whose
+        rate wobbles reads several %.
+    """
+    rep = Report("vibrato_jitter")
+    from voicemap.config import VoiceMapConfig
+    from voicemap.metrics import VibratoJitterCalculator, VibratoCalculator
+    cfg = VoiceMapConfig()
+    sr = cfg.sample_rate
+
+    # ── (B) formula GT: a constant rate has zero period variation ─────────────
+    out0 = VibratoJitterCalculator(cfg).calculate(np.full(200, 6.0))
+    rep.add("B · constant rate → 0 % jitter", "0 %", f"{out0.max():.3f} %",
+            f"{int((out0>0).sum())} nonzero (must be 0)", (out0 > 0).sum() == 0)
+
+    # ── (B) formula GT: alternating period p0(1±δ) → CV = 100·δ ──────────────
+    dmax = 0.0
+    for d in (0.05, 0.10, 0.20):
+        p0 = 1.0 / 6.0
+        periods = np.tile([p0 * (1 + d), p0 * (1 - d)], 100)   # 200 cycles
+        out = VibratoJitterCalculator(cfg).calculate(1.0 / periods)
+        nz = out[out > 0]
+        med = float(np.median(nz)) if len(nz) else float("nan")
+        dmax = max(dmax, abs(med - 100 * d))
+    rep.add("B · alternating period p0(1±δ) → CV=100·δ", "100·δ", "ours",
+            f"max|Δ| {dmax:.3f} pp (tol 0.1)", dmax <= 0.1)
+
+    # ── (B) end-to-end: a steady vibrato is low, a wobbling-rate one is high ──
+    def midi_of(f):
+        return 12.0 * np.log2(f / 440.0) + 69.0
+
+    f0, dur, A = 200.0, 6.0, 1.0                 # 1 semitone → 200 cent extent
+    n = int(dur * f0)
+    cyc = np.round(np.arange(n + 1) * sr / f0).astype(int)
+    tt = cyc[:n] / sr
+    dtm = float(np.diff(cyc).mean()) / sr
+
+    midi_reg = midi_of(f0) + A * np.sin(2 * np.pi * 6.0 * tt)
+    rate_reg, _ = VibratoCalculator(cfg).calculate(midi_reg, cyc)
+    vj_reg = VibratoJitterCalculator(cfg).calculate(rate_reg)
+    reg = float(np.median(vj_reg[vj_reg > 0])) if (vj_reg > 0).any() else 0.0
+
+    inst = 6.0 + 2.5 * np.sin(2 * np.pi * 0.8 * tt)    # rate wobbles 3.5–8.5 Hz
+    phase = np.cumsum(inst) * dtm
+    midi_irr = midi_of(f0) + A * np.sin(2 * np.pi * phase)
+    rate_irr, _ = VibratoCalculator(cfg).calculate(midi_irr, cyc)
+    vj_irr = VibratoJitterCalculator(cfg).calculate(rate_irr)
+    irr = float(np.median(vj_irr[vj_irr > 0])) if (vj_irr > 0).any() else 0.0
+
+    rep.add("B · steady 6 Hz vibrato → low jitter", "< 1 %", f"{reg:.2f} %",
+            f"{reg:.2f} % (max 1.0)", reg < 1.0)
+    rep.add("B · wobbling-rate vibrato → high jitter", "> 3 %", f"{irr:.2f} %",
+            f"{irr:.2f} % (min 3.0)", irr > 3.0)
+    rep.add("B · irregular ≫ regular", "≥ 5×", f"{irr/max(reg,1e-9):.0f}×",
+            f"{irr/max(reg,1e-9):.0f}× (min 5×)", irr >= 5.0 * reg)
+
+    rep.note("(B) Formula GT: a constant rate → 0 % and an alternating period "
+             "p0(1±δ) → CV = 100·δ exactly (Δ ≈ 0). End-to-end: a steady 6 Hz "
+             f"vibrato reads {reg:.2f} % (estimator noise floor), a vibrato whose "
+             f"rate wobbles 3.5–8.5 Hz reads {irr:.1f} % — a {irr/max(reg,1e-9):.0f}× "
+             "separation.")
+    rep.note("(§7) Magnitude is compressed for realistic vibrato — the rate "
+             "cannot change faster than the oscillation itself, so within the "
+             "~40-cycle (~0.2 s) window the period CV stays small; VibratoJitter "
+             "separates steady from wobbly vibrato but is not an absolute % of "
+             "rate scatter. It inherits VibratoCalculator's rate resolution; "
+             "zero-rate cycles are excluded; edge cycles outside the centred-"
+             "window region are 0 by design. (A) no reference tool; (C) "
+             "pop-vs-bel-canto corpus deferred.")
+    return rep
+
+
 VALIDATORS: dict[str, Callable[[], Report]] = {
     "jitter": validate_jitter,
     "shimmer": validate_shimmer,
@@ -2072,6 +2152,7 @@ VALIDATORS: dict[str, Callable[[], Report]] = {
     "singer_formant": validate_singer,
     "zcr": validate_zcr,
     "integrative": validate_integrative,
+    "vibrato_jitter": validate_vibrato_jitter,
 }
 # convenience aliases
 for _a in ("jitter_local", "jitter_rap", "jitter_ppq5", "jitter_ddp"):
@@ -2118,6 +2199,8 @@ for _a in ("zero_crossing_rate", "zerocrossing", "zero_crossings"):
 for _a in ("mpt", "voicing_ratio", "voicingratio", "duv",
            "max_phonation_time"):
     VALIDATORS[_a] = validate_integrative
+for _a in ("vibratojitter", "vibrato_jitter_cv", "vjitter"):
+    VALIDATORS[_a] = validate_vibrato_jitter
 
 
 # ─── Reporting ───────────────────────────────────────────────────────────────
@@ -2139,7 +2222,7 @@ def _ascii(s: str) -> str:
              .replace("²", "2").replace("√", "sqrt").replace("≥", ">=")
              .replace("≤", "<=").replace("≪", "<<").replace("≫", ">>")
              .replace("∑", "sum").replace("Σ", "sum").replace("×", "x")
-             .replace("½", "1/2").replace("–", "-"))
+             .replace("½", "1/2").replace("–", "-").replace("δ", "d"))
 
 
 def print_report(rep: Report) -> None:
