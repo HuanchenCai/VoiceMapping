@@ -311,4 +311,21 @@ Format per entry:
   square 1.0000, sawtooth 1.7301 (√3); all <0.2 % from the analytic constant.
 - Validation: metrics/crest.md (PASS, 3/3). No metric code changed.
 
+## 2026-05-31  session=validation-bootstrap  commit=pending  [PHASE 2]
+- Touched: scripts/validate_metric.py (+validate_cse), metrics/cse.md (new),
+  requirements-validation.txt (nolds pinned ==0.5.2)
+- Why: Phase 2 — CSE (Cycle Sample Entropy). Validate the entropy primitive
+  against nolds.
+- nolds note: 0.6.x crashes on import under Python 3.11 (eager bundled-dataset
+  load via importlib.resources). Pinned nolds==0.5.2 (no eager load). nolds is
+  a VALIDATION-only dep — runtime uses voicemap's own _batch_sample_entropy_m1,
+  so the downgrade is safe.
+- Phase 2 / CSE (harness 5/5 PASS): (A) _batch_sample_entropy_m1 byte-identical
+  to nolds.sampen(emb_dim=1) — max |Δ| 0 over white-noise/sine/AR(1);
+  (B) disorder ordering ramp(≈0) < sine(0.86) < white noise(2.19).
+- Scope note (md §7): only the SampEn PRIMITIVE is parity-checked; the
+  DFT-harmonic windowing + Bel scaling + summation are VoiceMap conventions
+  (SC predecessor), no external reference.
+- Validation: metrics/cse.md (PASS, 5/5). No metric code changed.
+
 <!-- next-session-anchor -->

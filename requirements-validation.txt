@@ -12,5 +12,7 @@ praat-parselmouth>=0.4.7   # Praat bindings — jitter/shimmer/F0/HNR/formant pa
 librosa>=0.10              # spectral / MFCC parity (Phase 1.8, 1.12)
 opensmile>=2.4             # eGeMAPS Alpha/Hammarberg parity (Phase 1.9)
 
-# Optional references, pulled in as later phases need them:
-# nolds>=0.5.2             # Sample Entropy (CSE) reference, Phase 2
+nolds==0.5.2               # Sample Entropy (CSE) reference (Phase 2). Pinned:
+                           # nolds 0.6.x eagerly loads a bundled dataset at
+                           # import and crashes on Python 3.11 (importlib
+                           # resources). 0.5.2 has no such eager load.
