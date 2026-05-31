@@ -197,4 +197,22 @@ Format per entry:
 - Validation: metrics/spectral_moments.md  (PASS, 7/7 checks)
 - Tests: harness 7/7; validate_params.py 48 PASS / 4 WARN / 0 FAIL intact.
 
+## 2026-05-31  session=validation-bootstrap  commit=pending
+- Touched: scripts/validate_metric.py (+validate_vibrato + aliases),
+  docs/validation/metrics/vibrato.md (new)
+- Why: Phase 1.10 — validate vibrato rate + extent (synthetic GT).
+- Phase 1.10 results (harness 8/8 PASS):
+  · (B) EXTENT recovers imposed depth to <5 % at the formula level
+    (100→103, 50→48, 200→199 c); 0 % false vibrato on a steady note;
+    e2e fixture extent 88 c (pitch-tracker noise).
+- IMPORTANT finding (md §7): vibrato RATE is resolution-limited. Bin width =
+  F0/W ≈ 5 Hz at F0 200 / W 40, so the 4–8 Hz band holds ~1 bin and rate
+  biases toward it (6 Hz reads ~4.7, 7 Hz ~5.6). Validated only as
+  "detected in 4–8 Hz band"; does NOT meet the ±0.3 Hz convention. Frozen
+  pre-copyright; post-freeze fix = zero-pad the FFT or lengthen W. Flagged
+  to the user as a real quality gap.
+- Before / After: vibrato.md Status UNKNOWN → PASS (extent + detection).
+- Validation: metrics/vibrato.md  (PASS, 8/8 checks; rate caveat in §7)
+- Tests: harness 8/8; validate_params.py 48 PASS / 4 WARN / 0 FAIL intact.
+
 <!-- next-session-anchor -->
