@@ -282,4 +282,25 @@ Format per entry:
   applicable). Next: Phase 2 (P1 EGG + secondary acoustic), or SVD download
   to add EGG-dependent (C) tests.
 
+## 2026-05-31  session=validation-bootstrap  commit=pending
+- Touched: voicemap/metrics.py (VibratoCalculator: zero-padded FFT n_fft=512
+  + window_cycles 40→80), scripts/validate_metric.py (vibrato rate rows
+  tightened to ±0.3 Hz), docs/validation/metrics/vibrato.md (§1/§4/§6/§7/§8)
+- Why: fix the vibrato RATE resolution gap flagged in the previous vibrato.md
+  §7 (user approved the un-freeze for this maintenance bugfix).
+- What: (1) zero-pad the per-window rfft so bin spacing = F0/n_fft resolves
+  the 4–8 Hz band; (2) lengthen the window to 80 cycles (~0.4 s ≥ 2 vibrato
+  periods) so the rate is *physically* resolvable (zero-pad alone only got
+  6 Hz→5.5; the window length is the real limit).
+- Before / After: imposed 6/5/7 Hz read 4.7/4.5/5.6 → **6.00/5.01/6.99**
+  (≤0.3 Hz). Extent unaffected (scaling depends on W real samples, not FFT
+  length): 99/49/198 c.
+- Ripple check (user's concern): window_cycles is an INDEPENDENT default in
+  VibratoCalculator / PPECalculator / VibratoJitterCalculator — changing one
+  does not touch the others. Only value-dependency is VibratoJitter (eats
+  vibrato_rate); verified `validate_params.py` 48 PASS / 0 FAIL with
+  VibratoJitter 9.53 (in range) — no harmful ripple.
+- Validation: metrics/vibrato.md  (PASS, 8/8; rate now ±0.3 Hz)
+- Tests: vibrato harness 8/8; validate_params.py 48 PASS / 4 WARN / 0 FAIL.
+
 <!-- next-session-anchor -->

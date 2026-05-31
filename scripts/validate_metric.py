@@ -898,9 +898,9 @@ def validate_vibrato() -> Report:
                 f"{extent_t:.0f} c", f"{em:.1f} c",
                 f"{abs(em-extent_t)/extent_t*100:.1f}% (max 8%)",
                 abs(em - extent_t) <= extent_t * 0.08)
-        rep.add(f"B · rate {rate_t:.0f} Hz detected in 4-8 band",
-                "4-8 Hz", f"{rm:.2f} Hz", "in band (coarse, see §7)",
-                4.0 <= rm <= 8.0)
+        rep.add(f"B · rate GT {rate_t:.0f} Hz",
+                f"{rate_t:.0f} Hz", f"{rm:.2f} Hz",
+                f"{abs(rm-rate_t):.2f} Hz (tol 0.3)", abs(rm - rate_t) <= 0.3)
 
     # ── (B) modal control: a steady note must NOT register vibrato ───────────
     _ensure_signals()
@@ -928,14 +928,12 @@ def validate_vibrato() -> Report:
             f"{abs(e2e_ext-100)/100*100:.0f}% (max 20%)",
             abs(e2e_ext - 100.0) <= 20.0)
 
-    rep.note(f"(B) Extent recovers the imposed value to <5 % at the formula "
-             f"level; end-to-end on the wav it reads {e2e_ext:.0f} c (pitch-"
-             f"tracker noise lowers the FFT peak). Modal control: 0 % false "
-             f"vibrato.")
-    rep.note(f"(B/§7) RATE is resolution-limited: bin width = F0/W ≈ 5 Hz at "
-             f"F0 200 / W 40, so the 4–8 Hz band holds ~1 bin and rate biases "
-             f"toward it (6 Hz reads ~{e2e_rate:.1f}). Detected-in-band only; "
-             f"does NOT meet the ±0.3 Hz convention. (C) corpus deferred.")
+    rep.note(f"(B) Rate recovers the imposed value to <0.3 Hz (zero-padded FFT "
+             f"+ window_cycles=80 ≈ 0.4 s ≥ 2 vibrato periods); extent to <5 % "
+             f"at the formula level. End-to-end on the wav extent reads "
+             f"{e2e_ext:.0f} c (pitch-tracker noise lowers the FFT peak); "
+             f"modal control: 0 % false vibrato.")
+    rep.note("(C) Real-corpus (bel-canto vs pop) deferred to the corpus phase.")
     return rep
 
 

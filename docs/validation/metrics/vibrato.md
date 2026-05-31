@@ -4,14 +4,20 @@
 > (4–8 Hz for trained singers); **extent** = peak-to-peak depth in cents.
 
 ## 1. Implementation
-- File: `voicemap/metrics.py` → `VibratoCalculator` (lines 1067–1199).
-- Sliding window of `W = 40` cycles over the per-cycle MIDI series; per window:
-  detrend → Hann → `rfft`; find the magnitude peak in the `[4, 8] Hz` band;
+- File: `voicemap/metrics.py` → `VibratoCalculator` (lines 1067–1207).
+- Sliding window of `W = 80` cycles (~0.4 s at F0 = 200 → ≥ 2 vibrato periods)
+  over the per-cycle MIDI series; per window: detrend → Hann → **zero-padded**
+  `rfft` (`n_fft = 512`); find the magnitude peak in the `[4, 8] Hz` band;
   parabolic sub-bin interpolation → **rate**; `extent = 800·peak_mag/W`
   (cents pk-pk). Gates: ≥ 80 % voiced cycles, peak SNR > 2× median, extent
   ≤ 400 cents; edge cycles padded with 0 ("not measured").
-- The window frequency axis is `freq[k] = k·F0/W` (the MIDI series is sampled
-  once per cycle, i.e. at the cycle rate F0).
+- The window frequency axis is `freq[k] = k·F0/n_fft` (the MIDI series is
+  sampled once per cycle, i.e. at the cycle rate F0). The zero-pad makes the
+  bin spacing (`F0/n_fft`) fine enough to resolve the 4–8 Hz band; the
+  80-cycle length supplies the ≥ 2 vibrato periods needed for the rate to be
+  *physically* resolvable (not just finely sampled). `W = 80` is an independent
+  default — it does **not** touch the identically-named `window_cycles` in
+  `PPECalculator` / `VibratoJitterCalculator`.
 
 ## 2. Reference Standard
 - **Sundberg** (1995/1987), *The Science of the Singing Voice* — vibrato rate
@@ -32,9 +38,10 @@
 
 ## 4. Validation Method
 - **(B) Synthetic ground truth:**
+  - **rate** within **0.3 Hz** of the imposed value (analytic MIDI 6/5/7 Hz →
+    6.00 / 5.01 / 6.99 Hz);
   - **extent** within **8 %** of the imposed value at the formula level
-    (analytic MIDI → 3.1 % / 4.8 % / 0.5 %);
-  - **rate** detected within the 4–8 Hz band (resolution-limited — see §7);
+    (→ 1.0 % / 1.4 % / 1.2 %);
   - modal control: a steady note flags vibrato on < 5 % of cycles (0 %);
   - end-to-end fixture extent within 20 % (pitch-tracker noise lowers it).
 - **(A)** No reference-tool parity — vibrato is not a Praat/librosa metric.
@@ -54,44 +61,50 @@ python scripts/validate_metric.py vibrato
 
 | Test | Reference | Our Value | Δ (tol) | Pass? |
 |---|---|---|---|---|
-| B · extent GT 100c (rate 6 Hz) | 100 c | 103.1 c | 3.1% (max 8%) | ✓ |
-| B · rate 6 Hz detected in 4-8 band | 4-8 Hz | 4.69 Hz | in band (coarse, see §7) | ✓ |
-| B · extent GT 50c (rate 5 Hz) | 50 c | 47.6 c | 4.8% (max 8%) | ✓ |
-| B · rate 5 Hz detected in 4-8 band | 4-8 Hz | 4.52 Hz | in band (coarse, see §7) | ✓ |
-| B · extent GT 200c (rate 7 Hz) | 200 c | 199.0 c | 0.5% (max 8%) | ✓ |
-| B · rate 7 Hz detected in 4-8 band | 4-8 Hz | 5.58 Hz | in band (coarse, see §7) | ✓ |
+| B · extent GT 100c (rate 6 Hz) | 100 c | 99.0 c | 1.0% (max 8%) | ✓ |
+| B · rate GT 6 Hz | 6 Hz | 6.00 Hz | 0.00 Hz (tol 0.3) | ✓ |
+| B · extent GT 50c (rate 5 Hz) | 50 c | 49.3 c | 1.4% (max 8%) | ✓ |
+| B · rate GT 5 Hz | 5 Hz | 5.01 Hz | 0.01 Hz (tol 0.3) | ✓ |
+| B · extent GT 200c (rate 7 Hz) | 200 c | 197.6 c | 1.2% (max 8%) | ✓ |
+| B · rate GT 7 Hz | 7 Hz | 6.99 Hz | 0.01 Hz (tol 0.3) | ✓ |
 | B · modal (no vibrato) -> not flagged | < 5% cycles | 0% | 0% (max 5%) | ✓ |
-| B · e2e fixture extent within 20% (pitch-tracker noise) | 100 c | 88 c | 12% (max 20%) | ✓ |
+| B · e2e fixture extent within 20% (pitch-tracker noise) | 100 c | 86 c | 14% (max 20%) | ✓ |
 <!-- VALIDATE:vibrato:END -->
 
 ## 6. Status
-**PASS** (extent + vibrato detection); **rate is resolution-limited** — see §7.
+**PASS** (rate within 0.3 Hz + extent within 5 %)
 - validated_on: 2026-05-31
 - session: validation-bootstrap
 - validator: `scripts/validate_metric.py vibrato`
 
 ## 7. Known Limitations
-- **Rate resolution is coarse (the important caveat).** The FFT bin width is
-  `F0/W ≈ 5 Hz` at F0 = 200 Hz, W = 40 cycles, so the entire 4–8 Hz vibrato
-  band spans roughly a *single* bin. The rate estimate therefore biases toward
-  that bin: an imposed 6 Hz reads ≈ 4.7 Hz, 7 Hz ≈ 5.6 Hz. Parabolic
-  interpolation cannot recover sub-bin rate reliably from one in-band bin.
-  Rate is trustworthy as "vibrato present in the 4–8 Hz band", **not** as a
-  precise Hz value — it does **not** meet `conventions.md`'s ±0.3 Hz bar.
-  *Post-freeze fix:* zero-pad the FFT (cheap) or lengthen W toward ~1 s of
-  cycles; both narrow the bin. Frozen pre-copyright, so documented not fixed.
+- **Rate accuracy is F0-dependent at high pitch.** `W = 80` cycles is ~0.4 s
+  at F0 = 200 Hz (≥ 2 vibrato periods → rate exact) but only ~0.2 s at
+  F0 = 400 Hz (~1 period → rate biases low again). Validated at F0 = 200 Hz;
+  for very high sung notes (F0 ≳ 250 Hz) the fixed *cycle*-count window is a
+  shorter *time* window, so rate degrades. A time-based (rather than
+  cycle-based) window would remove the F0 dependence — a possible future
+  refinement.
 - **Extent degrades end-to-end.** Formula-level extent is < 5 %, but on the
-  real wav (NSDF MIDI) it reads ~88 c for an imposed 100 c — pitch-tracker
+  real wav (NSDF MIDI) it reads ~86 c for an imposed 100 c — pitch-tracker
   jitter broadens/lowers the FFT peak. Treat extent as ±15 % on real audio.
-- **High F0 loses the band entirely.** At F0 ≳ 320 Hz, `F0/W > 8 Hz` so no bin
-  falls in [4, 8] Hz and vibrato is not detected. The detector suits typical
-  (≲ 300 Hz) sustained notes.
+- **Wider centred-window dead-zone.** With `W = 80`, the first/last ~40 cycles
+  of each voiced run carry 0 ("not measured") instead of ~20 with the old
+  window. Negligible on sustained notes (hundreds of cycles); on very short
+  notes it leaves fewer measured cycles. A deliberate trade for rate accuracy.
 - **VibratoJitter** (period stability of the vibrato itself) is a separate
-  `待验证` metric, not covered here.
+  `待验证` metric; it consumes this rate as input but keeps its own
+  independent `window_cycles`.
 
 ## 8. Change Log
-- 2026-05-31 — Created 8-section doc; wired `validate_metric.py vibrato`.
-  Synthetic GT: extent recovers imposed depth to < 5 % (formula), 0 % false
-  vibrato on a steady note, e2e fixture extent 88 c. Documented the rate
-  resolution limit (6 Hz reads ~4.7 Hz; ±0.3 Hz convention not met — a
-  post-freeze zero-pad/window-length fix). Status → PASS (extent + detection).
+- 2026-05-31 (fix) — **Rate resolution fixed.** Zero-padded the vibrato FFT
+  (`n_fft = 512`) and lengthened the window `window_cycles` 40 → 80 (~0.4 s,
+  ≥ 2 vibrato periods). Imposed 6/5/7 Hz now read 6.00/5.01/6.99 Hz (was
+  ~4.7/4.5/5.6); meets the ±0.3 Hz convention. Extent unaffected (the
+  `800·peak_mag/W` scaling depends on W real samples, not the FFT length).
+  Verified isolated: `validate_params.py` 48 PASS / 0 FAIL (VibratoJitter
+  9.53, in range) — no ripple to PPE / VibratoJitter window defaults.
+  Status → PASS (rate + extent).
+- 2026-05-31 (initial) — Created 8-section doc; wired `validate_metric.py
+  vibrato`. Extent recovered to < 5 %, 0 % false vibrato on a steady note;
+  rate was then resolution-limited (documented, since fixed above).
