@@ -1,0 +1,239 @@
+{
+  "sample_rate": 44100,
+  "n_signals": 12,
+  "signals": [
+    {
+      "filename": "vowel_modal_200Hz_5s.wav",
+      "sample_rate": 44100,
+      "duration_s": 5.0,
+      "ground_truth": {
+        "F0_Hz": 200.0,
+        "jitter_local_pct": 0.0,
+        "shimmer_local_pct": 0.0,
+        "formants_Hz": [
+          700.0,
+          1200.0,
+          2600.0
+        ],
+        "SNR_dB": null
+      },
+      "generator_seed": 0,
+      "generator_function": "synth_vowel(const 200)"
+    },
+    {
+      "filename": "vowel_breathy_200Hz_SNR15dB.wav",
+      "sample_rate": 44100,
+      "duration_s": 5.0,
+      "ground_truth": {
+        "F0_Hz": 200.0,
+        "jitter_local_pct": 0.0,
+        "shimmer_local_pct": 0.0,
+        "formants_Hz": [
+          700.0,
+          1200.0,
+          2600.0
+        ],
+        "SNR_dB": 15.0,
+        "HNR_dB_approx": 15.0
+      },
+      "generator_seed": 2,
+      "generator_function": "synth_vowel(const 200, snr=15)"
+    },
+    {
+      "filename": "vowel_jitter_0p5pct.wav",
+      "sample_rate": 44100,
+      "duration_s": 3.0,
+      "ground_truth": {
+        "F0_Hz": 200.0,
+        "jitter_local_pct": 0.5,
+        "shimmer_local_pct": 0.0,
+        "formants_Hz": [
+          700.0,
+          1200.0,
+          2600.0
+        ],
+        "SNR_dB": null
+      },
+      "generator_seed": 0,
+      "generator_function": "synth_vowel(const 200, jitter=0.005)"
+    },
+    {
+      "filename": "vowel_jitter_2pct.wav",
+      "sample_rate": 44100,
+      "duration_s": 3.0,
+      "ground_truth": {
+        "F0_Hz": 200.0,
+        "jitter_local_pct": 2.0,
+        "shimmer_local_pct": 0.0,
+        "formants_Hz": [
+          700.0,
+          1200.0,
+          2600.0
+        ],
+        "SNR_dB": null
+      },
+      "generator_seed": 0,
+      "generator_function": "synth_vowel(const 200, jitter=0.02)"
+    },
+    {
+      "filename": "vowel_shimmer_5pct.wav",
+      "sample_rate": 44100,
+      "duration_s": 3.0,
+      "ground_truth": {
+        "F0_Hz": 200.0,
+        "jitter_local_pct": 0.0,
+        "shimmer_local_pct": 5.0,
+        "formants_Hz": [
+          700.0,
+          1200.0,
+          2600.0
+        ],
+        "SNR_dB": null
+      },
+      "generator_seed": 0,
+      "generator_function": "synth_vowel(const 200, shimmer=0.05)"
+    },
+    {
+      "filename": "vowel_vibrato_6Hz_100cent.wav",
+      "sample_rate": 44100,
+      "duration_s": 5.0,
+      "ground_truth": {
+        "F0_Hz": 200.0,
+        "vibrato_rate_Hz": 6.0,
+        "vibrato_extent_cent_pp": 100.0,
+        "jitter_local_pct": 0.0,
+        "shimmer_local_pct": 0.0,
+        "formants_Hz": [
+          700.0,
+          1200.0,
+          2600.0
+        ],
+        "SNR_dB": null
+      },
+      "generator_seed": 0,
+      "generator_function": "synth_vowel(vibrato 6Hz/100cent)"
+    },
+    {
+      "filename": "vowel_pitch_glide_150_to_400Hz.wav",
+      "sample_rate": 44100,
+      "duration_s": 4.0,
+      "ground_truth": {
+        "F0_start_Hz": 150.0,
+        "F0_end_Hz": 400.0,
+        "glide": "log-linear",
+        "formants_Hz": [
+          700.0,
+          1200.0,
+          2600.0
+        ],
+        "SNR_dB": null
+      },
+      "generator_seed": 0,
+      "generator_function": "synth_vowel(glide 150->400)"
+    },
+    {
+      "filename": "vowel_formants_a_e_i.wav",
+      "sample_rate": 44100,
+      "duration_s": 4.5,
+      "ground_truth": {
+        "F0_Hz": 150.0,
+        "segments": [
+          {
+            "vowel": "a",
+            "t0": 0.0,
+            "t1": 1.5,
+            "formants_Hz": [
+              730.0,
+              1090.0,
+              2440.0
+            ]
+          },
+          {
+            "vowel": "e",
+            "t0": 1.5,
+            "t1": 3.0,
+            "formants_Hz": [
+              530.0,
+              1840.0,
+              2480.0
+            ]
+          },
+          {
+            "vowel": "i",
+            "t0": 3.0,
+            "t1": 4.5,
+            "formants_Hz": [
+              270.0,
+              2290.0,
+              3010.0
+            ]
+          }
+        ],
+        "SNR_dB": null
+      },
+      "generator_seed": 0,
+      "generator_function": "synth_vowel(a)+(e)+(i)"
+    },
+    {
+      "filename": "vowel_high_pitch_800Hz.wav",
+      "sample_rate": 44100,
+      "duration_s": 3.0,
+      "ground_truth": {
+        "F0_Hz": 800.0,
+        "jitter_local_pct": 0.0,
+        "shimmer_local_pct": 0.0,
+        "formants_Hz": [
+          700.0,
+          1200.0,
+          2600.0
+        ],
+        "SNR_dB": null
+      },
+      "generator_seed": 0,
+      "generator_function": "synth_vowel(const 800)"
+    },
+    {
+      "filename": "vowel_low_pitch_70Hz.wav",
+      "sample_rate": 44100,
+      "duration_s": 3.0,
+      "ground_truth": {
+        "F0_Hz": 70.0,
+        "jitter_local_pct": 0.0,
+        "shimmer_local_pct": 0.0,
+        "formants_Hz": [
+          700.0,
+          1200.0,
+          2600.0
+        ],
+        "SNR_dB": null
+      },
+      "generator_seed": 0,
+      "generator_function": "synth_vowel(const 70)"
+    },
+    {
+      "filename": "silent_5s.wav",
+      "sample_rate": 44100,
+      "duration_s": 5.0,
+      "ground_truth": {
+        "F0_Hz": null,
+        "note": "all voicing-gated metrics must be NaN/empty"
+      },
+      "generator_seed": 0,
+      "generator_function": "zeros(5s)"
+    },
+    {
+      "filename": "chirp_50_1000Hz.wav",
+      "sample_rate": 44100,
+      "duration_s": 5.0,
+      "ground_truth": {
+        "F0_Hz": null,
+        "kind": "linear_chirp",
+        "f_start_Hz": 50.0,
+        "f_end_Hz": 1000.0,
+        "note": "aperiodic; voicing-gated metrics should be 0/empty"
+      },
+      "generator_seed": 0,
+      "generator_function": "linear_chirp(50->1000)"
+    }
+  ]
+}
