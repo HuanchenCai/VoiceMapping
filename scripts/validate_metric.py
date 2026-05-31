@@ -903,6 +903,65 @@ def _synth_egg(fs, f0, dur, cq, ramp=0.15):
     return egg, trig
 
 
+def validate_qcontact() -> Report:
+    """Qcontact / dEGGmax / Icontact — VoiceMap's signature EGG metrics.
+
+    These are NOT the standard time-based contact quotient (that is OQ); they
+    are VoiceMap's own *amplitude*-based definitions, deliberately fixed as an
+    identity marker (CLAUDE.md §11 — do not change the formula). With no SC
+    source to parity against, we (B) spot-check that the implementation
+    evaluates its formula exactly, and use the closed form of dEGGmax for a
+    full-amplitude instantaneous closure:  `dEGGmax = 2 / sin(2π/T)`.
+    """
+    rep = Report("qcontact")
+    from voicemap.config import VoiceMapConfig
+    from voicemap.metrics import QcontactCalculator
+    cfg = VoiceMapConfig()
+    sr = cfg.sample_rate
+    # synthetic EGG with a DC offset so cmin != 0 (non-degenerate spot-check)
+    low, high = 0.2, 1.0
+    egg, trig = _synth_egg(sr, 150.0, 2.0, 0.5, ramp=0.15)
+    egg = np.where(egg > 0, egg, 0.0) * (high - low) + low   # remap to [low, high]
+    qc, dq, ic = QcontactCalculator(cfg).calculate(egg, trig)
+    idx = np.where(trig > 0.5)[0]
+
+    # by-hand on an interior cycle
+    i = 5
+    s, e = idx[i], idx[i + 1]
+    cyc = egg[s:e]
+    cmin, cmax = float(cyc.min()), float(cyc.max())
+    p2p = cmin - cmax
+    ticks = len(cyc)
+    integral = cmin / p2p
+    amp_sc = 1.0 / (p2p * (-0.5) * np.sin(2 * np.pi / ticks))
+    delta = max(egg[s] - egg[s - 1], float(np.diff(cyc).max()))
+    deggmax_hand = delta * amp_sc
+    ic_hand = np.log10(max(deggmax_hand, 1.0)) * integral
+
+    rep.add("B · Qcontact == cmin/(cmin−cmax) (impl)", f"{integral:.6f}",
+            f"{qc[i]:.6f}", f"{abs(qc[i]-integral):.1e} (atol 1e-9)",
+            abs(qc[i] - integral) <= 1e-9)
+    rep.add("B · Icontact == log10(dEGGmax)·Qc (impl)", f"{ic_hand:.6f}",
+            f"{ic[i]:.6f}", f"{abs(ic[i]-ic_hand):.1e} (atol 1e-9)",
+            abs(ic[i] - ic_hand) <= 1e-9)
+    # dEGGmax closed form for the full-jump closure: 2/sin(2π/T)
+    degg_cf = 2.0 / np.sin(2 * np.pi / ticks)
+    rep.add("B · dEGGmax == 2/sin(2π/T) (analytic)", f"{degg_cf:.4f}",
+            f"{dq[i]:.4f}", f"{abs(dq[i]-degg_cf):.1e} (atol 1e-6)",
+            abs(dq[i] - degg_cf) <= 1e-6)
+
+    rep.note("(B) Implementation spot-check: Qcontact/dEGGmax/Icontact evaluate "
+             "their formulas exactly (Δ 0); dEGGmax matches its closed form "
+             "2/sin(2π/T) for a full-amplitude closure.")
+    rep.note("(A/§7) IDENTITY MARKER (CLAUDE.md §11): Qcontact is VoiceMap's own "
+             "AMPLITUDE-based definition cmin/(cmin−cmax) — time-independent, "
+             "can be negative for an offset EGG — NOT the standard time-based "
+             "contact quotient (that is OQ, see oq.md). No SC-source parity "
+             "available; the formula is frozen by design, validated at the "
+             "implementation level only. (C) corpus deferred.")
+    return rep
+
+
 def validate_oq() -> Report:
     """OQ / SPQ / CIQ — EGG timing quotients, `OpenQuotientCalculator`.
 
@@ -1715,6 +1774,7 @@ VALIDATORS: dict[str, Callable[[], Report]] = {
     "h1h2": validate_h1h2,
     "cphon": validate_cphon,
     "oq": validate_oq,
+    "qcontact": validate_qcontact,
 }
 # convenience aliases
 for _a in ("jitter_local", "jitter_rap", "jitter_ppq5", "jitter_ddp"):
@@ -1750,6 +1810,8 @@ for _a in ("cluster", "phon", "kmeans"):
     VALIDATORS[_a] = validate_cphon
 for _a in ("spq", "ciq", "open_quotient"):
     VALIDATORS[_a] = validate_oq
+for _a in ("deggmax", "icontact", "qci"):
+    VALIDATORS[_a] = validate_qcontact
 
 
 # ─── Reporting ───────────────────────────────────────────────────────────────

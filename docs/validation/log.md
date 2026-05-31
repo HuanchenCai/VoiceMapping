@@ -391,4 +391,21 @@ Format per entry:
   (cmin=0) — it is the NON-standard one, validated next on its own terms.
 - Validation: metrics/oq.md (PASS, 3/3). No metric code changed.
 
+## 2026-05-31  session=validation-bootstrap  commit=pending  [PHASE 2 EGG]
+- Touched: scripts/validate_metric.py (+validate_qcontact), metrics/qcontact.md
+- Why: Phase 2 EGG — the NON-standard Qcontact/dEGGmax/Icontact (user's plan:
+  standard OQ first, then these).
+- FINDING: Qcontact = cmin/(cmin−cmax) is purely AMPLITUDE-based — independent
+  of contact TIME, and NEGATIVE for a positive-baseline EGG (−0.25 on
+  [0.2,1.0]). It is NOT a standard time-based contact quotient (that's OQ).
+  Per CLAUDE.md §11 this is an INTENTIONAL identity marker (formula frozen,
+  do-not-change), so this is by design, not a bug.
+- Phase 2 / Qcontact (harness 3/3 PASS): implementation spot-check exact
+  (Qcontact/Icontact Δ 0 vs hand-evaluated formula); dEGGmax matches its
+  closed form 2/sin(2π/T) for a full-amplitude closure (Δ 0).
+- Status nuance: PASS at the IMPLEMENTATION level; reference/physical parity
+  is N/A by design (no SC source, identity marker). Flagged in §7 that
+  paper-grade provenance would need the SC source recovered.
+- Validation: metrics/qcontact.md (PASS impl, 3/3). No metric code changed.
+
 <!-- next-session-anchor -->

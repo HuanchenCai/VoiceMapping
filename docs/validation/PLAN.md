@@ -168,9 +168,9 @@ def validate(metric_name, *, references=['praat'], signals=['all'],
 
 | 指标 | 参考标准 | 待做 |
 |---|---|---|
-| **Qcontact** | Howard 1995 (Speech Communication) | 比对 SC FonaDyn 源码 + Howard 公式；合成 EGG 信号验证 |
-| **dEGGmax** | FonaDyn convention | 同上 |
-| **Icontact** | log10(dEGGmax) · Qcontact 定义 | 数值 spot-check |
+| **Qcontact** ✅ | VoiceMap 签名定义(身份标识,§11) | ✅ PASS(实现 spot-check Δ=0)；§7 标明=cmin/(cmin-cmax) 幅度型非标准 CQ；docs/metrics/qcontact.md |
+| **dEGGmax** ✅ | VoiceMap convention | ✅ PASS — 解析 GT dEGGmax=2/sin(2π/T) Δ=0 |
+| **Icontact** ✅ | log10(dEGGmax) · Qcontact | ✅ PASS — 复合 spot-check Δ=0 |
 | **OQ / SPQ / CIQ** ✅ | Baken & Orlikoff 2000 | ✅ PASS — 合成 EGG(已知闭商)OQ→1-CQ/SPQ/CIQ 解析值 <0.02；docs/metrics/oq.md。corpus 典型值待 SVD |
 | **HRFegg** | Howard 1998 | parity vs SC `namePhasePortrait` |
 | **Sample Entropy (CSE)** ✅ | Richman & Moorman 2000 | ✅ PASS — m=1 SampEn 逐字节==nolds.sampen (Δ=0) + 无序排序；docs/metrics/cse.md |
