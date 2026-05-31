@@ -157,4 +157,23 @@ Format per entry:
 - Validation: metrics/formants.md  (PASS, 5/5 checks)
 - Tests: harness 5/5; validate_params.py 48 PASS / 4 WARN / 0 FAIL intact.
 
+## 2026-05-31  session=validation-bootstrap  commit=pending
+- Touched: scripts/validate_metric.py (+validate_bandwidths + aliases),
+  docs/validation/metrics/bandwidths.md (new)
+- Why: Phase 1.7 — validate B1/B2/B3. Same Burg poles as F1/F2/F3, bandwidth
+  = -ln|z|·fs/π, with >800 Hz zeroed (the §8.8 physiological ceiling; the
+  old FWHM note is stale — current code is pole-radius).
+- Method: bandwidth is the highest-variance formant quantity, so the bar is
+  AGGREGATE-MEDIAN parity vs Praat (≤10 %, conventions.md §1), not per-cycle.
+- Phase 1.7 results (harness 5/5 PASS):
+  · (A) median B1/B2/B3 vs Praat get_bandwidth: 182/244/155 vs 188/258/157 Hz
+    → 3.0 / 5.4 / 1.2 %.
+  · (B) >800 Hz ceiling holds (max 794); silence → none.
+- Documented (md §7): high per-cycle scatter (median |Δf/f| 10/18/11 %),
+  B2 least stable (~33 % zeroed by the ceiling), the hard 800 Hz gate
+  (a 0 means "not measured"), shared high-F0 synthetic confound.
+- Before / After: bandwidths.md Status UNKNOWN → PASS.
+- Validation: metrics/bandwidths.md  (PASS, 5/5 checks)
+- Tests: harness 5/5; validate_params.py 48 PASS / 4 WARN / 0 FAIL intact.
+
 <!-- next-session-anchor -->

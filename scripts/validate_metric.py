@@ -597,6 +597,77 @@ def validate_formants() -> Report:
     return rep
 
 
+def validate_bandwidths() -> Report:
+    """Formant bandwidths B1 / B2 / B3 (Hz) — Burg pole radii, >800 Hz cleared.
+
+    Same Praat-style Burg poles as F1/F2/F3 (`bw = −ln|z|·fs/π`), with a
+    physiological ceiling that zeros any bandwidth > 800 Hz. Bandwidth is the
+    highest-variance formant quantity, so the bar is **aggregate-median**
+    parity with Praat (≤ 10 %, per `conventions.md §1`), not per-cycle.
+    """
+    rep = Report("bandwidths")
+    try:
+        import soundfile as sf
+        import parselmouth
+    except ImportError as e:
+        rep.skipped = True
+        rep.skip_reason = f"missing dependency: {e.name}"
+        return rep
+    from voicemap.config import VoiceMapConfig
+    from voicemap.metrics import FormantExtrasCalculator
+    cfg = VoiceMapConfig()
+
+    audio = os.path.join(AUDIO_DIR, "test_Voice_EGG.wav")
+    if os.path.exists(audio):
+        sig, sr = sf.read(audio)
+        voice = (sig[:, 0] if sig.ndim == 2 else sig)[: int(10 * sr)]
+        voice = np.ascontiguousarray(voice.astype(np.float64))
+        trig = _cc_trigger_array(voice, float(sr))
+        ct = np.where(trig > 0.5)[0][:-1] / float(sr)
+        ex = FormantExtrasCalculator(cfg).calculate(voice, trig)
+
+        snd = parselmouth.Sound(voice, sampling_frequency=float(sr))
+        fo = snd.to_formant_burg(time_step=0.01, max_number_of_formants=5,
+                                 maximum_formant=5500.0, window_length=0.025,
+                                 pre_emphasis_from=50.0)
+        scatter = []
+        for k, label in enumerate(("B1", "B2", "B3")):
+            o = ex[f"b{k+1}"]
+            pv = np.array([fo.get_bandwidth_at_time(k + 1, float(t))
+                           for t in ct], dtype=np.float64)
+            good = (o > 0) & np.isfinite(pv) & (pv > 0) & (pv <= 800)
+            om, pm = float(np.median(o[good])), float(np.median(pv[good]))
+            d = abs(om - pm) / pm * 100.0
+            rep.add(f"A · {label} median vs Praat (real 10 s)", f"{pm:.0f} Hz",
+                    f"{om:.0f} Hz", f"{d:.1f}% (max 10%)", d <= 10.0)
+            scatter.append(float(np.median(
+                np.abs(o[good] - pv[good]) / pv[good]) * 100.0))
+        # ceiling invariant: nothing above 800 Hz survives
+        mx = max(float(ex[f"b{k+1}"].max()) for k in range(3))
+        rep.add("B · >800 Hz ceiling enforced", "<= 800 Hz", f"{mx:.0f} Hz",
+                f"{mx:.0f} (max 800)", mx <= 800.0)
+        rep.note(f"(A) Aggregate-median parity is the bar; per-cycle scatter is "
+                 f"high (median |Δf/f| {scatter[0]:.0f}/{scatter[1]:.0f}/"
+                 f"{scatter[2]:.0f}% for B1/B2/B3) — intrinsic to bandwidth "
+                 f"estimation, documented in md §7.")
+    else:
+        rep.note(f"(A) skipped — fixture not found: {audio}")
+
+    # silence → empty (boundary)
+    _ensure_signals()
+    sig, fsr = sf.read(os.path.join(TS_DIR, "silent_5s.wav"))
+    vs = (sig[:, 0] if sig.ndim == 2 else sig).astype(np.float64)
+    res = FormantExtrasCalculator(cfg).calculate(
+        vs, _cc_trigger_array(vs, float(fsr)))
+    nz = int((res["b1"] > 0).sum())
+    rep.add("B · silence -> no bandwidths", "0 nonzero", f"{nz}",
+            "must be empty", nz == 0)
+
+    rep.note("(B) >800 Hz physiological ceiling zeroes implausible widths; "
+             "silence yields none. (C) corpus distribution deferred.")
+    return rep
+
+
 def _our_hnr_median(voice, fs, cfg) -> float:
     from voicemap.metrics import HNRCalculator
     h = HNRCalculator(cfg).calculate(np.asarray(voice, dtype=np.float64),
@@ -795,6 +866,7 @@ VALIDATORS: dict[str, Callable[[], Report]] = {
     "hnr": validate_hnr,
     "cpp": validate_cpp,
     "formants": validate_formants,
+    "bandwidths": validate_bandwidths,
 }
 # convenience aliases
 for _a in ("jitter_local", "jitter_rap", "jitter_ppq5", "jitter_ddp"):
@@ -810,6 +882,8 @@ for _a in ("cpps", "cpp_cpps", "cepstral_peak_prominence"):
     VALIDATORS[_a] = validate_cpp
 for _a in ("formant", "f1", "f2", "f3"):
     VALIDATORS[_a] = validate_formants
+for _a in ("bandwidth", "b1", "b2", "b3"):
+    VALIDATORS[_a] = validate_bandwidths
 
 
 # ─── Reporting ───────────────────────────────────────────────────────────────
