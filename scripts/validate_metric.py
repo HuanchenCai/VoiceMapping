@@ -1868,6 +1868,85 @@ def validate_hnr() -> Report:
     return rep
 
 
+def validate_zcr() -> Report:
+    """ZCR — per-cycle zero-crossing rate (crossings / cycle length), `ZCRCalculator`.
+
+    A dimensionless index of high-frequency / noise content. Validated by
+    synthetic ground truth (it is an experimental P3 metric, so (B) suffices):
+      • broadband white noise → ZCR ≈ 0.5 — the probability that two i.i.d.
+        zero-mean samples have opposite signs is exactly 0.5, window-independent;
+      • ZCR scales ~linearly with the dominant frequency (an octave up → ×2);
+      • a pure tone reads ≪ noise; adding higher harmonics raises ZCR;
+      • silence → no crossings.
+    The ABSOLUTE per-cycle crossing count is alignment-sensitive (1–2 per
+    period for a pure tone — the half-open cycle window [s,e) drops the boundary
+    zero, so ours ≈ ½ the conventional full-signal 2·f0/sr); the metric is
+    meaningful as a RELATIVE high-frequency index, documented in §7.
+    """
+    rep = Report("zcr")
+    from voicemap.config import VoiceMapConfig
+    from voicemap.metrics import ZCRCalculator
+    cfg = VoiceMapConfig()
+    sr = cfg.sample_rate
+    dur = 3.0
+    tt = np.arange(int(dur * sr)) / sr
+
+    def _trig(f0):
+        idx = np.round(np.arange(int(dur * f0)) * sr / f0).astype(int)
+        t = np.zeros(len(tt))
+        t[idx[idx < len(tt)]] = 1.0
+        return t
+
+    def _zcr(x, f0, agg=np.mean):
+        z = ZCRCalculator(cfg).calculate(np.asarray(x, np.float64), _trig(f0))
+        zv = z[z > 0]
+        return float(agg(zv)) if len(zv) else float("nan")
+
+    # ── (B) white-noise analytic anchor: ZCR → 0.5 ───────────────────────────
+    rng = np.random.default_rng(0)
+    wn = rng.standard_normal(len(tt))
+    z_noise = _zcr(wn, 200.0, np.median)
+    rep.add("B · white-noise ZCR → 0.5 (analytic)", "0.500", f"{z_noise:.3f}",
+            f"{abs(z_noise-0.5):.3f} (tol 0.05)", abs(z_noise - 0.5) <= 0.05)
+
+    # ── (B) linear scaling: an octave up doubles ZCR ─────────────────────────
+    z100 = _zcr(np.sin(2 * np.pi * 100 * tt), 100.0)
+    z200 = _zcr(np.sin(2 * np.pi * 200 * tt), 200.0)
+    z400 = _zcr(np.sin(2 * np.pi * 400 * tt), 400.0)
+    r1, r2 = z200 / z100, z400 / z200
+    rep.add("B · ZCR ×2 per octave (200/100)", "2.0", f"{r1:.2f}",
+            f"{r1:.2f} (1.7–2.3)", 1.7 <= r1 <= 2.3)
+    rep.add("B · ZCR ×2 per octave (400/200)", "2.0", f"{r2:.2f}",
+            f"{r2:.2f} (1.7–2.3)", 1.7 <= r2 <= 2.3)
+
+    # ── (B) a pure tone reads far below broadband noise ──────────────────────
+    rep.add("B · pure tone ≪ noise", f"≪ {z_noise:.2f}", f"{z200:.4f}",
+            f"ratio {z_noise/z200:.0f}× (min 10×)", z_noise / z200 >= 10.0)
+
+    # ── (B) higher harmonics raise ZCR (more HF content → more crossings) ─────
+    h3 = _zcr(np.sin(2 * np.pi * 200 * tt) + 0.9 * np.sin(2 * np.pi * 600 * tt), 200.0)
+    h5 = _zcr(np.sin(2 * np.pi * 200 * tt) + 0.9 * np.sin(2 * np.pi * 1000 * tt), 200.0)
+    rep.add("B · higher harmonics raise ZCR (pure<+3rd<+5th)",
+            f"{z200:.3f}<{h3:.3f}<{h5:.3f}", "monotone",
+            "increasing with HF content", z200 < h3 < h5)
+
+    # ── (B) silence → no crossings (boundary) ────────────────────────────────
+    zs = ZCRCalculator(cfg).calculate(np.zeros(len(tt)), _trig(200.0))
+    nz = int((zs > 0).sum())
+    rep.add("B · silence → no crossings", "0 nonzero", f"{nz}",
+            "must be empty", nz == 0)
+
+    rep.note("(B) White-noise ZCR → 0.5 (window-independent analytic anchor); "
+             "ZCR scales linearly with the dominant frequency (×2 per octave); "
+             "a pure tone reads ≪ noise; higher harmonics raise it; silence → 0.")
+    rep.note("(A/§7) The ABSOLUTE per-cycle count is alignment-sensitive — the "
+             "half-open cycle window [s,e) drops the boundary zero, so a pure "
+             "tone reads 1–2 crossings/period (ours ≈ ½ the conventional full-"
+             "signal 2·f0/sr). ZCR is a RELATIVE high-frequency / noisiness "
+             "index, not an absolute crossing count. (C) corpus deferred.")
+    return rep
+
+
 VALIDATORS: dict[str, Callable[[], Report]] = {
     "jitter": validate_jitter,
     "shimmer": validate_shimmer,
@@ -1891,6 +1970,7 @@ VALIDATORS: dict[str, Callable[[], Report]] = {
     "qcontact": validate_qcontact,
     "hrf": validate_hrf,
     "singer_formant": validate_singer,
+    "zcr": validate_zcr,
 }
 # convenience aliases
 for _a in ("jitter_local", "jitter_rap", "jitter_ppq5", "jitter_ddp"):
@@ -1932,6 +2012,8 @@ for _a in ("hrfegg", "harmonic_richness"):
     VALIDATORS[_a] = validate_hrf
 for _a in ("sfe", "spr", "singer", "singers_formant"):
     VALIDATORS[_a] = validate_singer
+for _a in ("zero_crossing_rate", "zerocrossing", "zero_crossings"):
+    VALIDATORS[_a] = validate_zcr
 
 
 # ─── Reporting ───────────────────────────────────────────────────────────────
@@ -1952,7 +2034,8 @@ def _ascii(s: str) -> str:
              .replace("−", "-").replace("✓", "ok").replace("✗", "x")
              .replace("²", "2").replace("√", "sqrt").replace("≥", ">=")
              .replace("≤", "<=").replace("≪", "<<").replace("≫", ">>")
-             .replace("∑", "sum").replace("Σ", "sum"))
+             .replace("∑", "sum").replace("Σ", "sum").replace("×", "x")
+             .replace("½", "1/2").replace("–", "-"))
 
 
 def print_report(rep: Report) -> None:
