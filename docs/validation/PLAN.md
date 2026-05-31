@@ -11,6 +11,7 @@
   - 0.5 ⚠ corpus：本地 `audio/` stand-in 就位；真实 Saarbrücken 下载 deferred（仅阻塞 PPE/SFE/MPT 的 (C) 测试）
 - ✅ **Phase 1 — P0 指标 (12/12 PASS, 完成)**：1 ✅ Jitter；2 ✅ Shimmer；3 ✅ F0/Clarity；4 ✅ HNR/NHR；5 ✅ CPP/CPPS；6 ✅ Formants；7 ✅ B1/B2/B3；8 ✅ Spectral moments；9 ✅ Alpha/Hammarberg；10 ✅ Vibrato (rate+extent,已修)；11 ✅ PPE (VOICED 语料 AUC 0.73)；12 ✅ MFCC。**全部 P0 完成,A/B/C 按适用性各就位**
 - ✅ **Phase 2 — P1 EGG + 次要 acoustic (完成)**：Crest / CSE / SPL / SpecBal / H1-H2,H1-H3 / cPhon / OQ,SPQ,CIQ / Qcontact,dEGGmax,Icontact / HRFegg / SFE,SPR —— 全部 PASS（A 或 B 各就位）。EGG 全族已验；SFE/SPR/EGG 的 (C) 语料判别待 SVD/歌手语料。
+- ✅ **Phase 3 — 待验证 metrics (完成)**：ZCR ✅、MPT/VoicingRatio/DUV ✅、VibratoJitter ✅（合成 GT 各就位），cPhon ✅（Phase 2 已验）。**GNE ❌ FAIL as GNE**——已验证、已记录：是带对称比、与真 Praat GNE 反相关 r=−0.98；冻结期不改公式，post-freeze 改名/换真 GNE（metrics/gne.md，PLAN §6）。
 
 ---
 
@@ -191,7 +192,7 @@ def validate(metric_name, *, references=['praat'], signals=['all'],
 | 指标 | 行动 |
 |---|---|
 | ZCR ✅ | 合成信号验证 — PASS：(B) 白噪声 ZCR→0.5 锚 + ×2/八度缩放 + 谐波单调；§7 记半开窗减半约定；metrics/zcr.md |
-| GNE | 跟 Praat GNE 比；若实现差太多就删 |
+| GNE ❌ | **FAIL as GNE**（已验证、已记录）：Praat 确有 GNE（`To Harmonicity (gne)`）；我们的 `gne` 是 [500-1500]/[1500-2500] 带对称比，与真 GNE **反相关 r=−0.98**（方向相反、非保序、不能 re-scale 救回）。冻结期不改公式（registry 标签本就写 "GNE-like (simplified)"）。**post-freeze**：改名为带平衡描述符，或换成 Praat GNE（parselmouth drop-in）；metrics/gne.md |
 | MPT / VoicingRatio / DUV ✅ | PASS：(B) 合成 grid 机器精度恢复（MPT=最长 voiced run×T、VR=voiced/total、DUV=100·(1−VR)）+ (C) 真实录音 VR=1.0/MPT 67s；§7 记非临床 MPT；metrics/integrative.md |
 | VibratoJitter ✅ | PASS：(B) 公式 GT（constant→0%、交替 p0(1±δ)→CV=100δ 精确）+ 端到端 steady 0.18% vs wobbly 7.2%（40× 分离）；§7 记真实 vibrato magnitude 被压缩；metrics/vibrato_jitter.md |
 | cPhon ✅ | 已在 Phase 2 验证（z-score==StandardScaler + 合成簇 ARI=1.0）；metrics/cphon.md |
