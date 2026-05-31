@@ -238,4 +238,24 @@ Format per entry:
   downloaded). Next session: install opensmile OR pick an alt reference for
   Alpha/Hammarberg; download Saarbrücken for PPE + the (C) corpus tests.
 
+## 2026-05-31  session=validation-bootstrap  commit=pending
+- Touched: scripts/validate_metric.py (+validate_alpha_hammarberg + aliases),
+  requirements-validation.txt (opensmile uncommented),
+  docs/validation/metrics/alpha_hammarberg.md (new)
+- Why: Phase 1.9 — UNBLOCKED by installing opensmile 2.6.0. Validate Alpha
+  Ratio + Hammarberg Index vs eGeMAPS.
+- Phase 1.9 results (harness 5/5 PASS):
+  · (B) analytic two-tone GT (500+3000 Hz, 5 amplitude ratios): both Alpha
+    and Hammarberg recover 20·log10(Al/Ah) exactly (≤0.03 dB).
+  · (A) OpenSMILE eGeMAPSv02 on a voiced tilt sweep: Alpha r = −1.0000
+    (anti-correlated — ours = E_low/E_high, OpenSMILE the inverse; magnitudes
+    match), Hammarberg r = +0.9999 with median |Δ| 0.39 dB (near value-parity).
+- Finding: OpenSMILE's Alpha is the inverse band ratio → ours must be NEGATED
+  before comparing to an eGeMAPS threshold (md §7). OpenSMILE needs voiced
+  input (two-tone gives it garbage) → comparison run on voiced vowels only.
+- Before / After: alpha_hammarberg.md Status UNKNOWN → PASS.
+- Validation: metrics/alpha_hammarberg.md  (PASS, 5/5 checks)
+- Tests: harness 5/5; validate_params.py 48 PASS / 4 WARN / 0 FAIL intact.
+- ►► Phase 1 P0 now 11/12 PASS. Only #11 PPE remains (needs a real corpus).
+
 <!-- next-session-anchor -->
