@@ -375,4 +375,20 @@ Format per entry:
   non-standard split (user: standard first, add-if-missing, then Qcontact).
   Remaining non-EGG: SFE/SPR (need a singer corpus).
 
+## 2026-05-31  session=validation-bootstrap  commit=pending  [PHASE 2 EGG]
+- Touched: scripts/validate_metric.py (+_synth_egg helper, +validate_oq,
+  _ascii += U+2212), metrics/oq.md (new)
+- Why: Phase 2 EGG — STANDARD time-based quotients first (user's plan).
+- Built `_synth_egg`: synthetic EGG with known closed quotient CQ (closed
+  plateau → linear opening fall over ramp → open phase; trigger at GCI). Gives
+  analytic OQ=1−CQ, SPQ=ramp/(1−CQ−ramp), CIQ=(1−CQ−2·ramp)/(1−CQ). Reusable
+  for the rest of the EGG family.
+- Phase 2 / OQ-SPQ-CIQ (harness 3/3 PASS): OQ recovers 1−CQ to 0.003, SPQ to
+  0.013, CIQ to 0.012 over CQ 0.3–0.6. The standard EGG-timing family correct.
+- EGG survey finding: ALL PLAN EGG metrics already exist (QcontactCalculator,
+  OpenQuotientCalculator, HRFCalculator) — nothing to add, no freeze issue.
+- Note: amplitude-based Qcontact (cmin/p2p) reads 0 on a clean synthetic EGG
+  (cmin=0) — it is the NON-standard one, validated next on its own terms.
+- Validation: metrics/oq.md (PASS, 3/3). No metric code changed.
+
 <!-- next-session-anchor -->
