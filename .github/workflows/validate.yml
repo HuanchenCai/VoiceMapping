@@ -1,0 +1,50 @@
+name: validate
+
+# Methodology gate: regenerates the synthetic test signals, runs the
+# per-metric validation harness, and runs the Praat-parity unit tests.
+# A red check here means a metric drifted from its reference — block merge.
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # parselmouth wheels exist for these; 3.14 has no wheel yet.
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install validation dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-validation.txt
+
+      - name: Regenerate synthetic test signals
+        run: python docs/validation/test_signals/make_signals.py
+
+      - name: Validate metrics (harness, gates on exit code)
+        run: |
+          python scripts/validate_metric.py jitter
+          # add one line per metric as its validator lands:
+          # python scripts/validate_metric.py shimmer
+          # python scripts/validate_metric.py f0_clarity
+
+      - name: Praat-parity unit tests
+        run: |
+          python -m unittest \
+            tests.test_praat_perturbation_parity \
+            tests.test_praat_pitch_parity \
+            -v
