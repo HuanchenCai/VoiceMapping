@@ -173,7 +173,7 @@ def validate(metric_name, *, references=['praat'], signals=['all'],
 | **Icontact** | log10(dEGGmax) · Qcontact 定义 | 数值 spot-check |
 | **OQ / SPQ / CIQ** | Baken & Orlikoff 2000 | corpus 测典型值（modal/breathy/pressed）|
 | **HRFegg** | Howard 1998 | parity vs SC `namePhasePortrait` |
-| **Sample Entropy (CSE)** | Richman & Moorman 2000 | parity vs `nolds.sampen()` |
+| **Sample Entropy (CSE)** ✅ | Richman & Moorman 2000 | ✅ PASS — m=1 SampEn 逐字节==nolds.sampen (Δ=0) + 无序排序；docs/metrics/cse.md |
 | **Cluster / cPhon (K-means)** | sklearn 标准 | 验证 feature 抽取与归一化 |
 | **SPL** | IEC 61672 / SC scserver | 校准 `spl_correction_db` 与 SC reference |
 | **SpecBal** | SC `PV_SpecCentroid` 等 | parity vs SC source |
