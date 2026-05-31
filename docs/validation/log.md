@@ -176,4 +176,25 @@ Format per entry:
 - Validation: metrics/bandwidths.md  (PASS, 5/5 checks)
 - Tests: harness 5/5; validate_params.py 48 PASS / 4 WARN / 0 FAIL intact.
 
+## 2026-05-31  session=validation-bootstrap  commit=pending
+- Touched: scripts/validate_metric.py (+validate_spectral + _spec_frames
+  helper + aliases), docs/validation/metrics/spectral_moments.md (new)
+- Why: Phase 1.8 — validate spectral moments (centroid / bandwidth / rolloff
+  / flatness / slope) vs librosa.
+- Method: feed librosa the SAME spectrogram our calculator builds (via S=),
+  isolating the formula from the framing — the spectral analogue of jitter
+  feeding Praat the same marks.
+- Phase 1.8 results (harness 7/7 PASS):
+  · (A) centroid/bandwidth/rolloff/flatness == librosa to ~1e-16 (machine
+    precision) on a shared spectrogram.
+  · (B) slope recovers an analytic linear log10|S| slope exactly (librosa
+    has no spectral_slope); 1 kHz tone → centroid 1000.0 Hz through the
+    SHIPPED calculator; white-noise flatness 0.85 >> tone ~0.
+- Documented (md §7): power-weighting (not librosa's magnitude default — a
+  consistent offset vs a default librosa call); VoiceMap framing;
+  slope units (log10|S|/Hz, not dB/oct); skew/kurt are display-clipped.
+- Before / After: spectral_moments.md Status UNKNOWN → PASS.
+- Validation: metrics/spectral_moments.md  (PASS, 7/7 checks)
+- Tests: harness 7/7; validate_params.py 48 PASS / 4 WARN / 0 FAIL intact.
+
 <!-- next-session-anchor -->
