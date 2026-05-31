@@ -116,4 +116,26 @@ Format per entry:
 - Validation: metrics/hnr.md  (PASS, 13/13 checks)
 - Tests: harness 13/13; validate_params.py 48 PASS / 4 WARN / 0 FAIL intact.
 
+## 2026-05-31  session=validation-bootstrap  commit=pending
+- Touched: scripts/validate_metric.py (+validate_cpp, +_our_cpp_median /
+  +_praat_cpps helpers, +aliases), docs/validation/metrics/cpp.md (new)
+- Why: Phase 1.5 — validate CPP / CPPS. Parity NOT pre-existing.
+- Method insight: VoiceMap's CPP is the SuperCollider Cepstrum convention
+  (natural-log spectrum, 1024-pt IFFT, f=SR/(2q)), NOT Praat's. Absolute CPP
+  is convention-dependent (Praat CPPS sits several dB higher), so numeric
+  parity is the wrong bar — CPP is validated in the literature by its
+  ORDERING under degradation. Used correlation + monotonicity instead.
+- Phase 1.5 results (harness 5/5 PASS):
+  · (A) corr(CPP, Praat CPPS) over 0-25 dB SNR sweep r=0.9786.
+  · (B) corr(CPP, SNR) r=0.9942 (monotonic); clean 23.1 >> SNR-0 10.9 dB;
+    reproducible despite tie-break dither (std 0.028 dB / 5 runs);
+    silence → no CPP.
+- Documented limitations (md §7): not numerically comparable to Praat CPPS
+  (re-derive clinical cut-offs on VoiceMap's scale); flat ~0.14 dB/dB SNR
+  slope (use HNR for absolute noise); dither → weakly stochastic (~0.03 dB);
+  chirp reads ~11 dB (periodicity index, not voicing gate).
+- Before / After: cpp.md Status UNKNOWN → PASS.
+- Validation: metrics/cpp.md  (PASS, 5/5 checks)
+- Tests: harness 5/5; validate_params.py 48 PASS / 4 WARN / 0 FAIL intact.
+
 <!-- next-session-anchor -->
