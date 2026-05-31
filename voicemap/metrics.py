@@ -1065,10 +1065,18 @@ class OpenQuotientCalculator(MetricCalculator):
 #   • Each cycle is assigned to the window it's centred in.
 # ---------------------------------------------------------------------------
 class VibratoCalculator(MetricCalculator):
-    """Sliding-window FFT of the per-cycle MIDI series → rate (Hz) + extent (cents)."""
+    """Sliding-window FFT of the per-cycle MIDI series → rate (Hz) + extent (cents).
+
+    `window_cycles=80` (~0.4 s at F0=200) spans ≥ 2 vibrato periods, which is
+    the minimum to resolve the 4-8 Hz rate; together with the zero-padded FFT
+    (see `calculate`) it recovers an imposed rate to <0.3 Hz. A shorter window
+    sees only ~1 vibrato cycle and biases the rate low (an imposed 6 Hz read
+    ~4.7 Hz at the old window_cycles=40). Independent of the identically-named
+    defaults in PPECalculator / VibratoJitterCalculator.
+    """
 
     def __init__(self, config: VoiceMapConfig,
-                 window_cycles: int = 40,
+                 window_cycles: int = 80,
                  vib_f_min: float = 4.0, vib_f_max: float = 8.0,
                  min_snr: float = 2.0):
         super().__init__(config)
@@ -1095,17 +1103,25 @@ class VibratoCalculator(MetricCalculator):
         T_wins    = sliding_window_view(T, W)                        # (n-W+1, W)
         n_wins    = midi_wins.shape[0]
 
-        # Detrend + Hann, FFT
+        # Detrend + Hann, FFT.  Zero-pad the rfft (n_fft >> W) so the bin
+        # spacing (= cycle_rate / n_fft) is fine enough to RESOLVE the 4-8 Hz
+        # vibrato band: at W=40 / F0≈200 the bare-W spacing is ~5 Hz, leaving a
+        # single in-band bin and biasing the rate toward it (a genuine 6 Hz
+        # reads ~4.7 Hz). Zero-padding only interpolates the DTFT — it does not
+        # change the peak magnitude, so the `extent = 800·peak_mag/W` scaling
+        # below (which depends on W real samples, not the FFT length) is
+        # unaffected.
         midi_d = midi_wins - midi_wins.mean(axis=1, keepdims=True)
         hann   = np.hanning(W)
-        X      = np.fft.rfft(midi_d * hann, axis=1)
-        mag    = np.abs(X)                                           # (n_wins, W//2+1)
+        n_fft  = 1 << int(np.ceil(np.log2(max(8 * W, 64))))         # 512 for W=40
+        X      = np.fft.rfft(midi_d * hann, n=n_fft, axis=1)
+        mag    = np.abs(X)                                           # (n_wins, n_fft//2+1)
 
         # Per-window cycle rate (cycles/s ≈ pitch frequency average)
         cycle_rate = W / T_wins.sum(axis=1)                          # (n_wins,)
-        # FFT bin frequencies per window
+        # FFT bin frequencies per window (bin spacing = cycle_rate / n_fft)
         k = np.arange(mag.shape[1])
-        freqs = k[None, :] * cycle_rate[:, None] / W                  # (n_wins, n_bins)
+        freqs = k[None, :] * cycle_rate[:, None] / n_fft             # (n_wins, n_bins)
 
         # Mask to vibrato band (per-window since freqs vary)
         band = (freqs >= self.vib_f_min) & (freqs <= self.vib_f_max)
