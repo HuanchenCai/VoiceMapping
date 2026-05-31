@@ -171,7 +171,7 @@ def validate(metric_name, *, references=['praat'], signals=['all'],
 | **Qcontact** | Howard 1995 (Speech Communication) | 比对 SC FonaDyn 源码 + Howard 公式；合成 EGG 信号验证 |
 | **dEGGmax** | FonaDyn convention | 同上 |
 | **Icontact** | log10(dEGGmax) · Qcontact 定义 | 数值 spot-check |
-| **OQ / SPQ / CIQ** | Baken & Orlikoff 2000 | corpus 测典型值（modal/breathy/pressed）|
+| **OQ / SPQ / CIQ** ✅ | Baken & Orlikoff 2000 | ✅ PASS — 合成 EGG(已知闭商)OQ→1-CQ/SPQ/CIQ 解析值 <0.02；docs/metrics/oq.md。corpus 典型值待 SVD |
 | **HRFegg** | Howard 1998 | parity vs SC `namePhasePortrait` |
 | **Sample Entropy (CSE)** ✅ | Richman & Moorman 2000 | ✅ PASS — m=1 SampEn 逐字节==nolds.sampen (Δ=0) + 无序排序；docs/metrics/cse.md |
 | **Cluster / cPhon (K-means)** ✅ | sklearn 标准 | ✅ PASS — z-score==StandardScaler (Δ=0) + 合成可分簇 ARI=1.0 + 可复现；docs/metrics/cphon.md |
