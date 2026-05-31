@@ -1947,6 +1947,106 @@ def validate_zcr() -> Report:
     return rep
 
 
+def validate_integrative() -> Report:
+    """MPT / Voicing Ratio / DUV — whole-recording integrative metrics,
+    `IntegrativeMetricsCalculator`.
+
+    Pure bookkeeping over the per-cycle voiced flag (`midi_per_cycle > 0`) and
+    the cycle durations: MPT = longest contiguous voiced run (s), VoicingRatio
+    = voiced/total, DUV = 100·(1−ratio). Validated by (B) synthetic ground
+    truth — a designed voiced/unvoiced pattern on a regular cycle grid recovers
+    each quantity exactly — plus a (C) real-audio sanity.
+    """
+    rep = Report("integrative")
+    from voicemap.config import VoiceMapConfig
+    from voicemap.metrics import IntegrativeMetricsCalculator
+    cfg = VoiceMapConfig()
+    sr = cfg.sample_rate
+    P = 220                       # integer cycle period (~200 Hz)
+    T = P / sr                    # cycle duration (s)
+
+    def _run(pattern):
+        n = len(pattern)
+        idx = np.arange(n + 1) * P            # n+1 triggers → n cycles
+        trig = np.zeros(idx[-1] + 1)
+        trig[idx] = 1.0
+        midi = np.where(np.asarray(pattern) > 0, 57.0, 0.0)
+        out = IntegrativeMetricsCalculator(cfg).calculate(
+            np.zeros(len(trig)), midi, trig)
+        return {k: float(v[0]) for k, v in out.items()}
+
+    # ── (B) designed pattern: 30 voiced / 10 unvoiced / 50 voiced / 10 unvoiced
+    res = _run([1]*30 + [0]*10 + [1]*50 + [0]*10)         # longest run = 50
+    exp_mpt, exp_vr, exp_duv = 50*T, 80/100, 20.0
+    rep.add("B · MPT == longest voiced run × T", f"{exp_mpt:.4f} s",
+            f"{res['mpt']:.4f} s", f"{abs(res['mpt']-exp_mpt):.1e} (atol 1e-6)",
+            abs(res['mpt']-exp_mpt) <= 1e-6)
+    rep.add("B · VoicingRatio == voiced/total", f"{exp_vr:.3f}",
+            f"{res['voicing_ratio']:.3f}",
+            f"{abs(res['voicing_ratio']-exp_vr):.1e} (atol 1e-9)",
+            abs(res['voicing_ratio']-exp_vr) <= 1e-9)
+    rep.add("B · DUV == 100·(1−ratio)", f"{exp_duv:.2f}%", f"{res['duv']:.2f}%",
+            f"{abs(res['duv']-exp_duv):.1e} (atol 1e-9)",
+            abs(res['duv']-exp_duv) <= 1e-9)
+    rep.add("B · DUV/VoicingRatio identity", "100·(1−VR)", f"{res['duv']:.4f}",
+            f"{abs(res['duv']-100*(1-res['voicing_ratio'])):.1e} (atol 1e-9)",
+            abs(res['duv']-100*(1-res['voicing_ratio'])) <= 1e-9)
+
+    # ── (B) corners ──────────────────────────────────────────────────────────
+    av = _run([1]*100)
+    rep.add("B · all-voiced → ratio 1, DUV 0, MPT full",
+            f"{100*T:.4f}s/1/0",
+            f"{av['mpt']:.4f}/{av['voicing_ratio']:.0f}/{av['duv']:.0f}",
+            "corner", abs(av['mpt']-100*T) <= 1e-6
+            and av['voicing_ratio'] == 1.0 and av['duv'] == 0.0)
+    uv = _run([0]*100)
+    rep.add("B · all-unvoiced → ratio 0, DUV 100, MPT 0", "0/0/100",
+            f"{uv['mpt']:.0f}/{uv['voicing_ratio']:.0f}/{uv['duv']:.0f}",
+            "corner", uv['mpt'] == 0.0 and uv['voicing_ratio'] == 0.0
+            and uv['duv'] == 100.0)
+
+    # ── (C) real-audio sanity: sustained voice → VoicingRatio ~ 1, MPT > 15 s ─
+    try:
+        import soundfile as sf
+        from voicemap.metrics import ClarityCalculator
+        audio = os.path.join(AUDIO_DIR, "test_Voice_EGG.wav")
+        if os.path.exists(audio):
+            sig, srr = sf.read(audio)
+            v = (sig[:, 0] if sig.ndim == 2 else sig).astype(np.float64)
+            dur = len(v) / float(srr)
+            trig = _cc_trigger_array(v, float(srr))
+            cmidi, _ = ClarityCalculator(cfg).calculate(v, trig)
+            if len(cmidi):
+                out = IntegrativeMetricsCalculator(cfg).calculate(v, cmidi, trig)
+                mpt, vr, duv = (float(out['mpt'][0]),
+                                float(out['voicing_ratio'][0]),
+                                float(out['duv'][0]))
+                rep.add("C · real voiced recording VoicingRatio ~ 1", ">= 0.95",
+                        f"{vr:.3f}", f"{vr:.3f} (min 0.95)", vr >= 0.95)
+                rep.add("C · real MPT > 15 s (long voiced run)", "> 15 s",
+                        f"{mpt:.1f} s", f"{mpt:.1f}s of {dur:.0f}s", mpt > 15.0)
+                rep.add("C · DUV identity on real audio", "100·(1−VR)",
+                        f"{duv:.3f}", f"{abs(duv-100*(1-vr)):.1e} (atol 1e-6)",
+                        abs(duv-100*(1-vr)) <= 1e-6)
+            else:
+                rep.note("(C) real-audio sanity skipped — no cc cycle marks "
+                         "(parselmouth missing?).")
+    except ImportError as e:
+        rep.note(f"(C) real-audio sanity skipped — missing dependency: {e.name}")
+
+    rep.note("(B) Synthetic GT: on a regular cycle grid with a designed "
+             "voiced/unvoiced pattern, MPT = longest voiced run × T, "
+             "VoicingRatio = voiced/total, DUV = 100·(1−ratio) — all recovered "
+             "to machine precision; the all-voiced / all-unvoiced corners exact.")
+    rep.note("(§7) Our MPT = longest voiced run in the ANALYSED recording "
+             "(bounded by its length), NOT the clinical Maximum Phonation Time "
+             "(a max-effort sustained-/a/ task). VoicingRatio is relative to "
+             "analysed cycles, which the cc / phase-portrait front-end already "
+             "gates to voiced regions, so it mainly flags per-cycle pitch-"
+             "assignment failures, not silence. (C) corpus distribution deferred.")
+    return rep
+
+
 VALIDATORS: dict[str, Callable[[], Report]] = {
     "jitter": validate_jitter,
     "shimmer": validate_shimmer,
@@ -1971,6 +2071,7 @@ VALIDATORS: dict[str, Callable[[], Report]] = {
     "hrf": validate_hrf,
     "singer_formant": validate_singer,
     "zcr": validate_zcr,
+    "integrative": validate_integrative,
 }
 # convenience aliases
 for _a in ("jitter_local", "jitter_rap", "jitter_ppq5", "jitter_ddp"):
@@ -2014,6 +2115,9 @@ for _a in ("sfe", "spr", "singer", "singers_formant"):
     VALIDATORS[_a] = validate_singer
 for _a in ("zero_crossing_rate", "zerocrossing", "zero_crossings"):
     VALIDATORS[_a] = validate_zcr
+for _a in ("mpt", "voicing_ratio", "voicingratio", "duv",
+           "max_phonation_time"):
+    VALIDATORS[_a] = validate_integrative
 
 
 # ─── Reporting ───────────────────────────────────────────────────────────────

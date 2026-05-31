@@ -455,4 +455,22 @@ Format per entry:
 - Validation: metrics/zcr.md (PASS, 6/6). No metric code changed.
 - Tests: harness 6/6; validate_params.py 48 PASS / 4 WARN / 0 FAIL intact.
 
+## 2026-05-31  session=validation-bootstrap  commit=pending  [PHASE 3]
+- Touched: scripts/validate_metric.py (+validate_integrative, +aliases),
+  metrics/integrative.md (new)
+- Why: Phase 3 — MPT / VoicingRatio / DUV (IntegrativeMetricsCalculator,
+  metrics.py:1568). One validator, three Density broadcast metrics.
+- Phase 3 / integrative (harness 9/9 PASS): (B) on a regular 220-sample cycle
+  grid with a designed voiced/unvoiced pattern, MPT = longest voiced run × T,
+  VoicingRatio = voiced/total, DUV = 100·(1−ratio) — recovered to machine
+  precision (Δ ≤ 6e-17); all-voiced / all-unvoiced corners exact. (C) on the
+  real 70 s fixture VoicingRatio 1.000, MPT 67.1 s (> 15 s), DUV identity holds.
+- §7 findings: our MPT = longest voiced run in the ANALYSED recording (bounded
+  by length), NOT the clinical max-effort Maximum Phonation Time; VoicingRatio
+  is relative to analysed cycles (cc/phase-portrait front-end already gates to
+  voiced regions → ≈ 1 on clean voice), so it flags per-cycle pitch-assignment
+  failures, not silence.
+- Validation: metrics/integrative.md (PASS, 9/9). No metric code changed.
+- Tests: harness 9/9; validate_params.py 48 PASS / 4 WARN / 0 FAIL intact.
+
 <!-- next-session-anchor -->
