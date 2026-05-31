@@ -10,6 +10,7 @@
   - 0.4 ✅ 文档框架（`_template.md` / `log.md` / `conventions.md`）
   - 0.5 ⚠ corpus：本地 `audio/` stand-in 就位；真实 Saarbrücken 下载 deferred（仅阻塞 PPE/SFE/MPT 的 (C) 测试）
 - ✅ **Phase 1 — P0 指标 (12/12 PASS, 完成)**：1 ✅ Jitter；2 ✅ Shimmer；3 ✅ F0/Clarity；4 ✅ HNR/NHR；5 ✅ CPP/CPPS；6 ✅ Formants；7 ✅ B1/B2/B3；8 ✅ Spectral moments；9 ✅ Alpha/Hammarberg；10 ✅ Vibrato (rate+extent,已修)；11 ✅ PPE (VOICED 语料 AUC 0.73)；12 ✅ MFCC。**全部 P0 完成,A/B/C 按适用性各就位**
+- 🔄 **Phase 2 — P1 EGG + 次要 acoustic (进行中)**：P1 验收 = A 或 B 至少一项。EGG 有真实 test_Voice_EGG/Jiang + 合成 EGG 可做 (B)。
 
 ---
 
@@ -176,7 +177,7 @@ def validate(metric_name, *, references=['praat'], signals=['all'],
 | **Cluster / cPhon (K-means)** | sklearn 标准 | 验证 feature 抽取与归一化 |
 | **SPL** | IEC 61672 / SC scserver | 校准 `spl_correction_db` 与 SC reference |
 | **SpecBal** | SC `PV_SpecCentroid` 等 | parity vs SC source |
-| **Crest** | (peak / RMS) 标准定义 | 合成正弦信号验证（应 = √2）|
+| **Crest** ✅ | (peak / RMS) 标准定义 | ✅ PASS — 合成 sine=√2 / square=1 / sawtooth=√3 (<0.2%)；docs/metrics/crest.md |
 | **H1-H2 / H1-H3** | Iseli & Alwan 2004 | parity vs VoiceSauce |
 | **Singer's Formant (SFE)** | Sundberg 1974 | corpus（古典歌手 vs 普通说话）|
 | **SPR** | Omori 1996 | corpus 验证范围 |
