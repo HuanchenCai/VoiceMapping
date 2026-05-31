@@ -258,4 +258,28 @@ Format per entry:
 - Tests: harness 5/5; validate_params.py 48 PASS / 4 WARN / 0 FAIL intact.
 - ►► Phase 1 P0 now 11/12 PASS. Only #11 PPE remains (needs a real corpus).
 
+## 2026-05-31  session=validation-bootstrap  commit=pending
+- Touched: scripts/fetch_voiced_corpus.py (new), scripts/validate_metric.py
+  (+validate_ppe + CORPORA_DIR), docs/validation/metrics/ppe.md (new),
+  docs/validation/corpora/voiced.md (new), corpora/saarbruecken.md (status),
+  corpora/voiced/manifest.json (new; wavs gitignored)
+- Why: Phase 1.11 — UNBLOCKED #11 PPE with a real corpus. SVD web export is
+  still deferred; used the free VOICED corpus (PhysioNet, ODC-BY) instead.
+- Phase 1.11 results (harness 3/3 PASS — the FIRST (C) corpus validator):
+  · Downloaded 42 healthy + 50 pathological VOICED /a/ recordings (8 kHz).
+  · median PPE healthy 0.282 < pathological 0.333; ROC AUC 0.734 > 0.70.
+  · PPE is sample-rate-independent (period ratios) so 8 kHz used as-is; cycle
+    marks from Praat cc (validated-equivalent to VoiceMap's marker).
+- Honest note: AUC firmed up with data (0.68 on 80 recs → 0.73 on 92) — added
+  data, did NOT tune params. AUC is subset-dependent (flaky PhysioNet
+  downloads); >0.70 with the fuller balanced cohort.
+- Corpus reproducible via scripts/fetch_voiced_corpus.py; only the script +
+  manifest are tracked (wavs gitignored).
+- Before / After: ppe.md Status UNKNOWN → PASS.
+- Validation: metrics/ppe.md  (PASS, 3/3 checks)
+- Tests: harness 3/3; validate_params.py 48 PASS / 4 WARN / 0 FAIL intact.
+- ►►►► Phase 1 P0 COMPLETE: 12/12 PASS. All P0 metrics validated (A/B/C as
+  applicable). Next: Phase 2 (P1 EGG + secondary acoustic), or SVD download
+  to add EGG-dependent (C) tests.
+
 <!-- next-session-anchor -->

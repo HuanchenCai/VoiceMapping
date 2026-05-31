@@ -7,14 +7,15 @@
 
 ## Status
 
-**STAND-IN (Phase 0.5).** The full SVD is not yet downloaded. Validation
-phases that only need (A) parity + (B) synthetic GT (jitter, shimmer, F0,
-spectral, MFCC …) are **not blocked**. Phases needing (C) — notably
-**PPE** (Phase 1.11, target healthy-vs-pathological AUC > 0.7),
-**Singer's Formant / SPR**, **MPT** — are **blocked until SVD is wired**.
+**SVD still deferred; VOICED used instead for the first (C) test.** The SVD
+web export is not yet downloaded. The free **VOICED** corpus (PhysioNet,
+see [`voiced.md`](voiced.md)) has been wired as the (C) corpus and **PPE is
+now validated** on it (Phase 1.11, AUC 0.73 > 0.70). SVD is still wanted for
+**EGG-dependent** (C) tests (Qcontact, dEGGmax, …) and the **> 4 kHz** band
+tests (**Singer's Formant / SPR**) that VOICED's 8 kHz cannot serve.
 
-Until then a tiny local stand-in (`audio/`) is used for smoke-testing the
-adapter plumbing only (see [Stand-in](#stand-in-local-audio)).
+A tiny local stand-in (`audio/`) remains for smoke-testing adapter plumbing
+(see [Stand-in](#stand-in-local-audio)).
 
 ## The corpus
 

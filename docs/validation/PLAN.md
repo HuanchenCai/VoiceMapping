@@ -9,7 +9,7 @@
   - 0.3 ✅ CI（`.github/workflows/validate.yml` + `requirements-validation.txt`）
   - 0.4 ✅ 文档框架（`_template.md` / `log.md` / `conventions.md`）
   - 0.5 ⚠ corpus：本地 `audio/` stand-in 就位；真实 Saarbrücken 下载 deferred（仅阻塞 PPE/SFE/MPT 的 (C) 测试）
-- 🔄 **Phase 1 — P0 指标 (11/12 PASS)**：1 ✅ Jitter；2 ✅ Shimmer；3 ✅ F0/Clarity；4 ✅ HNR/NHR；5 ✅ CPP/CPPS；6 ✅ Formants；7 ✅ B1/B2/B3；8 ✅ Spectral moments；9 ✅ Alpha/Hammarberg (opensmile 已装, r≈±1)；10 ✅ Vibrato (extent)；12 ✅ MFCC。**剩 11 PPE（需真实语料,正在下载）**
+- ✅ **Phase 1 — P0 指标 (12/12 PASS, 完成)**：1 ✅ Jitter；2 ✅ Shimmer；3 ✅ F0/Clarity；4 ✅ HNR/NHR；5 ✅ CPP/CPPS；6 ✅ Formants；7 ✅ B1/B2/B3；8 ✅ Spectral moments；9 ✅ Alpha/Hammarberg；10 ✅ Vibrato (extent)；11 ✅ PPE (VOICED 语料 AUC 0.73)；12 ✅ MFCC。**全部 P0 完成,A/B/C 按适用性各就位**
 
 ---
 
@@ -156,7 +156,7 @@ def validate(metric_name, *, references=['praat'], signals=['all'],
 | 8 | **Spectral centroid/bandwidth/rolloff/flatness/slope** | librosa | ✅ PASS (A 公式==librosa 1e-16 同谱 + B slope 解析 GT + 纯音物理) | ✅ docs/metrics/spectral_moments.md 8 节；§7 记 power-weighting 约定 |
 | 9 | **AlphaRatio / Hammarberg** | eGeMAPS (Eyben 2016) / OpenSMILE | ✅ PASS (B 双音解析 GT 精确 + A OpenSMILE Alpha r=-1/Hamm r=+1) | ✅ docs/metrics/alpha_hammarberg.md 8 节；§7 记 Alpha 反号约定 |
 | 10 | **Vibrato** (rate / extent / jitter) | Sundberg 1995 + commit d53b47b 修过 | ✅ PASS extent (合成 GT <5%)；⚠ rate 分辨率受限 (F0/W≈5Hz bin, 6Hz 读成~4.7) | ✅ docs/metrics/vibrato.md 8 节；§7 标 rate 需 post-freeze zero-pad 修 |
-| 11 | **PPE** | Little 2009 | ⚠ commit f208fce 改了 bin，需 corpus 验证 | Saarbruecken 健康 vs 病态分类 AUC > 0.7 |
+| 11 | **PPE** | Little 2009 | ✅ PASS (C VOICED 健康 vs 病态 ROC AUC 0.73 > 0.70) | ✅ docs/metrics/ppe.md 8 节；fetch_voiced_corpus.py + voiced.md |
 | 12 | **MFCC 1-13** | librosa.feature.mfcc | ✅ PASS (A mel 中心+DCT 精确；full MFCC r≥0.999 分层) | ✅ docs/metrics/mfcc.md 8 节；§7 记 HTK 顶点量化 + 自然对数 vs dB |
 
 **每个指标的 acceptance criteria 都在它的 `docs/validation/metrics/<name>.md` 里写死**。Phase 1 完成判定：12 个 md 都 Status = PASS。

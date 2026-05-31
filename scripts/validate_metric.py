@@ -46,6 +46,7 @@ sys.path.insert(0, ROOT)
 TS_DIR = os.path.join(ROOT, "docs", "validation", "test_signals")
 METRICS_DIR = os.path.join(ROOT, "docs", "validation", "metrics")
 AUDIO_DIR = os.path.join(ROOT, "audio")
+CORPORA_DIR = os.path.join(ROOT, "docs", "validation", "corpora")
 
 # Praat MDVP-style perturbation query defaults (match the parity tests).
 PMIN, PMAX, PERIOD_FACTOR, AMP_FACTOR = 1e-4, 0.02, 1.3, 1.6
@@ -594,6 +595,81 @@ def validate_formants() -> Report:
              "the formants and shift the LPC poles for BOTH our tracker and "
              "Praat (§7). Real-audio parity (A) is the trustworthy evidence.")
     rep.note("(C) Real-corpus formant distribution deferred to corpus phase.")
+    return rep
+
+
+def validate_ppe() -> Report:
+    """PPE (Pitch Period Entropy) — Little et al. 2009 dysphonia marker.
+
+    The first (C) **real-corpus** validator: PPE should be higher for
+    disordered voices. We compute median PPE per recording on the VOICED
+    corpus (PhysioNet; `scripts/fetch_voiced_corpus.py`) and check the
+    healthy-vs-pathological separation by ROC AUC (target > 0.70). The
+    corpus is gitignored, so this SKIPS cleanly when it is not present
+    (e.g. in CI) — run the fetch script first to enable it.
+    """
+    rep = Report("ppe")
+    man_path = os.path.join(CORPORA_DIR, "voiced", "manifest.json")
+    if not os.path.exists(man_path):
+        rep.skipped = True
+        rep.skip_reason = ("VOICED corpus not present — run "
+                           "`python scripts/fetch_voiced_corpus.py` first")
+        return rep
+    try:
+        import soundfile as sf
+        import parselmouth  # noqa: F401
+    except ImportError as e:
+        rep.skipped = True
+        rep.skip_reason = f"missing dependency: {e.name}"
+        return rep
+    from voicemap.config import VoiceMapConfig
+    from voicemap.metrics import PPECalculator
+    cfg = VoiceMapConfig()
+
+    with open(man_path, encoding="utf-8") as fh:
+        man = json.load(fh)
+    corp_dir = os.path.join(CORPORA_DIR, "voiced")
+
+    def _ppe(path):
+        v, fsr = sf.read(path)
+        v = (v[:, 0] if v.ndim == 2 else v).astype(np.float64)
+        trig = _cc_trigger_array(v, float(fsr), floor=70.0, ceiling=400.0)
+        p = PPECalculator(cfg).calculate(trig)
+        pv = p[p > 0]
+        return float(np.median(pv)) if len(pv) else float("nan")
+
+    H, P = [], []
+    for r in man["recordings"]:
+        val = _ppe(os.path.join(corp_dir, r["path"]))
+        if np.isfinite(val):
+            (H if r["label"] == "healthy" else P).append(val)
+    H, P = np.array(H), np.array(P)
+    if len(H) < 10 or len(P) < 10:
+        rep.skipped = True
+        rep.skip_reason = f"too few recordings (H={len(H)}, P={len(P)})"
+        return rep
+
+    # ROC AUC = P(PPE_patho > PPE_healthy) over all cross pairs (Mann-Whitney).
+    gt = P[:, None] > H[None, :]
+    eq = P[:, None] == H[None, :]
+    auc = float((gt.sum() + 0.5 * eq.sum()) / (len(P) * len(H)))
+    mh, mp = float(np.median(H)), float(np.median(P))
+
+    rep.add("C · AUC pathological vs healthy", ">= 0.70", f"{auc:.4f}",
+            f"{auc:.4f} (min 0.70)", auc >= 0.70)
+    rep.add("C · pathological median > healthy median", f"H={mh:.3f}",
+            f"P={mp:.3f}", "separation direction", mp > mh)
+    rep.add("C · cohort sizes adequate", ">= 20 each",
+            f"H={len(H)} P={len(P)}", "n", len(H) >= 20 and len(P) >= 20)
+
+    rep.note(f"(C) VOICED corpus: {len(H)} healthy + {len(P)} pathological "
+             f"recordings. Median PPE healthy {mh:.3f} < pathological {mp:.3f}; "
+             f"ROC AUC {auc:.3f} > 0.70. Cycle marks from Praat cc (validated "
+             f"equivalent to VoiceMap's marker in f0_clarity.md).")
+    rep.note("(A)/(B): PPE is a corpus-validated discriminator, not a parity "
+             "metric; the formula is a normalised Shannon entropy of windowed "
+             "log-period residuals (bounded [0,1]). AUC depends on the "
+             "downloaded subset (the fetch can drop flaky recordings).")
     return rep
 
 
@@ -1255,6 +1331,7 @@ VALIDATORS: dict[str, Callable[[], Report]] = {
     "vibrato": validate_vibrato,
     "mfcc": validate_mfcc,
     "alpha_hammarberg": validate_alpha_hammarberg,
+    "ppe": validate_ppe,
 }
 # convenience aliases
 for _a in ("jitter_local", "jitter_rap", "jitter_ppq5", "jitter_ddp"):
@@ -1280,6 +1357,8 @@ for _a in ("mfcc1", "mfcc13", "mel", "cepstral"):
     VALIDATORS[_a] = validate_mfcc
 for _a in ("alpha", "hammarberg", "alpha_ratio", "egemaps"):
     VALIDATORS[_a] = validate_alpha_hammarberg
+for _a in ("pitch_period_entropy",):
+    VALIDATORS[_a] = validate_ppe
 
 
 # ─── Reporting ───────────────────────────────────────────────────────────────
