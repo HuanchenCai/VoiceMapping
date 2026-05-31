@@ -338,4 +338,14 @@ Format per entry:
   120 dB SPL); only the relative level + dB law are intrinsically validated.
 - Validation: metrics/spl.md (PASS, 3/3). No metric code changed.
 
+## 2026-05-31  session=validation-bootstrap  commit=pending  [PHASE 2]
+- Touched: scripts/validate_metric.py (+validate_specbal), metrics/specbal.md
+- Why: Phase 2 option-1 — SpecBal (high/low band level balance).
+- Phase 2 / SpecBal (harness 3/3 PASS): (B) two-tone (300 Hz LP-band +
+  4000 Hz HP-band) over 5 amplitude ratios — SpecBal linear in the imposed
+  20·log10(A_hi/A_lo): slope 1.0002, r 1.0000, constant +0.41 dB filter offset.
+- §7: absolute SpecBal is filter-design-dependent (~0.4 dB offset); 1500–2000
+  Hz crossover notch; no SC bit-parity (rq=1.4 empirically matched).
+- Validation: metrics/specbal.md (PASS, 3/3). No metric code changed.
+
 <!-- next-session-anchor -->
