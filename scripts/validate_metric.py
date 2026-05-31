@@ -597,6 +597,94 @@ def validate_formants() -> Report:
     return rep
 
 
+def validate_alpha_hammarberg() -> Report:
+    """Alpha Ratio + Hammarberg Index (dB) — spectral-balance descriptors.
+
+    Ours (in `SpectralMomentsCalculator`):
+      AlphaRatio = 10·log10(E[50–1000] / E[1000–5000])
+      Hammarberg = max(|S|dB, 0–2 kHz) − max(|S|dB, 2–5 kHz)
+    Validated by (B) an analytic two-tone ground truth (a 500 Hz + 3000 Hz
+    pair has both = 20·log10(A_low/A_high) exactly) and (A) correlation with
+    OpenSMILE eGeMAPS on *voiced* signals (a two-tone is not "voiced" to
+    OpenSMILE's F0-gated extractor, so the OpenSMILE comparison uses a
+    spectrally-tilted vowel). OpenSMILE's AlphaRatio uses the inverse band
+    ratio → expect a sign flip (documented).
+    """
+    rep = Report("alpha_hammarberg")
+    try:
+        import opensmile
+    except ImportError as e:
+        rep.skipped = True
+        rep.skip_reason = f"missing dependency: {e.name} (pip install opensmile)"
+        return rep
+    from voicemap.config import VoiceMapConfig
+    from voicemap.metrics import SpectralMomentsCalculator
+    cfg = VoiceMapConfig()
+    sr = cfg.sample_rate
+    mk = _load_make_signals()
+    smile = opensmile.Smile(
+        feature_set=opensmile.FeatureSet.eGeMAPSv02,
+        feature_level=opensmile.FeatureLevel.LowLevelDescriptors)
+
+    trig = np.zeros(int(2.0 * sr))
+    trig[:: int(sr / 200)] = 1.0
+
+    # ── (B) analytic two-tone GT: both metrics == 20·log10(A_low/A_high) ─────
+    tt = np.arange(int(2.0 * sr)) / sr
+    a_err, h_err = 0.0, 0.0
+    for ratio in (0.25, 0.5, 1.0, 2.0, 4.0):
+        x = (ratio * np.sin(2 * np.pi * 500 * tt)
+             + 1.0 * np.sin(2 * np.pi * 3000 * tt)).astype(np.float64)
+        true = 20.0 * np.log10(ratio)
+        out = SpectralMomentsCalculator(cfg).calculate(x, trig)
+        a_err = max(a_err, abs(float(np.median(out["alpha_ratio"])) - true))
+        h_err = max(h_err, abs(float(np.median(out["hammarberg"])) - true))
+    rep.add("B · Alpha two-tone GT (5 ratios)", "20·log10(Al/Ah)",
+            "ours", f"max|Δ| {a_err:.2f} dB (tol 0.5)", a_err <= 0.5)
+    rep.add("B · Hammarberg two-tone GT (5 ratios)", "20·log10(Al/Ah)",
+            "ours", f"max|Δ| {h_err:.2f} dB (tol 0.5)", h_err <= 0.5)
+
+    # ── (A) OpenSMILE eGeMAPS parity on a voiced (tilted-vowel) sweep ────────
+    base = mk.normalize(mk.synth_vowel(3.0, lambda t: 200.0, "neutral")
+                        ).astype(np.float64)
+    oa, sa, oh, sh = [], [], [], []
+    for a in (-0.97, -0.5, 0.0, 0.5, 0.97):
+        if a == 0.0:
+            x = base.copy()
+        else:
+            x = np.empty_like(base)
+            x[0] = base[0]
+            x[1:] = base[1:] - a * base[:-1]
+            x = x / np.max(np.abs(x)) * 0.9
+        tg = _cc_trigger_array(x, float(sr), floor=100.0, ceiling=400.0)
+        out = SpectralMomentsCalculator(cfg).calculate(x, tg)
+        oa.append(float(np.median(out["alpha_ratio"])))
+        oh.append(float(np.median(out["hammarberg"])))
+        df = smile.process_signal(x.astype(np.float32), sr)
+        sa.append(float(df["alphaRatio_sma3"].median()))
+        sh.append(float(df["hammarbergIndex_sma3"].median()))
+    oa, sa, oh, sh = map(np.array, (oa, sa, oh, sh))
+    r_alpha = float(np.corrcoef(oa, sa)[0, 1])
+    r_hamm = float(np.corrcoef(oh, sh)[0, 1])
+    rep.add("A · Alpha |corr| vs OpenSMILE (voiced)", "|r| >= 0.95",
+            f"r={r_alpha:+.4f}", f"{abs(r_alpha):.4f} (sign-flipped)",
+            abs(r_alpha) >= 0.95)
+    rep.add("A · Hammarberg corr vs OpenSMILE (voiced)", "r >= 0.95",
+            f"r={r_hamm:+.4f}", f"{r_hamm:.4f} (min 0.95)", r_hamm >= 0.95)
+    dh = float(np.median(np.abs(oh - sh)))
+    rep.add("A · Hammarberg median |Δ| vs OpenSMILE", "near-parity",
+            f"{dh:.2f} dB", f"{dh:.2f} dB (max 2.0)", dh <= 2.0)
+
+    rep.note(f"(B) Two-tone analytic GT: Alpha & Hammarberg recover "
+             f"20·log10(Al/Ah) to <0.5 dB (formula exact).")
+    rep.note(f"(A) On voiced signals vs OpenSMILE eGeMAPS: Alpha r={r_alpha:+.3f} "
+             f"(anti-correlated — ours = E_low/E_high, OpenSMILE the inverse), "
+             f"Hammarberg r={r_hamm:+.3f}, median |Δ| {dh:.1f} dB (near parity).")
+    rep.note("(C) Corpus distribution deferred. Alpha SIGN differs from "
+             "eGeMAPS by convention — see md §7.")
+    return rep
+
+
 def validate_mfcc() -> Report:
     """MFCC 1–13 — HTK-style mel-frequency cepstrum (`MFCCCalculator`).
 
@@ -1166,6 +1254,7 @@ VALIDATORS: dict[str, Callable[[], Report]] = {
     "spectral_moments": validate_spectral,
     "vibrato": validate_vibrato,
     "mfcc": validate_mfcc,
+    "alpha_hammarberg": validate_alpha_hammarberg,
 }
 # convenience aliases
 for _a in ("jitter_local", "jitter_rap", "jitter_ppq5", "jitter_ddp"):
@@ -1189,6 +1278,8 @@ for _a in ("vibrato_rate", "vibrato_extent"):
     VALIDATORS[_a] = validate_vibrato
 for _a in ("mfcc1", "mfcc13", "mel", "cepstral"):
     VALIDATORS[_a] = validate_mfcc
+for _a in ("alpha", "hammarberg", "alpha_ratio", "egemaps"):
+    VALIDATORS[_a] = validate_alpha_hammarberg
 
 
 # ─── Reporting ───────────────────────────────────────────────────────────────
