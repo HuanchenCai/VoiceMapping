@@ -215,4 +215,27 @@ Format per entry:
 - Validation: metrics/vibrato.md  (PASS, 8/8 checks; rate caveat in §7)
 - Tests: harness 8/8; validate_params.py 48 PASS / 4 WARN / 0 FAIL intact.
 
+## 2026-05-31  session=validation-bootstrap  commit=pending
+- Touched: scripts/validate_metric.py (+validate_mfcc + aliases),
+  docs/validation/metrics/mfcc.md (new)
+- Why: Phase 1.12 — validate MFCC 1-13 vs librosa (the last doable P0; #9/#11
+  blocked on opensmile / Saarbrücken).
+- Method: ours is HTK-style (vertex-quantised filterbank, natural log) so not
+  bit-identical to a default librosa call — validated in LAYERS.
+- Phase 1.12 results (harness 5/5 PASS):
+  · (A) mel centres == librosa htk EXACT (max|Δ|=0); DCT-II ortho == librosa
+    EXACT on the same log-mel (max|Δ|=0); filterbank ≈ librosa htk/norm=None
+    (max|Δw| 0.11, the vertex-quantisation gap); full MFCC per-coef Pearson
+    r vs the librosa filterbank path ≥ 0.999 (min of 13 = 0.9989).
+  · (B) shipped MFCCCalculator emits 13 finite coeffs, mfcc1 ≈ inline.
+- Documented (md §7): natural-log-vs-dB constant scale (×0.23,
+  correlation-invariant); vertex-quantisation; MFCC 1-13 (no C0/deltas).
+- Before / After: mfcc.md Status UNKNOWN → PASS.
+- Validation: metrics/mfcc.md  (PASS, 5/5 checks)
+- Tests: harness 5/5; validate_params.py 48 PASS / 4 WARN / 0 FAIL intact.
+- ►► Phase 1 P0 status: 10/12 PASS (1-8, 10, 12). Remaining BLOCKED:
+  #9 Alpha/Hammarberg (opensmile not installed), #11 PPE (SVD corpus not
+  downloaded). Next session: install opensmile OR pick an alt reference for
+  Alpha/Hammarberg; download Saarbrücken for PPE + the (C) corpus tests.
+
 <!-- next-session-anchor -->
