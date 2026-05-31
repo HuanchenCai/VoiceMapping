@@ -656,6 +656,53 @@ def validate_cse() -> Report:
     return rep
 
 
+def validate_specbal() -> Report:
+    """SpecBal — high/low spectral-band level balance (dB), `SpecBalCalculator`.
+
+    Splits the voice into a low band (BLowPass4 @ 1500 Hz) and a high band
+    (BHiPass4 @ 2000 Hz), `SpecBal = 20·log10(RMS_hi) − 20·log10(RMS_lo)`.
+    Ground truth: a two-tone (low + high) signal with amplitude ratio A_hi/A_lo
+    gives `SpecBal = 20·log10(A_hi/A_lo)` up to a constant filter-passband
+    offset, so SpecBal must be *linear* in the imposed band ratio (slope ≈ 1).
+    """
+    rep = Report("specbal")
+    from voicemap.config import VoiceMapConfig
+    from voicemap.metrics import SpecBalCalculator
+    cfg = VoiceMapConfig()
+    sr = cfg.sample_rate
+    dur, f0 = 2.0, 150.0
+    tt = np.arange(int(dur * sr)) / sr
+    ratios = [0.25, 0.5, 1.0, 2.0, 4.0]
+    ours, true = [], []
+    for r in ratios:
+        x = (np.sin(2 * np.pi * 300 * tt)
+             + r * np.sin(2 * np.pi * 4000 * tt)).astype(np.float64)
+        idx = np.round(np.arange(int(dur * f0)) * sr / f0).astype(int)
+        trig = np.zeros(len(x))
+        trig[idx[idx < len(x)]] = 1.0
+        sb = SpecBalCalculator(cfg).calculate(x, trig)
+        sv = sb[np.isfinite(sb)]
+        ours.append(float(np.median(sv)))
+        true.append(20.0 * np.log10(r))
+    ours, true = np.array(ours), np.array(true)
+    slope, intercept = np.polyfit(true, ours, 1)
+    corr = float(np.corrcoef(ours, true)[0, 1])
+    rep.add("B · SpecBal linear in band ratio (slope)", "1.00",
+            f"{slope:.4f}", f"{abs(slope-1)*100:.1f}% (0.98–1.02)",
+            0.98 <= slope <= 1.02)
+    rep.add("B · SpecBal corr with 20·log10(A_hi/A_lo)", "r >= 0.99",
+            f"r={corr:.4f}", f"{corr:.4f} (min 0.99)", corr >= 0.99)
+    rep.add("B · filter-passband offset bounded", "|c| <= 1 dB",
+            f"{intercept:+.2f} dB", f"{abs(intercept):.2f} (max 1.0)",
+            abs(intercept) <= 1.0)
+    rep.note(f"(B) SpecBal is linear in the imposed band ratio (slope "
+             f"{slope:.3f}, r {corr:.3f}); a constant +{intercept:.2f} dB "
+             f"offset comes from the 4th-order LP/HP passband gains at the test "
+             f"tones (a fixed bias, not a scale error). (A) SC source parity "
+             f"unavailable; (C) corpus deferred.")
+    return rep
+
+
 def validate_spl() -> Report:
     """SPL — per-cycle level, `20·log10(RMS)` dB + `spl_correction_db` offset.
 
@@ -1476,6 +1523,7 @@ VALIDATORS: dict[str, Callable[[], Report]] = {
     "crest": validate_crest,
     "cse": validate_cse,
     "spl": validate_spl,
+    "specbal": validate_specbal,
 }
 # convenience aliases
 for _a in ("jitter_local", "jitter_rap", "jitter_ppq5", "jitter_ddp"):

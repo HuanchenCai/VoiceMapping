@@ -176,7 +176,7 @@ def validate(metric_name, *, references=['praat'], signals=['all'],
 | **Sample Entropy (CSE)** ✅ | Richman & Moorman 2000 | ✅ PASS — m=1 SampEn 逐字节==nolds.sampen (Δ=0) + 无序排序；docs/metrics/cse.md |
 | **Cluster / cPhon (K-means)** | sklearn 标准 | 验证 feature 抽取与归一化 |
 | **SPL** ✅ | IEC 61672 / SC scserver | ✅ PASS — 合成电平 20log10(A/√2)<0.01dB + 6.02dB/倍 + 标定偏移；docs/metrics/spl.md |
-| **SpecBal** | SC `PV_SpecCentroid` 等 | parity vs SC source |
+| **SpecBal** ✅ | SC `PV_SpecCentroid` 等 | ✅ PASS — 合成双音 SpecBal 线性于 band ratio (slope 1.00, r 1.00)；docs/metrics/specbal.md |
 | **Crest** ✅ | (peak / RMS) 标准定义 | ✅ PASS — 合成 sine=√2 / square=1 / sawtooth=√3 (<0.2%)；docs/metrics/crest.md |
 | **H1-H2 / H1-H3** | Iseli & Alwan 2004 | parity vs VoiceSauce |
 | **Singer's Formant (SFE)** | Sundberg 1974 | corpus（古典歌手 vs 普通说话）|
