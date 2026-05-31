@@ -9,7 +9,7 @@
   - 0.3 ✅ CI（`.github/workflows/validate.yml` + `requirements-validation.txt`）
   - 0.4 ✅ 文档框架（`_template.md` / `log.md` / `conventions.md`）
   - 0.5 ⚠ corpus：本地 `audio/` stand-in 就位；真实 Saarbrücken 下载 deferred（仅阻塞 PPE/SFE/MPT 的 (C) 测试）
-- 🔄 **Phase 1 — P0 指标**：1 ✅ Jitter；2 ✅ Shimmer；3 ✅ F0/Clarity；4 ✅ HNR/NHR；5 ✅ CPP/CPPS；6 ✅ Formants F1/F2/F3 (PASS, Praat parity 0.8–2.4%)；7–12 待做
+- 🔄 **Phase 1 — P0 指标**：1 ✅ Jitter；2 ✅ Shimmer；3 ✅ F0/Clarity；4 ✅ HNR/NHR；5 ✅ CPP/CPPS；6 ✅ Formants；7 ✅ B1/B2/B3 (PASS, 中位数 parity 1–5%)；8–12 待做
 
 ---
 
@@ -152,7 +152,7 @@ def validate(metric_name, *, references=['praat'], signals=['all'],
 | 4 | **HNR / NHR** | Praat To Harmonicity (cc) + 物理锚 HNR==SNR | ✅ PASS (B HNR==SNR<0.3dB + A Praat<0.3dB on stationary) | ✅ docs/metrics/hnr.md 8 节；§7 记 ~6dB 非稳态发散 |
 | 5 | **CPP / CPPS** | Hillenbrand 1996；SC Cepstrum 约定（≠Praat 绝对值）| ✅ PASS (A corr r=0.98 vs Praat CPPS + B SNR 单调 r=0.99) | ✅ docs/metrics/cpp.md 8 节；§7 记 absolute 不可比、需自标定 |
 | 6 | **Formants F1/F2/F3** | Praat Burg + roots | ✅ PASS (A real-audio parity 0.8–2.4% + B 合成 F1) | ✅ docs/metrics/formants.md 8 节；§7 记合成 F2/F3 高 F0 谐波混淆 |
-| 7 | **B1/B2/B3** | Praat | ⚠ parity 未做 | 同 #6 |
+| 7 | **B1/B2/B3** | Praat get_bandwidth (同 Burg 极点) | ✅ PASS (A 中位数 parity 1–5%；>800Hz 清零) | ✅ docs/metrics/bandwidths.md 8 节；§7 记逐周期高散度 10–18% |
 | 8 | **Spectral centroid/bandwidth/rolloff/flatness/slope** | librosa | ⚠ 自实现 | parity vs `librosa.feature.spectral_*`。容差 rtol=1e-2 |
 | 9 | **AlphaRatio / Hammarberg** | eGeMAPS (Eyben 2016) | ⚠ 自实现 | parity vs OpenSMILE。容差 |Δ| < 1 dB |
 | 10 | **Vibrato** (rate / extent / jitter) | Sundberg 1995 + commit d53b47b 修过 | ⚠ 新修，合成信号验证 | 合成 6Hz/100cent → 算出来应 6Hz/100cent ±5% |
