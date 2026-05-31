@@ -66,4 +66,30 @@ Format per entry:
 - Tests: harness 12/12; unittest 21/21 perturbation parity green;
   validate_params.py 48 PASS / 0 FAIL baseline intact.
 
+## 2026-05-31  session=validation-bootstrap  commit=pending
+- Touched: scripts/validate_metric.py (+validate_f0_clarity, +_nsdf helper,
+  +aliases), docs/validation/metrics/f0_clarity.md (new, 8 sections)
+- Why: Phase 1.3 — validate F0 + Clarity. The doc the jitter/shimmer files
+  defer their cycle-marker fidelity to.
+- Key structural finding: VoiceMap has TWO F0 subsystems with TWO references.
+  (1) cycle-marker F0 = native Praat Sound_to_Pitch (AC) in praat_pitch.py
+  (drives jitter/shimmer). (2) the SHIPPED VRP Clarity + MIDI/F0_Hz = a
+  Tartini-style NSDF (ClarityCalculator, McLeod & Wyvill 2005 / SC
+  Tartini.cpp), NOT Praat. Documented both; PLAN row #3 had conflated them.
+- Phase 1.3 results (harness 13/13 PASS):
+  · Part 1 (A, Praat-AC parity, real 10 s): voicing agreement 99.75 %,
+    F0 median err 0.0000 % / P90 0.0001 %, cycle-mark count ratio 0.9983,
+    mark offset median 0.0002 ms / P90 0.0025 ms.
+  · Part 2 (B, NSDF octave stress, in designed singing range): 200/800 Hz +
+    breathy + vibrato all within +4 cents (no octave error); clean clarity
+    0.999, breathy 0.991 (noise lowers it), silence → 0 voiced cycles.
+- Documented limitations (md §7): NSDF low-pitch floor ≈ 78 Hz (MIDI 39) —
+  a genuine 70 Hz voice is forced up an octave (reads ≈1002 Hz), below the
+  designed VRP range, NOT fixed (frozen); chirp false-locks (clarity is not
+  a voicing gate); two-F0-by-design; +4-cent NSDF lag-quantisation bias.
+- Before / After: f0_clarity.md Status UNKNOWN → PASS (within designed range).
+- Validation: metrics/f0_clarity.md  (PASS, 13/13 checks)
+- Tests: harness 13/13; pitch parity unittest 9/9 OK; perturbation parity
+  21/21 green; validate_params.py 48 PASS / 0 FAIL baseline intact.
+
 <!-- next-session-anchor -->
