@@ -2,6 +2,15 @@
 
 > **本文件是下一个 session 的执行路线图。按顺序读 → 按 Phase 推进 → 每动一处填 log。**
 
+## 进度（顶部 ✓ 标记）
+- ✅ **Phase 0 — Validation Infrastructure**（2026-05-31, session=validation-bootstrap）
+  - 0.1 ✅ 12 合成信号 + manifest（`test_signals/make_signals.py`）
+  - 0.2 ✅ 通用 harness（`scripts/validate_metric.py`）
+  - 0.3 ✅ CI（`.github/workflows/validate.yml` + `requirements-validation.txt`）
+  - 0.4 ✅ 文档框架（`_template.md` / `log.md` / `conventions.md`）
+  - 0.5 ⚠ corpus：本地 `audio/` stand-in 就位；真实 Saarbrücken 下载 deferred（仅阻塞 PPE/SFE/MPT 的 (C) 测试）
+- 🔄 **Phase 1 — P0 指标**：1 ✅ Jitter (PASS, A+B)；2–12 待做
+
 ---
 
 ## 0. 总目标（三个并列要求）
@@ -137,7 +146,7 @@ def validate(metric_name, *, references=['praat'], signals=['all'],
 
 | 序 | 指标 | 参考标准 | 当前状态 | 待做 |
 |---|---|---|---|---|
-| 1 | **Jitter** (local/RAP/PPQ5) | Praat VoiceAnalysis.cpp | ✅ atol=1e-9 parity | 只补 docs/metrics/jitter.md（8 节）|
+| 1 | **Jitter** (local/RAP/PPQ5) | Praat VoiceAnalysis.cpp | ✅ PASS (A parity 1e-9 + B 合成GT) | ✅ docs/metrics/jitter.md 8 节完成 |
 | 2 | **Shimmer** (local/dB/APQ3/5/11) | Praat AmplitudeTier.cpp | ✅ atol=1e-6 parity | 补 docs/metrics/shimmer.md |
 | 3 | **F0 / Clarity** | Praat Sound_to_Pitch (AC) | ✅ 99.5% voicing agreement | 补 docs/metrics/f0_clarity.md + octave-error stress test |
 | 4 | **HNR / NHR** | Praat To Harmonicity (cc) | ⚠ parity 未做 | parity vs `snd.to_harmonicity_cc()`. 容差 |Δ| < 0.5 dB |
