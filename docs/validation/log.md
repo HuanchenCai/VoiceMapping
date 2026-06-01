@@ -604,4 +604,21 @@ Format per entry:
 - Tests: imports OK; consistency unit tests OK; e2e baseline 237→231 columns
   (3 modes ran clean); validate_params 51 → **49 PASS / 0 WARN / 0 FAIL**.
 
+## 2026-06-01  session=validation-bootstrap  commit=pending  [PHASE 4]
+- Touched: scripts/e2e_regression.py (4.1), scripts/benchmark.py (4.2),
+  scripts/batch_stability.py (4.4), docs/validation/regression/e2e_baseline.json,
+  docs/validation/phase4.md
+- 4.1 (e2e CSV regression): 3-mode harness (mono / stereo+EGG / stereo+no-EGG)
+  → per-column signature vs committed baseline. Re-run 0 drift across 231 cols.
+- 4.2 (benchmark): wall time LINEAR O(N) ~0.30× real-time (10/30/60 s →
+  3.2/8.9/18.2 s; 60s/10s ratio 0.94×). Memory also linear ~20 MB/audio-sec
+  (60 s peak 1.5 GB) — bounds very long clips, documented.
+- 4.3 (cross-platform): Win verified; Linux via CI follow-up (run e2e on the
+  Win baseline within tolerance); Mac deferred; ±1e-9 bit-identical not met
+  (numba/BLAS) — tolerance-based e2e is the practical guarantee.
+- 4.4 (batch stability): 30 runs over 12 synthetic + real, 0 crashes / 0 NaN;
+  RSS plateaus (2nd-half growth +1 MB, no leak). No 100+ distinct-voice corpus
+  → breadth×repetition, not 100 unique voices (documented).
+- Status: 4.1 PASS · 4.2 PASS · 4.3 partial · 4.4 PASS. phase4.md records it.
+
 <!-- next-session-anchor -->
