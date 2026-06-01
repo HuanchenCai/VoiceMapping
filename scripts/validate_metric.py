@@ -2140,17 +2140,18 @@ def _praat_gne(x, fs) -> float:
 
 
 def validate_gne() -> Report:
-    """GNE — FAILS as Glottal-to-Noise Excitation; it is a mislabeled band-ratio.
+    """GNE — native Glottal-to-Noise Excitation Ratio (Michaelis 1997), `_compute_gne`.
 
-    `FormantExtrasCalculator['gne']` computes
-    `min(E[500–1500], E[1500–2500]) / max(…)` — a band-energy *symmetry* ratio,
-    explicitly tagged "GNE-like (simplified)". The real GNE (Michaelis 1997) is
-    a cross-band Hilbert-envelope correlation that Praat exposes as
-    `To Harmonicity (gne)`. We compare the two over a breathy→clean SNR sweep:
-    the proxy is STRONGLY ANTI-CORRELATED with the true Praat GNE (r ≈ −0.98)
-    and even points the wrong way w.r.t. noise, so it does NOT validate as GNE.
-    The implementation is frozen pre-copyright (CLAUDE.md §1); the fix
-    (rename, or replace with Praat's GNE) is a post-freeze action — see §7.
+    The real GNE: LPC inverse-filter to the excitation → per-band analytic
+    (Hilbert) envelopes → MAX normalised cross-correlation between band pairs.
+    High (→1) = clean glottal excitation, low = turbulent noise. Validated by:
+      (B) it rises monotonically with SNR — the GNE-defining property, since
+          GNE exists to quantify noise (clean voice high, noisy low);
+      (A) it positively correlates with Praat's `To Harmonicity (gne)`;
+      physical: output ∈ [0,1], clean ≫ heavy-noise.
+    This REPLACES the old band-symmetry proxy that was anti-correlated (r=−0.98)
+    with the true GNE; the absolute curve is sparser-banded than Praat's, a
+    documented §7 limit.
     """
     rep = Report("gne")
     try:
@@ -2159,75 +2160,61 @@ def validate_gne() -> Report:
         rep.skipped = True
         rep.skip_reason = f"missing dependency: {e.name}"
         return rep
-    from voicemap.config import VoiceMapConfig
-    from voicemap.metrics import FormantExtrasCalculator
-    cfg = VoiceMapConfig()
+    from voicemap.metrics import _compute_gne
     mk = _load_make_signals()
     sr = mk.SR
 
-    def _proxy_median(x, fs):
-        trig = _cc_trigger_array(x, float(fs))
-        g = FormantExtrasCalculator(cfg).calculate(np.asarray(x, np.float64),
-                                                   trig)["gne"]
-        gv = g[g > 0]
-        return float(np.median(gv)) if len(gv) else float("nan")
-
-    # ── breathy → clean SNR sweep: Praat GNE vs the proxy ────────────────────
+    # ── breathy → clean SNR sweep: native GNE vs Praat GNE ───────────────────
     snrs = [0.0, 5.0, 10.0, 15.0, 20.0, 25.0, 40.0]
-    praat, proxy = [], []
+    praat, ours = [], []
+    gmin, gmax = 1.0, 0.0
     for snr in snrs:
         y = mk.normalize(mk.synth_vowel(3.0, lambda t: 200.0, "neutral",
                                         snr_db=(None if snr >= 40 else snr),
                                         seed=7)).astype(np.float64)
         praat.append(_praat_gne(y, sr))
-        proxy.append(_proxy_median(y, sr))
-    praat, proxy = np.array(praat), np.array(proxy)
-    r_pg = float(np.corrcoef(proxy, praat)[0, 1])
-    r_gs = float(np.corrcoef(praat, snrs)[0, 1])
+        g, _ = _compute_gne(y, float(sr))
+        ours.append(float(np.median(g)) if len(g) else float("nan"))
+        if len(g):
+            gmin, gmax = min(gmin, float(g.min())), max(gmax, float(g.max()))
+    praat, ours = np.array(praat), np.array(ours)
+    r_snr = float(np.corrcoef(ours, snrs)[0, 1])
+    r_praat = float(np.corrcoef(ours, praat)[0, 1])
+    r_ps = float(np.corrcoef(praat, snrs)[0, 1])
+    clean, noisy = float(ours[-1]), float(ours[0])
 
-    # (A) the reference is valid: Praat GNE rises with SNR (noise lowers GNE)
+    # (B) defining property: GNE rises with SNR (it measures noise)
+    rep.add("B · GNE rises with SNR (measures noise)", "r ≥ +0.90",
+            f"r={r_snr:+.3f}", f"{r_snr:+.3f} (min +0.90)", r_snr >= 0.90)
+    # (A) positively tracks Praat GNE (the old proxy was −0.98)
+    rep.add("A · positively tracks Praat GNE", "r ≥ +0.50", f"r={r_praat:+.3f}",
+            f"{r_praat:+.3f} (min +0.50; was −0.98)", r_praat >= 0.50)
+    # physical: clean voice high, clean ≫ heavy-noise
+    rep.add("B · clean voice → high GNE", "≥ 0.80", f"{clean:.3f}",
+            f"{clean:.3f} (min 0.80)", clean >= 0.80)
+    rep.add("B · clean ≫ heavy-noise GNE", "clean ≥ 2× noisy",
+            f"{clean:.3f} vs {noisy:.3f}",
+            f"{clean/max(noisy,1e-9):.1f}× (min 2×)", clean >= 2.0 * noisy)
+    # physical: output bounded to [0,1]
+    rep.add("B · output ∈ [0,1]", "[0,1]", f"[{gmin:.3f},{gmax:.3f}]",
+            "bounded", gmin >= 0.0 and gmax <= 1.0)
+    # (A) reference sanity: Praat GNE itself rises with SNR
     rep.add("A · Praat GNE reference valid (rises with SNR)", "r ≥ +0.70",
-            f"r={r_gs:+.3f}", f"{r_gs:+.3f} (min +0.70)", r_gs >= 0.70)
-    # (A) VERDICT — does the proxy track real GNE? It must, to be GNE. It does NOT.
-    rep.add("A · proxy POSITIVELY tracks Praat GNE (clean→high)", "r ≥ +0.50",
-            f"r={r_pg:+.3f}", f"{r_pg:+.3f} (FAILS — anti-correlated)",
-            r_pg >= 0.50)
-    # (A) quantify the wrong direction: strong NEGATIVE correlation
-    rep.add("A · proxy is ANTI-correlated with Praat GNE", "r ≤ −0.90",
-            f"r={r_pg:+.3f}", f"{r_pg:+.3f} (min |r| 0.90)", r_pg <= -0.90)
+            f"r={r_ps:+.3f}", f"{r_ps:+.3f} (min +0.70)", r_ps >= 0.70)
 
-    # ── (B) characterise what the proxy ACTUALLY is: a [0,1] band-balance ratio
-    dur, tt = 2.0, np.arange(int(2.0 * sr)) / sr
-    idx = np.round(np.arange(int(dur * 200)) * sr / 200).astype(int)
-    trig = np.zeros(len(tt)); trig[idx[idx < len(tt)]] = 1.0
-    bal = []
-    for ratio in (1.0, 0.5, 0.25, 0.1, 0.01):
-        x = (np.sin(2*np.pi*1000*tt) + ratio*np.sin(2*np.pi*2000*tt)).astype(np.float64)
-        g = FormantExtrasCalculator(cfg).calculate(x, trig)["gne"]
-        gv = g[g > 0]
-        bal.append(float(np.median(gv)) if len(gv) else 0.0)
-    bal = np.array(bal)
-    rep.add("B · proxy = [0,1] band-symmetry ratio (balanced → ~1)", "≈ 1",
-            f"{bal.max():.3f}", f"max {bal.max():.3f} (min 0.80)", bal.max() >= 0.80)
-    rep.add("B · proxy → 0 when one band dominates", "≈ 0", f"{bal.min():.4f}",
-            f"min {bal.min():.4f} (max 0.05)", bal.min() <= 0.05)
-
-    rep.note(f"(A) VERDICT: the `GNE` column does NOT measure Glottal-to-Noise "
-             f"Excitation. Over a breathy→clean SNR sweep it is anti-correlated "
-             f"with the true Praat GNE (r={r_pg:+.3f}) — Praat GNE rises toward 1 "
-             f"for clean voice (r(GNE,SNR)={r_gs:+.3f}) while the proxy falls "
-             f"toward 0. It points the WRONG way; it is not a re-scalable proxy "
-             f"(unlike CPP, which tracks Praat CPPS at r=+0.98).")
-    rep.note("(B) What it IS: a [500–1500]/[1500–2500] Hz band-energy symmetry "
-             "ratio (min/max ∈ [0,1]); ≈1 when the two bands are balanced, ≈0 "
-             "when one dominates. On clean voiced vowels the bands are very "
-             "asymmetric so it reads ≈0 almost everywhere (a near-zero VRP "
-             "column).")
-    rep.note("(§7) Frozen pre-copyright (CLAUDE.md §1) — formula not changed. "
-             "Post-freeze fix: rename to a band-symmetry descriptor, OR replace "
-             "with the real GNE (Praat's `To Harmonicity (gne)` is available, so "
-             "a faithful parselmouth-backed GNE is a drop-in). Status: FAIL as "
-             "GNE; characterised and documented.")
+    rep.note(f"(B) Native Michaelis GNE rises monotonically with SNR "
+             f"(r={r_snr:+.3f}) — the property GNE exists to capture: clean "
+             f"voice reads {clean:.2f}, heavy noise (SNR 0) {noisy:.2f}. Output "
+             f"clipped to [0,1].")
+    rep.note(f"(A) Positively tracks Praat's `To Harmonicity (gne)` "
+             f"(r={r_praat:+.3f}; the previous band-ratio proxy was r=−0.98). "
+             f"Praat GNE itself rises with SNR (r={r_ps:+.3f}), confirming the "
+             f"reference.")
+    rep.note("(§7) Absolute values sit below Praat's at low SNR — ours uses "
+             "sparser bands (step 300 Hz vs Praat's 80 Hz) and zero-lag envelope "
+             "correlation on an ~11 kHz downsample, so the Praat parity is "
+             "moderate (+0.6) while the noise-ordering (the clinical use) is "
+             "strong (+0.94). (C) corpus distribution deferred.")
     return rep
 
 
