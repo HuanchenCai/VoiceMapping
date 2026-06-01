@@ -428,7 +428,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "metric.tooltip.FormantDispersion": "共振峰平均间隔：FD = (F3 − F1) / 2 (Hz)。是声道长度的代理指标 —— 声道越长 FD 越小。男声典型 FD ≈ 800 Hz，女声 ≈ 950 Hz。",
         "metric.tooltip.SPR":               "歌者功率比：SPR = 10·log10(E[2-4 kHz] / E[0-2 kHz]) (dB)。高频段相对低频段的能量比。受过训练的歌手 > -7 dB（歌者共振峰存在）；普通说话嗓音 -25 至 -15 dB。",
         "metric.tooltip.VibratoJitter":     "颤音规则性：滑动窗内颤音周期长度 T_vib[i] 的变异系数 CV = std(T_vib) / mean(T_vib) (%)。值低 = 颤音节奏稳定；值高 = 颤音忽快忽慢，可能颤抖或紧张。",
-        "metric.tooltip.GNE":               "声门激励/噪声比 GNE：把声门激励信号在多个 hilbert 包络上做相关，取最大相关系数。GNE ≈ 1 表示纯净激励，≈ 0 表示噪声主导。简化的 vocal noise 指标。",
+        "metric.tooltip.GNE":               "声门激励/噪声比 GNE：先 LPC 逆滤波得到激励信号，再在多个频带的 Hilbert 包络间做互相关，取最大相关系数。GNE ≈ 1 表示纯净激励，≈ 0 表示噪声主导。Michaelis 1997 原生实现。",
         "metric.tooltip.DUV":               "无声段比例：DUV = 100 · (1 − VoicingRatio) (%)。无声帧（辅音、停顿、断点）占总帧数。和 VoicingRatio 互补。MPT 测试中 DUV < 15% 为正常。",
     },
     "en": {
@@ -816,7 +816,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "metric.tooltip.FormantDispersion":  "Formant dispersion: FD = (F3 − F1) / 2 (Hz). Proxy for vocal-tract length — longer tracts give smaller FD. Male typical FD ≈ 800 Hz, female ≈ 950 Hz.",
         "metric.tooltip.SPR":                "Singing Power Ratio: SPR = 10·log10(E[2-4 kHz] / E[0-2 kHz]) (dB). Energy ratio of the high band to the low band. Trained singers > -7 dB (singer's formant present); ordinary speech -25 to -15 dB.",
         "metric.tooltip.VibratoJitter":      "Vibrato regularity: coefficient of variation of vibrato cycle length T_vib[i] in a sliding window: CV = std(T_vib) / mean(T_vib) (%). Low = steady vibrato; high = wobbly, possibly tremor or tension.",
-        "metric.tooltip.GNE":                "Glottal-to-Noise Excitation: maximum cross-correlation across multiple Hilbert envelopes of the glottal excitation signal. GNE ≈ 1 means clean excitation, ≈ 0 means noise-dominated. Simplified vocal-noise marker.",
+        "metric.tooltip.GNE":                "Glottal-to-Noise Excitation: maximum cross-correlation across multiple Hilbert envelopes of the glottal excitation signal. GNE ≈ 1 means clean excitation, ≈ 0 means noise-dominated. Native Michaelis (1997) implementation.",
         "metric.tooltip.DUV":                "Unvoiced fraction: DUV = 100 · (1 − VoicingRatio) (%). Fraction of frames that are unvoiced (consonants, pauses, gaps). Complementary to VoicingRatio. In MPT testing, DUV < 15% is normal.",
     },
 }

@@ -7,7 +7,7 @@ All hot paths use vectorised NumPy; no Python-level loops over samples or window
 
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
-from scipy.signal import butter, sosfilt, lfilter
+from scipy.signal import butter, sosfilt, lfilter, decimate
 from scipy.fft import rfft, irfft, ifft as _ifft
 from scipy.ndimage import median_filter
 from typing import Tuple, Dict, Optional
@@ -1464,14 +1464,107 @@ class FormantCalculator(MetricCalculator):
 
 
 # ───────────────────────────────────────────────────────────────────────────
-# Formant bandwidths B1/B2/B3 + Singing Power Ratio + GNE (待验证).
+# GNE — Glottal-to-Noise Excitation Ratio (Michaelis, Gramss & Strube 1997).
+# Native reimplementation (no parselmouth dependency): downsample to ~11 kHz,
+# LPC-inverse-filter to the excitation, take the analytic (Hilbert) envelope of
+# several overlapping frequency bands, and compute the MAXIMUM normalised
+# cross-correlation between band-envelope pairs whose centres are ≥ bw/2 apart.
+# A glottal pulse excites all bands synchronously (correlated envelopes → 1);
+# turbulent noise excites them independently (→ 0). One value per ~10 ms frame,
+# assigned per cycle like SPR. Validated in docs/validation/metrics/gne.md.
+# ───────────────────────────────────────────────────────────────────────────
+def _gne_levinson(r: np.ndarray, order: int) -> np.ndarray:
+    """Levinson-Durbin recursion → inverse-filter coeffs [1, a1, …, a_p]."""
+    a = np.zeros(order + 1)
+    a[0] = 1.0
+    e = float(r[0])
+    if e <= 0:
+        return a
+    for i in range(1, order + 1):
+        acc = r[i] + (np.dot(a[1:i], r[1:i][::-1]) if i > 1 else 0.0)
+        k = -acc / e
+        a_new = a.copy()
+        a_new[1:i] = a[1:i] + k * a[1:i][::-1]
+        a_new[i] = k
+        a = a_new
+        e *= (1.0 - k * k)
+        if e <= 0:
+            break
+    return a
+
+
+def _compute_gne(voice: np.ndarray, fs: float,
+                 fmin: float = 500.0, fmax: float = 4500.0,
+                 bandwidth: float = 1000.0, step: float = 300.0,
+                 target_fs: float = 11025.0,
+                 win_ms: float = 30.0, hop_ms: float = 10.0,
+                 env_decim: int = 5) -> Tuple[np.ndarray, int]:
+    """Native Michaelis GNE → (gne_per_frame ∈ [0,1], hop_in_input_samples).
+
+    The hop is reported in ORIGINAL-rate samples so the caller maps cycles to
+    frames with `cycle_start // hop`. Returns an empty array if the signal is
+    silent or too short for one window.
+    """
+    x = np.asarray(voice, dtype=np.float64)
+    x = x - x.mean()
+    hop0 = max(int(hop_ms * 0.001 * fs), 1)
+    if x.size == 0 or np.max(np.abs(x)) < 1e-12:
+        return np.zeros(0), hop0
+
+    # 1. downsample to ~11 kHz (GNE only needs up to fmax) — cheap IIR decimate
+    q = int(round(fs / target_fs))
+    if q >= 2:
+        x = decimate(x, q, ftype="iir", zero_phase=True)
+        fs = fs / q
+    else:
+        q = 1
+
+    # 2. LPC inverse filter → excitation (autocorr method, needed lags only)
+    order = int(round(fs / 1000.0)) + 2
+    n = x.size
+    r = np.array([np.dot(x[:n - k], x[k:]) for k in range(order + 1)])
+    if r[0] > 0:
+        x = np.convolve(x, _gne_levinson(r, order), mode="same")
+
+    # 3. per-band analytic (Hilbert) envelopes via FFT band-masking, decimated
+    Xf = np.fft.rfft(x)
+    fr = np.fft.rfftfreq(n, 1.0 / fs)
+    centres = np.arange(fmin + bandwidth / 2, fmax - bandwidth / 2 + 1e-6, step)
+    envs = []
+    for fc in centres:
+        H = np.zeros(len(fr))
+        H[(fr >= fc - bandwidth / 2) & (fr <= fc + bandwidth / 2)] = 2.0
+        envs.append(np.abs(np.fft.irfft(Xf * H, n))[::env_decim])
+    E = np.stack(envs)
+    fds = fs / env_decim
+    wd = int(win_ms * 0.001 * fds)
+    hd = max(int(hop_ms * 0.001 * fds), 1)
+    hop_in = hd * env_decim * q          # frame hop back in input-rate samples
+    nb = len(centres)
+    if E.shape[1] < wd:
+        return np.zeros(0), hop_in
+
+    # 4. max normalised cross-correlation over band pairs ≥ bw/2 apart
+    pairs = [(i, j) for i in range(nb) for j in range(i + 1, nb)
+             if abs(centres[i] - centres[j]) >= bandwidth / 2 - 1e-6]
+    sw = sliding_window_view(E, wd, axis=1)[:, ::hd, :]
+    swc = sw - sw.mean(axis=2, keepdims=True)
+    nrm = np.sqrt((swc ** 2).sum(axis=2)) + 1e-20
+    out = np.zeros(sw.shape[1])
+    for (i, j) in pairs:
+        out = np.maximum(out, (swc[i] * swc[j]).sum(axis=1) / (nrm[i] * nrm[j]))
+    return np.clip(out, 0.0, 1.0), hop_in
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Formant bandwidths B1/B2/B3 + Singing Power Ratio + GNE.
 # Independent LPC root-finding pass — separate from FormantCalculator's
 # spectrum-peak F1/F2/F3 so the two coexist (B1/B2/B3 here may not align
 # perfectly with F1/F2/F3 from FormantCalculator since they come from
 # different tracker designs).
 # ───────────────────────────────────────────────────────────────────────────
 class FormantExtrasCalculator(MetricCalculator):
-    """B1/B2/B3 from LPC roots + Formant Dispersion + Singing Power Ratio + GNE-like."""
+    """B1/B2/B3 from LPC roots + Formant Dispersion + Singing Power Ratio + GNE."""
 
     KEYS = ("b1", "b2", "b3", "formant_dispersion", "spr", "gne")
 
@@ -1517,10 +1610,9 @@ class FormantExtrasCalculator(MetricCalculator):
         f_disp = np.where((F[:, 0] > 0) & (F[:, 2] > 0),
                           (F[:, 2] - F[:, 0]) / 2.0, 0.0)
 
-        # --- SPR + GNE: FFT power ratios on original-sr frames (unchanged) ---
+        # --- SPR: FFT power ratios on original-sr frames (unchanged) ---
         win = int(self.win_ms * 0.001 * sr)
         spr = np.zeros(n_frames)
-        gne_proxy = np.zeros(n_frames)
         if len(voice) >= win:
             v = np.asarray(voice, dtype=np.float64)
             v_pe = v.copy()
@@ -1536,17 +1628,14 @@ class FormantExtrasCalculator(MetricCalculator):
             spr  = 10.0 * np.log10(
                 np.maximum(psd[:, m_hi].sum(axis=1), 1e-15) /
                 np.maximum(psd[:, m_lo].sum(axis=1), 1e-15))
-            # GNE-like: normalised cross-power of two adjacent bands (待验证).
-            m_g1 = (freqs >= 500.0)  & (freqs < 1500.0)
-            m_g2 = (freqs >= 1500.0) & (freqs <= 2500.0)
-            e_g1 = psd[:, m_g1].sum(axis=1)
-            e_g2 = psd[:, m_g2].sum(axis=1)
-            gne_proxy = np.minimum(e_g1, e_g2) / np.maximum(
-                np.maximum(e_g1, e_g2), 1e-15)
+
+        # --- GNE: native Michaelis Glottal-to-Noise Excitation (per ~10 ms) ---
+        gne_vals, gne_hop = _compute_gne(voice, sr)
 
         cycle_starts = idx[:-1]
         fi    = np.clip(cycle_starts // hop, 0, n_frames - 1)
         fi_sp = np.clip(cycle_starts // hop, 0, max(len(spr) - 1, 0))
+        fi_g  = np.clip(cycle_starts // gne_hop, 0, max(len(gne_vals) - 1, 0))
 
         return {
             "b1":                  b1[fi],
@@ -1554,7 +1643,7 @@ class FormantExtrasCalculator(MetricCalculator):
             "b3":                  b3[fi],
             "formant_dispersion":  f_disp[fi],
             "spr":                 spr[fi_sp] if len(spr) else z(),
-            "gne":                 gne_proxy[fi_sp] if len(gne_proxy) else z(),
+            "gne":                 gne_vals[fi_g] if len(gne_vals) else z(),
         }
 
 

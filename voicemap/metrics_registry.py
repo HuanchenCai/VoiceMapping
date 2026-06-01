@@ -471,13 +471,13 @@ def _populate_m1_addons():
         待验证=True,
         description="CV (%) of vibrato cycle period in sliding window."))
 
-    # ── Acoustic — GNE-like (待验证, simplified) ──
+    # ── Acoustic — GNE (Michaelis 1997, validated: docs/validation/metrics/gne.md) ──
     register(MetricSpec(
-        key="GNE", category="Acoustic", label="GNE-like (simplified)",
+        key="GNE", category="Acoustic", label="GNE - Glottal-to-Noise Excitation",
         vmin=0.0, vmax=1.0, unit="",
         cmap="viridis",
-        待验证=True,
-        description="Simplified Glottal-to-Noise Excitation proxy."))
+        description="Glottal-to-Noise Excitation (Michaelis 1997): max cross-band "
+                    "Hilbert-envelope correlation. ~1 clean glottal, ~0 noisy."))
 
     # ── Density / Integrative (whole-recording broadcast) ──
     register(MetricSpec(

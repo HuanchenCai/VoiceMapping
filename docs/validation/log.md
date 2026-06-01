@@ -517,4 +517,30 @@ Format per entry:
   GNE. Next: Phase 4 (end-to-end 3-mode CSV regression + performance benchmark
   + cross-platform reproducibility + batch stability).
 
+## 2026-06-01  session=validation-bootstrap  commit=pending  [PHASE 3 — GNE FIX]
+- Touched: voicemap/metrics.py (+_gne_levinson, +_compute_gne; FormantExtras
+  calculate: replaced the band-ratio proxy with the native GNE; +decimate
+  import), voicemap/metrics_registry.py (GNE label/desc, 待验证 cleared),
+  voicemap/i18n.py (zh+en GNE tooltips drop "simplified"), scripts/
+  validate_metric.py (validate_gne rewritten FAIL→PASS), metrics/gne.md (rewrite)
+- Why: user lifted the freeze ("现在不是冻结期") and chose to REPLACE the GNE
+  proxy with a real GNE (not rename/remove).
+- What: native Michaelis (1997) GNE — downsample ~11 kHz → LPC inverse filter →
+  per-band analytic (Hilbert) envelopes via FFT band-masking → MAX normalised
+  cross-band envelope correlation, per ~10 ms frame, clipped [0,1]. ~3 s / 70 s.
+- Before / After (vs Praat `To Harmonicity (gne)` over a 0–25 dB SNR sweep):
+  corr(ours, Praat) −0.98 → **+0.59**; corr(ours, SNR) −0.70 → **+0.94** (now
+  rises with clean voice as GNE must). Clean vowel 0.91, heavy noise 0.35.
+- Validation: metrics/gne.md PASS (6/6) — (B) monotonic with SNR r=+0.94 (the
+  GNE-defining property), clean ≥ 0.80, clean ≥ 2× noisy, output ∈ [0,1];
+  (A) positively tracks Praat r=+0.59 (reference itself rises r=+0.83).
+- §7: Praat parity moderate (+0.59) — sparser bands (step 300 vs Praat 80) +
+  zero-lag correlation; noise-ordering (clinical use) strong (+0.94). Denser
+  bands / lag search deferred.
+- Tests: gne harness 6/6 PASS (exit 0); validate_params.py 48 PASS / 4 WARN /
+  0 FAIL intact (GNE range-check [0,1] passes). Metric CODE changed → regression
+  re-run green.
+- ►► Phase 3 GNE is now a REAL validated metric (was FAIL-as-labeled). All 5
+  Phase 3 metric groups PASS.
+
 <!-- next-session-anchor -->
