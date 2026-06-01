@@ -100,6 +100,7 @@ def _classify_praat_delta(delta_pct, metric_name):
     # EGG vs voice-autocorr segmentation — Jitter can legitimately run
     # 3-4× Praat's. Still PASS if within documented spread.
     if metric_name.startswith("Jitter"):
+        if abs_d < 30:  return "PASS", "matches Praat (EGG seg agrees)"
         if abs_d < 400: return "WARN", "EGG-seg methodological gap (expected)"
         return "FAIL", "too far from Praat even for EGG seg"
     # Shimmer: closer match expected
