@@ -34,10 +34,27 @@
   the 60 s/10 s `wall/audio` ratio is 0.94× (fixed overhead amortises, so it is
   slightly *super*-linear in throughput). ms/cycle falls 2.6 → 1.8 for the same
   reason.
-- **Memory is also linear** — ~20 MB of working set per audio-second (peak
-  1.5 GB at 60 s). Not a leak (freed after each analysis — see 4.4), but it
-  bounds very long clips: a 300 s recording would need ~6 GB. Documented as a
-  scaling limit; streaming/chunked analysis is out of scope (PLAN §12).
+- **Memory scaled linearly** — ~20 MB working-set per audio-second (peak 1.5 GB
+  at 60 s → a 1-hour clip would peak ~70–90 GB). **BLOCKER for the batch /
+  long-recording use case; being fixed, not accepted.**
+- **Root cause (profiled per stage):** it is NOT one hog — *several* frame-based
+  calculators each materialise full-length `(n_frames × nfft)` FFT/frame
+  matrices (≈1 GB each at 60 s, linear in length). At 60 s the peak was
+  `SpectralMomentsCalculator` (it holds ~10 simultaneous `(n_frames × 2049)`
+  matrices — `mag/psd/log_mag/mag_db/norm_psd/cum` + `diff^2/3/4` for the
+  moments). The others of the same shape: HNR, MFCC, Burg formants, Formant
+  extras (SPR), EGG-shape Cluster.
+- **Fix:** process frames in fixed-size blocks (peak ≈ `BLOCK × nfft`,
+  independent of audio length) — math identical, guarded by the 4.1 e2e
+  baseline (0 drift).
+  - `SpectralMomentsCalculator` done (BLOCK=512): 60 s peak 1522 → 1137 MB; the
+    peak moved off it (now HNR). Remaining calculators to block-process: HNR,
+    MFCC, Burg formants, FormantExtras, Cluster.
+- **Persistent floor:** even after the transient FFT peaks are capped, the
+  audio is held as float64 (+ filtered copies) and the per-cycle dict is O(N),
+  so a 1-hour clip still needs several GB. Fully flat memory needs a chunked
+  pipeline (process N-second blocks, merge VRP histograms + shared cluster
+  centroids) — a larger change, pending a scope decision.
 
 ## 4.3 — Cross-platform reproducibility ⚠ (partial)
 - Determinism by design: K-means uses `random_state=0`; the only stochastic

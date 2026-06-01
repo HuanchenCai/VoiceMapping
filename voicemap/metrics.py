@@ -734,83 +734,83 @@ class SpectralMomentsCalculator(MetricCalculator):
 
         n_frames = 1 + (len(voice) - win) // hop
         starts   = np.arange(n_frames) * hop
-        frames   = sliding_window_view(voice, win)[starts]    # (n_frames, win)
         hann     = np.hanning(win)
-        frames_w = (frames - frames.mean(axis=1, keepdims=True)) * hann
+        view     = sliding_window_view(voice, win)            # (…, win) view, no copy
 
-        # FFT (single pass shared across all moments)
         nfft = 1
         while nfft < 2 * win:
             nfft *= 2
-        X    = np.fft.rfft(frames_w, nfft, axis=1)
-        mag  = np.abs(X)
-        psd  = mag ** 2                                    # power
         freqs = np.fft.rfftfreq(nfft, 1.0 / sr)
 
-        total_pow = psd.sum(axis=1)
-        safe_pow  = np.maximum(total_pow, 1e-15)
-
-        # Centroid
-        centroid = (psd * freqs[None, :]).sum(axis=1) / safe_pow
-
-        # Bandwidth (std around centroid)
-        diff   = freqs[None, :] - centroid[:, None]
-        var    = (psd * (diff ** 2)).sum(axis=1) / safe_pow
-        bandwidth = np.sqrt(np.maximum(var, 0.0))
-
-        # Rolloff: smallest freq where cumulative power exceeds rolloff_pct
-        cum = np.cumsum(psd, axis=1)
-        thr = self.rolloff_pct * total_pow[:, None]
-        idx_roll = (cum >= thr).argmax(axis=1)             # first True
-        rolloff = freqs[idx_roll]
-
-        # Spectral flatness = geomean / mean of magnitude
-        log_mag  = np.log(np.maximum(mag, 1e-15))
-        flatness = np.exp(log_mag.mean(axis=1)) / np.maximum(mag.mean(axis=1), 1e-15)
-
-        # Spectral slope: linear fit of log10(mag) vs frequency in 0-5 kHz
+        # Static band masks / slope fit constants (computed once)
         slope_band = (freqs >= 0) & (freqs <= 5000)
         f_band = freqs[slope_band]
-        if len(f_band) >= 2:
-            log_sub = np.log10(np.maximum(mag[:, slope_band], 1e-15))
-            x = f_band - f_band.mean()
-            denom = (x ** 2).sum()
-            slope = (log_sub * x).sum(axis=1) / max(denom, 1e-12)
-        else:
-            slope = np.zeros(n_frames)
-
-        # Skewness / kurtosis of the spectral distribution (using PSD as weights).
-        # Floor bandwidth at 50 Hz in the denominator so that very tonal
-        # frames (single FFT line, bandwidth → 0) don't blow skewness /
-        # kurtosis to 10⁴+. Before this floor, kurtosis hit 30 257 on
-        # Jiang's tonal segments — literature reports kurtosis < 50 for
-        # voice. Then clip the result to ±100 for skewness and ±1000 for
-        # kurtosis to bound display range and stop pathological frames
-        # from dominating per-cell aggregation.
-        bw_safe = np.maximum(bandwidth, 50.0)
-        norm_psd = psd / safe_pow[:, None]
-        skewness = (norm_psd * (diff ** 3)).sum(axis=1) / (bw_safe ** 3)
-        kurtosis = (norm_psd * (diff ** 4)).sum(axis=1) / (bw_safe ** 4) - 3.0
-        skewness = np.clip(skewness, -100.0, 100.0)
-        kurtosis = np.clip(kurtosis, -100.0, 1000.0)
-
-        # Alpha Ratio (E_low / E_high in dB)
+        x_slope = f_band - f_band.mean() if len(f_band) >= 2 else None
+        denom_slope = max((x_slope ** 2).sum(), 1e-12) if x_slope is not None else 1.0
         m_low  = (freqs >= self.alpha_lo)  & (freqs < self.alpha_mid)
         m_high = (freqs >= self.alpha_mid) & (freqs <= self.alpha_hi)
-        e_low  = psd[:, m_low ].sum(axis=1)
-        e_high = psd[:, m_high].sum(axis=1)
-        alpha = 10.0 * np.log10(np.maximum(e_low, 1e-15) /
-                                 np.maximum(e_high, 1e-15))
+        m_hl   = (freqs >= self.hamm_lo)   & (freqs < self.hamm_mid)
+        m_hh   = (freqs >= self.hamm_mid)  & (freqs <= self.hamm_hi)
 
-        # Hammarberg Index: max(0-2k, dB) − max(2-5k, dB)
-        m_hl = (freqs >= self.hamm_lo)  & (freqs < self.hamm_mid)
-        m_hh = (freqs >= self.hamm_mid) & (freqs <= self.hamm_hi)
-        # Use mag dB so it's a level difference
-        mag_db = 20.0 * np.log10(np.maximum(mag, 1e-15))
-        hamm = mag_db[:, m_hl].max(axis=1) - mag_db[:, m_hh].max(axis=1)
+        # Per-frame scalar outputs (small; the per-block FFT matrices below are
+        # what scale with audio length, so we process frames in fixed-size
+        # blocks to cap peak memory — see Phase 4.2 memory finding. Math is
+        # identical to the all-at-once version; the e2e regression guards it).
+        centroid  = np.zeros(n_frames); bandwidth = np.zeros(n_frames)
+        rolloff   = np.zeros(n_frames); flatness  = np.zeros(n_frames)
+        slope     = np.zeros(n_frames); skewness  = np.zeros(n_frames)
+        kurtosis  = np.zeros(n_frames); alpha     = np.zeros(n_frames)
+        hamm      = np.zeros(n_frames); rms_frame = np.zeros(n_frames)
 
-        # RMS per frame from time-domain windowed energy
-        rms_frame = np.sqrt(np.mean(frames ** 2, axis=1))
+        # Small FIXED block so peak ≈ BLOCK×nfft regardless of audio length
+        # (the ~10 simultaneous (BLOCK×nfft) moment temporaries dominate).
+        BLOCK = 512
+        for b0 in range(0, n_frames, BLOCK):
+            b1 = min(b0 + BLOCK, n_frames)
+            frames   = view[starts[b0:b1]]                    # (blk, win)
+            frames_w = (frames - frames.mean(axis=1, keepdims=True)) * hann
+            X   = np.fft.rfft(frames_w, nfft, axis=1)
+            mag = np.abs(X)
+            psd = mag ** 2
+            sp  = np.maximum(psd.sum(axis=1), 1e-15)
+
+            c = (psd * freqs[None, :]).sum(axis=1) / sp
+            centroid[b0:b1] = c
+            diff = freqs[None, :] - c[:, None]
+            var  = (psd * (diff ** 2)).sum(axis=1) / sp
+            bw   = np.sqrt(np.maximum(var, 0.0))
+            bandwidth[b0:b1] = bw
+
+            cum = np.cumsum(psd, axis=1)
+            thr = self.rolloff_pct * sp[:, None]
+            rolloff[b0:b1] = freqs[(cum >= thr).argmax(axis=1)]
+
+            log_mag = np.log(np.maximum(mag, 1e-15))
+            flatness[b0:b1] = (np.exp(log_mag.mean(axis=1))
+                               / np.maximum(mag.mean(axis=1), 1e-15))
+
+            if x_slope is not None:
+                log_sub = np.log10(np.maximum(mag[:, slope_band], 1e-15))
+                slope[b0:b1] = (log_sub * x_slope).sum(axis=1) / denom_slope
+
+            # Skewness / kurtosis (PSD-weighted; bandwidth floored at 50 Hz so
+            # tonal frames don't explode, then clipped). See the original note.
+            bw_safe  = np.maximum(bw, 50.0)
+            norm_psd = psd / sp[:, None]
+            sk = (norm_psd * (diff ** 3)).sum(axis=1) / (bw_safe ** 3)
+            ku = (norm_psd * (diff ** 4)).sum(axis=1) / (bw_safe ** 4) - 3.0
+            skewness[b0:b1] = np.clip(sk, -100.0, 100.0)
+            kurtosis[b0:b1] = np.clip(ku, -100.0, 1000.0)
+
+            e_low  = psd[:, m_low ].sum(axis=1)
+            e_high = psd[:, m_high].sum(axis=1)
+            alpha[b0:b1] = 10.0 * np.log10(np.maximum(e_low, 1e-15) /
+                                           np.maximum(e_high, 1e-15))
+
+            mag_db = 20.0 * np.log10(np.maximum(mag, 1e-15))
+            hamm[b0:b1] = mag_db[:, m_hl].max(axis=1) - mag_db[:, m_hh].max(axis=1)
+
+            rms_frame[b0:b1] = np.sqrt(np.mean(frames ** 2, axis=1))
 
         # Assign each cycle to its enclosing frame
         cycle_starts = idx[:-1]
