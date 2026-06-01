@@ -692,4 +692,21 @@ Format per entry:
   marks (block-processable, marks are O(cycles)) — noted as follow-up, not done.
 - Tests: validate_params 49 PASS · e2e_regression 0-drift across 3 modes.
 
+## 2026-06-01  session=validation-bootstrap  commit=pending  [AUTO-CHUNK WIRING]
+- Why: the chunked pipeline existed but nothing called it (only the compare
+  script) — CLI + GUI both used the whole-signal path, so a 1-hour batch run
+  would still OOM. log.md had flagged "auto-switch threshold" as an open decision.
+- Fix: `analyze_and_output_vrp_auto(file_path, ...)` probes duration via
+  `sf.info` and routes >`config.chunk_threshold_s` (default 180 s) to the chunked
+  path, else whole-signal (same return shape → callers agnostic). Config gains
+  auto_chunk / chunk_threshold_s / chunk_s(120) / chunk_overlap_s(1). CLI _run_one
+  + GUI worker now call _auto. Chunked has no progressive first pass → partial_cb
+  ignored there (logged). auto_chunk=False forces whole-signal.
+- Threshold rationale: after block-processing, whole-signal peak ≈797 MB @60 s →
+  ~2.4 GB @180 s (linear); chunked is flat ~1.2-1.5 GB. So ≤180 s stays on the
+  exact (slightly faster) whole path; longer auto-chunks to cap RAM.
+- Verified: 64 s file @ default 180 s → whole (12525 cycles, identical to forced
+  whole); low threshold via _auto → chunked (12519). validate_params/e2e use the
+  whole path directly, unaffected.
+
 <!-- next-session-anchor -->
