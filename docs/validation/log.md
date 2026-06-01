@@ -543,4 +543,32 @@ Format per entry:
 - ►► Phase 3 GNE is now a REAL validated metric (was FAIL-as-labeled). All 5
   Phase 3 metric groups PASS.
 
+## 2026-06-01  session=validation-bootstrap  commit=pending  [cPhon FEATURES]
+- Touched: tests/validate_params.py (Jitter PASS bin), voicemap/metrics.py
+  (PhonClusterCalculator.DEFAULT_KEYS 9→6), metrics/cphon.md
+- Why: user asked to (1) fix the benign Jitter WARNs and (2) investigate the
+  cPhon clustering — algorithm, feature set, and the "missing maxCPhon label 5".
+- Jitter: classifier had no PASS bin for Jitter* (assumed EGG-seg always 3-4×
+  Praat). Added |Δ|<30% → PASS; the 3 Jitter rows now PASS (they match Praat
+  to <1% on this recording). 48/4 → 51/1.
+- cPhon investigation (data-driven, on test_Voice_EGG via --cycle-log, 12.5k
+  cycles, 62 per-cycle features):
+  · Algorithm = sklearn KMeans(k=5, n_init=10, z-score, empty-cluster rescue).
+  · Old feature set = 9, heavily REDUNDANT: max |r| 0.91 (Icontact ==
+    log10(dEGGmax)·Qcontact, collinear with 2 others) → over-weighted EGG-
+    contact, left cluster 5 at 1.3% → never dominant → "missing maxCPhon 5".
+  · PCA: 62 feats → 10 (Kaiser) / 21 (90% var) effective dims. Gap statistic
+    rises monotonically (no peak) + silhouette/CH/DB favour k=2 → phonation is
+    a CONTINUUM, no natural k; k=5 is a descriptive binning (k=1 ruled out).
+  · Chose a fixed, de-correlated, interpretable 6 (one rep per variance
+    direction): cpp, qcontact, spq, jitter, hnr, crest. max |r| 0.69,
+    silhouette 0.27 (vs 9-feat 0.31, inflated by redundancy), smallest cluster
+    ~9% (vs 2.4%). Fixed subset (not per-recording PCA) keeps cross-recording
+    comparability.
+- Before / After: maxCPhon "missing label 5" WARN → all 5 labels present.
+  validate_params 48/4/0 → **52 PASS / 0 WARN / 0 FAIL**.
+- Validation: metrics/cphon.md (PASS 3/3, validator is feature-count-agnostic).
+- Tests: cphon harness 3/3; validate_params 52/0/0. Metric code changed
+  (DEFAULT_KEYS) → full regression re-run green.
+
 <!-- next-session-anchor -->
