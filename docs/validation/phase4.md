@@ -83,7 +83,19 @@
     making it chunk-invariant would change the (Praat-validated) definition.
     For 1-hour recordings the whole-signal path cannot run anyway, so chunked
     per-window perturbation is the natural/only option; larger chunks shrink the
-    gap. A 2-pass global-mean prepass could make it exact if required.
+    gap.
+  - **Jitter/shimmer global-normaliser cache (implemented).** Only the
+    *denominator* of jitter (mean period) / shimmer (mean amplitude) is
+    window-global; the numerators are local. So each chunk's mean + count are
+    cached (`mean_period_count`), recombined globally (Σ(mean·n)/Σn), and
+    jitter/shimmer rescaled by `chunk_mean / global_mean` at the end. Result
+    (chunk vs whole): **jitter 13 % → ~3 %** (residual = boundary cycles, →1 %
+    with larger chunks); Entropy/VibratoJitter 8.7/5.1 % → 1.1 % (boundary-only).
+    **Shimmer 19 % → ~11 %**: the mean-amplitude rescale removes the denominator
+    error but a ~11 % residual remains because the amplitude-tier *entries*
+    differ per chunk when loudness varies — exact shimmer needs deferring the
+    amplitude tier to a single global pass (follow-up; ShimmerDB is already
+    exact). GNE ~4 % (per-chunk LPC, boundary).
 
 ## 4.3 — Cross-platform reproducibility ⚠ (partial)
 - Determinism by design: K-means uses `random_state=0`; the only stochastic
