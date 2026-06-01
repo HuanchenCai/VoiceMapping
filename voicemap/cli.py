@@ -156,7 +156,9 @@ def _run_one(args, config, logger, audio_path: str, save_centroids_once: bool = 
     t0 = time.perf_counter()
     # Need the grouped DataFrame for Excel export; avoid the second CSV read
     # by asking for return_df=True unconditionally.
-    data, out_csv, grouped = analyzer.analyze_and_output_vrp(
+    # Auto-route long recordings to the bounded-memory chunked path (config
+    # auto_chunk / chunk_threshold_s); short files stay on the exact whole path.
+    data, out_csv, grouped = analyzer.analyze_and_output_vrp_auto(
         audio_path, plot_mode=args.plot_mode, return_df=True)
     dt = time.perf_counter() - t0
 

@@ -110,6 +110,20 @@ class VoiceMapConfig:
     # or by the CLI --mode flag.
     analysis_mode: str = 'auto'
     
+    # Bounded-memory chunked analysis (for long / batch recordings).
+    # The whole-signal path holds full-length per-cycle tables + transient
+    # FFT matrices, so peak RAM scales with duration (~2.4 GB at 180 s). For
+    # longer files the analyzer auto-switches to the chunked path, whose
+    # working set is flat in length (~1.2-1.5 GB) — see analyzer
+    # analyze_and_output_vrp_auto / _chunked. Trade-off: chunked jitter/shimmer
+    # are ~1 % off the whole-signal values (per-chunk pitch tracking; see
+    # docs/validation/phase4.md), and there is no progressive first-pass
+    # heatmap. Set auto_chunk=False to always use the exact whole-signal path.
+    auto_chunk: bool          = True
+    chunk_threshold_s: float  = 180.0   # auto-switch above this duration (0 disables)
+    chunk_s: float            = 120.0   # chunk core length
+    chunk_overlap_s: float    = 1.0     # per-side overlap (filter settle + cycle context)
+
     # File paths
     audio_file: str = "audio/test_Voice_EGG.wav"
     output_dir: str = "result"

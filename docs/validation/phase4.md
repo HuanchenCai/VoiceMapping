@@ -69,21 +69,60 @@
   deferred, keeps the cycles whose onset is in the block's core, and fits the
   two K-means clusterings ONCE on the accumulated features at the end (the
   "cluster once at the end" insight removes the cross-chunk label problem).
-  Existing whole-signal path untouched (opt-in).
+  Existing whole-signal path untouched.
+  - **Auto-wired (no longer opt-in).** `analyze_and_output_vrp_auto` probes
+    duration via `sf.info` and routes files longer than `config.chunk_threshold_s`
+    (default 180 s) to the chunked path, shorter ones to the exact whole-signal
+    path; both return the same shape. CLI (`_run_one`) and the GUI worker call it,
+    so a 1-hour batch run no longer OOMs. `config.auto_chunk=False` forces the
+    whole-signal path. The chunked path has no progressive first-pass heatmap, so
+    the GUI `partial_cb` is skipped for long files.
   - **Memory bounded:** the working set is flat in audio length — +629 / +613 /
     +634 MB at 120 / 300 / 600 s (chunk_s=60), vs whole-signal +593 (60 s) →
     +1717 MB (180 s, linear). 180 s peak 2024 → 1074 MB at the same wall time
     (chunking overhead negligible). A real 1-hour run projects to ~1.2–1.5 GB
     (≈ one chunk + the ~400 MB accumulated per-cycle table) vs ~35 GB.
   - **Output parity:** cell grid + cycle count match (510 vs 509 cells, 12523 vs
-    12494 cycles); all per-cycle metrics match the whole-signal path **except
-    jitter/shimmer** (median ~15 % diff) and GNE (~6 %). Jitter/shimmer
-    decompose a *window-global* Praat scalar (per-cycle = local |ΔT| ÷
-    window-mean-period), so a chunk window ≠ the whole window — inherent, since
-    making it chunk-invariant would change the (Praat-validated) definition.
-    For 1-hour recordings the whole-signal path cannot run anyway, so chunked
-    per-window perturbation is the natural/only option; larger chunks shrink the
-    gap. A 2-pass global-mean prepass could make it exact if required.
+    12494 cycles); all per-cycle metrics match the whole-signal path. The only
+    structurally-tricky family was jitter/shimmer (each decomposes a
+    *window-global* Praat scalar — per-cycle = local |ΔT| ÷ window-mean-period),
+    handled by the deferral below. Parity harness:
+    `scripts/compare_chunked_vs_whole.py` (whole vs chunked grids → per-column
+    median relative diff over shared cells; K-means label-ID columns excluded as
+    permutation-variant).
+  - **Jitter/shimmer deferred to a single global pass (implemented — replaces the
+    earlier per-chunk rescale).** `PerturbationCalculator` is split into
+    `compute_marks(voice)` → cc cycle marks + amplitude tier (the only chunk-local
+    inputs), and `perturb_from_marks(t_points, amp_t, amp_v, egg_centres)` → a
+    PURE function doing the full per-cycle decomposition. `calculate_all_metrics`
+    grows a `skip_perturbation` hook: each chunk stashes its marks (chunk-local s)
+    and emits zeros; `_compute_metrics_chunked` offsets every chunk's marks to
+    global time, de-dups the overlap by keeping only marks in each chunk's core
+    interval, and runs `perturb_from_marks` ONCE on the accumulated
+    whole-recording marks. The numerator is then **exact** — ShimmerDB (a local
+    log-ratio, no global denominator) is **0.1 %** chunk-vs-whole.
+  - **Residual is now pitch-tracking divergence, not an algorithm error.** What
+    remains comes from the *global denominators* (jitter ÷ mean-period, shimmer ÷
+    mean-amplitude): per-chunk `sound_to_pitch` (autocorrelation + Viterbi) finds
+    ~10 % more pulses than a single whole-signal pass on this voice, and they are
+    low-amplitude / longer-period, so chunked `mean_amp` runs ~8.6 % low and
+    `mean_period` ~2.8 % high at chunk_s=30 (n_tp 8574→9484). This is intrinsic to
+    chunking — the global Viterbi path can't be reconstructed from independent
+    chunks — and it affects every per-cycle metric (Entropy, VibratoJitter, GNE
+    show the same chunk-count growth); shimmer is just the most exposed because of
+    its amplitude denominator. **It shrinks with chunk size**, and chunked is only
+    used for long files where the whole-signal path can't run anyway:
+
+    | chunk_s (this 64 s file) | Shimmer | Jitter | ShimmerDB | GNE | Entropy |
+    |---|---|---|---|---|---|
+    | 60 (2 chunks) | 1.3 % | 0.2 % | 0.1 % | 2.5 % | 0.0 % |
+    | 30 (3 chunks) | 9.5 % | 2.8 % | 0.3 % | 5.1 % | 2.0 % |
+    | 15 (5 chunks) | 14.7 % | 4.1 % | 0.6 % | 5.7 % | 7.1 % |
+
+    The default `chunk_s=120` therefore keeps jitter/shimmer ≈1 % on realistic
+    long files. **Exact** parity (if ever needed) requires a single global
+    voice-pitch pass feeding chunk-consistent marks — block-processable (marks are
+    O(cycles), cheap) but a larger change; noted as a follow-up.
 
 ## 4.3 — Cross-platform reproducibility ⚠ (partial)
 - Determinism by design: K-means uses `random_state=0`; the only stochastic

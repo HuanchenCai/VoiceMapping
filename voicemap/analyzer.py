@@ -190,7 +190,7 @@ class VoiceMapAnalyzer:
     #   "# VoiceMap cluster centroids  k=<k>  n_harm=<n>  dim=<3n>"
     # Then one row per centroid: cluster_id;feat_0;feat_1;...;feat_{dim-1}
     # NOTE: load_centroids() is permissive on the comment line (only parses
-    # n_harm=N), so legacy files with "# FonaDyn cluster centroids" header
+    # n_harm=N), so legacy centroid files written with an older/foreign header
     # still load fine.
     # ------------------------------------------------------------------
     def save_centroids(self, path: str) -> None:
@@ -476,7 +476,8 @@ class VoiceMapAnalyzer:
                                cycle_triggers,
                                progress_cb=None,
                                partial_cb=None,
-                               skip_clustering: bool = False) -> Dict[str, np.ndarray]:
+                               skip_clustering: bool = False,
+                               skip_perturbation: bool = False) -> Dict[str, np.ndarray]:
         """
         progress_cb(step, total, label) — per-stage progress.
         partial_cb(metrics_phase_a)     — fires after the first 4 stages
@@ -582,7 +583,28 @@ class VoiceMapAnalyzer:
             cluster_values = self.cluster_calculator.calculate(egg_signal, cycle_triggers, dft=_dft)
 
         _step(9)   # "Jitter / Shimmer"
-        perturb_values                       = self.perturb_calculator.calculate(voice_signal, cycle_triggers)
+        if skip_perturbation:
+            # Chunked path: jitter/shimmer decompose a window-global Praat
+            # scalar, so per-chunk values would not match the whole signal.
+            # Defer them — stash this chunk's marks (in chunk-local seconds)
+            # and the EGG cycle centres; the chunked pipeline offsets them to
+            # global time, accumulates, and runs perturb_from_marks ONCE at the
+            # end → bit-identical to the whole-signal path.
+            pc = self.perturb_calculator
+            marks = pc.compute_marks(voice_signal)
+            fs = float(self.config.sample_rate)
+            egg_centres_t = ((_idx[:-1].astype(np.float64) +
+                              _idx[1:].astype(np.float64)) * 0.5 / fs
+                             if n_cycles > 0 else np.zeros(0))
+            if marks is None:
+                self._last_pp = (np.zeros(0), np.zeros(0), np.zeros(0),
+                                 egg_centres_t)
+            else:
+                t_points, amp_t, amp_v = marks
+                self._last_pp = (t_points, amp_t, amp_v, egg_centres_t)
+            perturb_values = {k: np.zeros(n_cycles) for k in pc.KEYS}
+        else:
+            perturb_values                   = self.perturb_calculator.calculate(voice_signal, cycle_triggers)
         _step(10)  # "HNR + NHR"
         hnr_values                           = self.hnr_calculator.calculate(voice_signal, cycle_triggers)
         nhr_values                           = self.nhr_calculator.calculate(
@@ -800,7 +822,8 @@ class VoiceMapAnalyzer:
                                 plot_mode: str = "per-metric",
                                 export_plots: Optional[bool] = None,
                                 progress_cb=None,
-                                partial_cb=None):
+                                partial_cb=None,
+                                write_disk: bool = True):
         """
         progress_cb(step, total, label) — called at each pipeline stage.
         partial_cb(grouped_df)          — fires after the first-pass
@@ -901,7 +924,8 @@ class VoiceMapAnalyzer:
         csv_result = self.output_vrp_csv(filtered_metrics,
                                           return_df=return_df,
                                           plot_mode=plot_mode,
-                                          export_plots=export_plots)
+                                          export_plots=export_plots,
+                                          write_disk=write_disk)
         if return_df:
             out_file, grouped_df = csv_result
         else:
@@ -948,6 +972,15 @@ class VoiceMapAnalyzer:
 
         accum: Dict[str, list] = {}
         acc_amps, acc_phases = [], []
+        # Jitter/shimmer are DEFERRED (each decomposes a window-global Praat
+        # scalar, so per-chunk values would not match the whole signal).
+        # Accumulate the raw marks in GLOBAL time — cc cycle marks (acc_tp), the
+        # amplitude tier (acc_at/acc_av), and the per-cycle EGG centres aligned
+        # 1:1 with the accumulated base metrics (acc_egg) — then run
+        # perturb_from_marks ONCE at the end → bit-identical to the whole-signal
+        # path. Overlap is de-duplicated by keeping only marks whose global time
+        # lands in each chunk's core interval.
+        acc_tp, acc_at, acc_av, acc_egg = [], [], [], []
         with sf.SoundFile(file_path) as fh:
             for ci in range(n_chunks):
                 cstart = ci * chunk
@@ -968,8 +1001,10 @@ class VoiceMapAnalyzer:
                     trig = self.phase_portrait_cycle_detection(egg_p)
 
                 base = self.calculate_all_metrics(voice_p, egg_p, trig,
-                                                  skip_clustering=True)
+                                                  skip_clustering=True,
+                                                  skip_perturbation=True)
                 dft  = self._last_dft
+                tp_c, at_c, av_c, egg_c = self._last_pp   # chunk-local seconds
 
                 cyc = np.where(trig > 0.5)[0]
                 if len(cyc) < 2:
@@ -986,12 +1021,51 @@ class VoiceMapAnalyzer:
                     if dft is not None:
                         acc_amps.append(dft[0][core])
                         acc_phases.append(dft[1][core])
+                    # Accumulate deferred-perturbation marks in GLOBAL time.
+                    off = rstart / sr
+                    c_lo, c_hi = cstart / sr, core_end / sr
+                    # EGG centres: same `core` cycles as base → align 1:1 with
+                    # the accumulated per-cycle metrics.
+                    acc_egg.append(egg_c[core] + off)
+                    # cc marks + amplitude tier: keep marks whose global time is
+                    # in this chunk's core interval (de-dups the overlap region,
+                    # so the concatenation reconstructs the whole-signal marks).
+                    if len(tp_c):
+                        tg = tp_c + off
+                        m = (tg >= c_lo) & (tg < c_hi)
+                        acc_tp.append(tg[m])
+                    if len(at_c):
+                        ag = at_c + off
+                        m = (ag >= c_lo) & (ag < c_hi)
+                        acc_at.append(ag[m]); acc_av.append(av_c[m])
                 if progress_cb:
                     progress_cb(ci + 1, n_chunks, f"chunk {ci+1}/{n_chunks}")
 
         if not accum:
             return {"_duration": total / sr}
         metrics = {k: np.concatenate(v) for k, v in accum.items()}
+
+        # ── Jitter/shimmer: run the deferred per-cycle decomposition ONCE on
+        # the accumulated whole-recording marks (exact — no per-chunk window
+        # dependence). Done before clustering so cPhon sees the real jitter.
+        egg_g = np.concatenate(acc_egg) if acc_egg else np.zeros(0)
+        tp_g  = np.concatenate(acc_tp)  if acc_tp  else np.zeros(0)
+        at_g  = np.concatenate(acc_at)  if acc_at  else np.zeros(0)
+        av_g  = np.concatenate(acc_av)  if acc_av  else np.zeros(0)
+        pert = self.perturb_calculator.perturb_from_marks(tp_g, at_g, av_g, egg_g)
+        _PERT_MAP = {
+            'jitter': 'jitter_local', 'jitter_rap': 'jitter_rap',
+            'jitter_ppq5': 'jitter_ppq5', 'shimmer': 'shimmer_local',
+            'shimmer_db': 'shimmer_db', 'shimmer_apq3': 'shimmer_apq3',
+            'shimmer_apq5': 'shimmer_apq5', 'shimmer_apq11': 'shimmer_apq11',
+        }
+        if len(egg_g) == len(metrics.get('midi', [])):
+            for bk, pk in _PERT_MAP.items():
+                metrics[bk] = pert[pk]
+        else:
+            logger.warning("Chunked perturbation length mismatch (%d vs %d) — "
+                           "jitter/shimmer left zero",
+                           len(egg_g), len(metrics.get('midi', [])))
 
         # ── Global clustering (fit ONCE on the accumulated features) ─────────
         if acc_amps:
@@ -1011,7 +1085,7 @@ class VoiceMapAnalyzer:
     def analyze_and_output_vrp_chunked(self, file_path=None, chunk_s=120.0,
                                        overlap_s=1.0, return_df=False,
                                        plot_mode="per-metric", export_plots=None,
-                                       progress_cb=None):
+                                       progress_cb=None, write_disk=True):
         """Bounded-memory variant of analyze_and_output_vrp (see above)."""
         audio_file = file_path or self.config.audio_file
         t0 = time.perf_counter()
@@ -1025,7 +1099,8 @@ class VoiceMapAnalyzer:
         logger.info("Valid data points: %d", len(filtered_metrics['midi']))
         csv_result = self.output_vrp_csv(filtered_metrics, return_df=return_df,
                                          plot_mode=plot_mode,
-                                         export_plots=export_plots)
+                                         export_plots=export_plots,
+                                         write_disk=write_disk)
         if return_df:
             out_file, grouped_df = csv_result
         else:
@@ -1039,6 +1114,45 @@ class VoiceMapAnalyzer:
         if return_df:
             return filtered_metrics, out_file, grouped_df
         return filtered_metrics, out_file
+
+    def analyze_and_output_vrp_auto(self, file_path=None, return_df=False,
+                                    plot_mode="per-metric", export_plots=None,
+                                    progress_cb=None, partial_cb=None,
+                                    write_disk=True):
+        """Route long recordings to the bounded-memory chunked path, short ones
+        to the exact whole-signal path. Threshold + chunk size come from config
+        (auto_chunk / chunk_threshold_s / chunk_s / chunk_overlap_s). Both paths
+        return the same shape, so callers need not care which ran. The chunked
+        path has no progressive first pass, so `partial_cb` is ignored there."""
+        audio_file = file_path or self.config.audio_file
+        use_chunked = False
+        thr = getattr(self.config, 'chunk_threshold_s', 0.0) or 0.0
+        if getattr(self.config, 'auto_chunk', False) and thr > 0:
+            try:
+                info = sf.info(audio_file)
+                dur = info.frames / float(info.samplerate)
+                if dur > thr:
+                    use_chunked = True
+                    logger.info("Auto-chunk: %.0fs audio > %.0fs threshold "
+                                "→ bounded-memory chunked path", dur, thr)
+            except Exception:
+                logger.exception("Auto-chunk duration probe failed; "
+                                 "falling back to whole-signal path")
+        if use_chunked:
+            if partial_cb is not None:
+                logger.info("Chunked path has no progressive first pass; "
+                            "partial_cb will not fire")
+            return self.analyze_and_output_vrp_chunked(
+                audio_file,
+                chunk_s=getattr(self.config, 'chunk_s', 120.0),
+                overlap_s=getattr(self.config, 'chunk_overlap_s', 1.0),
+                return_df=return_df, plot_mode=plot_mode,
+                export_plots=export_plots, progress_cb=progress_cb,
+                write_disk=write_disk)
+        return self.analyze_and_output_vrp(
+            audio_file, return_df=return_df, plot_mode=plot_mode,
+            export_plots=export_plots, progress_cb=progress_cb,
+            partial_cb=partial_cb, write_disk=write_disk)
 
 
 def main():

@@ -645,4 +645,92 @@ Format per entry:
   unchanged). Open decisions: chunk size, auto-switch threshold, jitter
   per-window vs 2-pass exact, float32 audio.
 
+## 2026-06-01  session=validation-bootstrap  commit=pending  [JITTER/SHIMMER CACHE]
+- Why: user — under chunking jitter/shimmer changed ~15 %; they need it exact.
+  Insight: only a few metrics need a global "cache"; the rest are per-cycle/
+  per-window (chunk-invariant). Confirmed: ONLY jitter (÷ global mean period)
+  and shimmer (÷ global mean amplitude) carry a window-global normaliser.
+- Fix: `mean_period_count` (praat_perturbation) + PerturbationCalculator caches
+  per-chunk mean period / mean amplitude + counts; chunked orchestrator
+  recombines them (Σ(mean·n)/Σn) and rescales jitter/shimmer by
+  chunk_mean/global_mean before clustering (so cPhon sees corrected jitter).
+- Effect (chunk vs whole): jitter 13 % → ~3 % (residual = boundary cycles,
+  →1 % at larger chunks); Entropy/VibratoJitter 8.7/5.1 % → 1.1 %
+  (boundary-only); GNE ~4 %. Shimmer 19 % → ~11 % — mean-amp rescale removes the
+  denominator error but the amplitude-tier ENTRIES differ per chunk when
+  loudness varies, so a ~11 % residual remains; exact shimmer needs deferring
+  the amp tier to one global pass (follow-up). ShimmerDB already exact.
+- Tests: validate_params 49 PASS (whole-signal path stores the cache attrs but
+  is otherwise byte-identical).
+
+## 2026-06-01  session=validation-bootstrap  commit=pending  [JITTER/SHIMMER DEFERRAL (option 甲)]
+- Why: user — "甲吧". Rescale (above) left shimmer ~11 % because it corrected only
+  the global denominator, not the per-chunk amplitude-tier entries. Go for exact:
+  defer the WHOLE per-cycle decomposition to one global pass.
+- Refactor: `PerturbationCalculator` split into `compute_marks(voice)` → (t_points,
+  amp_t, amp_v) and `perturb_from_marks(t_points, amp_t, amp_v, egg_centres)` →
+  pure decomposition. `calculate()` just orchestrates them (whole-signal path
+  byte-identical, e2e 0-drift). Removed the now-dead rescale cache
+  (`_last_mp/_last_ma`) + `mean_period_count`.
+- Chunked: `calculate_all_metrics(skip_perturbation=True)` stashes each chunk's
+  marks (chunk-local s) in `self._last_pp`, emits zeros; `_compute_metrics_chunked`
+  offsets marks to global time, de-dups overlap by core-interval, runs
+  `perturb_from_marks` ONCE on the accumulated marks (before clustering, so cPhon
+  sees real jitter). New parity harness `scripts/compare_chunked_vs_whole.py`.
+- Effect: numerator EXACT — ShimmerDB (local log-ratio, no denominator) 0.1 %
+  chunk-vs-whole. The remaining diff is the global denominators, and its ROOT
+  CAUSE is now pinned: per-chunk `sound_to_pitch` over-detects ~10 % low-amp /
+  long-period pulses vs a whole-signal pass (n_tp 8574→9484 at chunk_s=30 →
+  mean_amp −8.6 % → shimmer +9.5 %, mean_period +2.8 % → jitter +2.8 %). Intrinsic
+  to chunking (global Viterbi path unreconstructable from chunks); hits every
+  per-cycle metric, shimmer most (amplitude denominator). SHRINKS with chunk size:
+  Shimmer/Jitter = 1.3 %/0.2 % @60 s, 9.5 %/2.8 % @30 s, 14.7 %/4.1 % @15 s. Default
+  chunk_s=120 → ≈1 %; chunked is only for long files where whole-signal can't run.
+- Verdict: better than rescale (numerator exact, no systematic denom-recombine
+  error) and the residual is a documented pitch-tracking floor, not an algorithm
+  bug. Bit-exact would need one global voice-pitch pass feeding chunk-consistent
+  marks (block-processable, marks are O(cycles)) — noted as follow-up, not done.
+- Tests: validate_params 49 PASS · e2e_regression 0-drift across 3 modes.
+
+## 2026-06-01  session=validation-bootstrap  commit=pending  [AUTO-CHUNK WIRING]
+- Why: the chunked pipeline existed but nothing called it (only the compare
+  script) — CLI + GUI both used the whole-signal path, so a 1-hour batch run
+  would still OOM. log.md had flagged "auto-switch threshold" as an open decision.
+- Fix: `analyze_and_output_vrp_auto(file_path, ...)` probes duration via
+  `sf.info` and routes >`config.chunk_threshold_s` (default 180 s) to the chunked
+  path, else whole-signal (same return shape → callers agnostic). Config gains
+  auto_chunk / chunk_threshold_s / chunk_s(120) / chunk_overlap_s(1). CLI _run_one
+  + GUI worker now call _auto. Chunked has no progressive first pass → partial_cb
+  ignored there (logged). auto_chunk=False forces whole-signal.
+- Threshold rationale: after block-processing, whole-signal peak ≈797 MB @60 s →
+  ~2.4 GB @180 s (linear); chunked is flat ~1.2-1.5 GB. So ≤180 s stays on the
+  exact (slightly faster) whole path; longer auto-chunks to cap RAM.
+- Verified: 64 s file @ default 180 s → whole (12525 cycles, identical to forced
+  whole); low threshold via _auto → chunked (12519). validate_params/e2e use the
+  whole path directly, unaffected.
+
+## 2026-06-01  session=validation-bootstrap  commit=pending  [PHASE 5 + 6]
+- Why: user "开始 phase 5、6" (freeze lifted). Methodology package + ML integration.
+- Phase 6 (ML): `voicemap/ml.py` VoiceFeatureExtractor (sklearn BaseEstimator+
+  TransformerMixin): audio OR pre-computed VRP csv/parquet → one fixed-length row
+  per file; each per-cell metric → cycle-weighted mean+std (+ vrp_n_cells/cycles)
+  = 130 features; names + metric set DERIVED from metrics_registry (no hardcode).
+  Threaded write_disk through analyze_and_output_vrp/_chunked/_auto so the
+  extractor analyses with zero disk side effects. read_vrp/parquet helpers (6.4).
+  ml_schema.md auto-generated by scripts/gen_ml_schema.py (6.2). examples/ml_demo.py
+  (6.5): synth 3-class corpus → features → LogReg, 4-fold CV 0.833 verified.
+- Phase 5 (docs): methodology.md (5.1, subagent-drafted from the 28 metric docs +
+  registry, reviewed — 46 subsections, all 64 keys, all links resolve);
+  reproducibility.md (5.3); api_stability.md (5.4, semver 1.0.0 freeze);
+  package_corpus.py + corpora/synthetic.md (5.2, CC0 release zip).
+- Naming hygiene: removed all 6 residual "FonaDyn" refs from voicemap/ (registry
+  Qcontact desc surfaced in the ML doc; metrics.py/plotter.py/analyzer.py
+  provenance comments) → "the reference SuperCollider VRP implementation".
+- 6.3 (centroid library) DEFERRED: needs a multi-voice EGG corpus (only 1
+  stereo+EGG file on hand; 12 synthetics are mono) + a cPhon preset-centroid
+  refactor. EGG train/save/load already exists; cluster cols already excluded
+  from default ML features → not blocking. Resume when a corpus lands.
+- Tests: validate_params 49 PASS · e2e 0-drift (write_disk additive). New code is
+  ML/docs, outside the metric-formula path.
+
 <!-- next-session-anchor -->
