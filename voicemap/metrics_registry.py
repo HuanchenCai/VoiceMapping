@@ -246,7 +246,7 @@ def _populate_builtins():
     register(MetricSpec(
         key="Qcontact", category="EGG", label="Qci - Contact Quotient",
         vmin=0.1, vmax=0.6, unit="", cmap="fd_qci",
-        description="FonaDyn integral-based contact quotient."))
+        description="Integral-based contact quotient (normalised-EGG area)."))
     register(MetricSpec(
         key="dEGGmax", category="EGG", label="Qdelta - Peak dEGG",
         vmin=1.0, vmax=20.0, unit="slope", cmap="fd_degg",

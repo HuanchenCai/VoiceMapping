@@ -3,7 +3,8 @@
 """
 VoiceMap VRP Plotter
 Saves a PNG map for every non-empty metric column in the grouped VRP CSV.
-Colour scales reproduce the exact HSV/RGB formulas from FonaDyn's Metric*.sc files.
+Colour scales reproduce the exact HSV/RGB formulas from the reference
+SuperCollider VRP Metric*.sc files.
 """
 
 import os
@@ -56,7 +57,7 @@ _CMAP = {
 }
 
 # ---------------------------------------------------------------------------
-# Per-metric display configuration  (vmin/vmax = FonaDyn minVal/maxVal)
+# Per-metric display configuration  (vmin/vmax = reference SC minVal/maxVal)
 # ---------------------------------------------------------------------------
 # norm=None  → linear Normalize(vmin, vmax)
 # norm=LogNorm → logarithmic axis (dEGGmax, Total)
