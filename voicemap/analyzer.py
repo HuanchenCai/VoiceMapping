@@ -27,9 +27,9 @@ from voicemap.metrics import (
     OpenQuotientCalculator,
     # Add-on voice quality metrics (待验证)
     NHRCalculator, CPPSCalculator, PPECalculator, ZCRCalculator,
-    # Extended metrics: spectral / MFCC / formant extras / integrative / vibrato jitter
+    # Extended metrics: spectral / MFCC / formant extras / vibrato jitter
     SpectralMomentsCalculator, F0HzCalculator, MFCCCalculator,
-    FormantExtrasCalculator, IntegrativeMetricsCalculator,
+    FormantExtrasCalculator,
     VibratoJitterCalculator,
 )
 
@@ -173,7 +173,6 @@ class VoiceMapAnalyzer:
         self.f0hz_calculator           = F0HzCalculator(self.config)
         self.mfcc_calculator           = MFCCCalculator(self.config)
         self.formant_extras_calculator = FormantExtrasCalculator(self.config)
-        self.integrative_calculator    = IntegrativeMetricsCalculator(self.config)
         self.vib_jitter_calculator     = VibratoJitterCalculator(self.config)
 
         # Per-analysis transient state — populated by voice_only_cycle_detection()
@@ -611,11 +610,7 @@ class VoiceMapAnalyzer:
         _step(18)  # "M1: 共振峰带宽 + SPR + GNE"
         formant_extras                       = self.formant_extras_calculator.calculate(voice_signal, cycle_triggers)
 
-        _step(19)  # "M1: Voicing + DUV"
-        integ_values                         = self.integrative_calculator.calculate(
-                                                    voice_signal, midi_values, cycle_triggers)
-
-        _step(20)  # "M1: Vibrato Jitter"
+        _step(19)  # "M1: Vibrato Jitter"
         vib_jitter_values                    = self.vib_jitter_calculator.calculate(vib_rate)
 
         base = {
@@ -663,8 +658,6 @@ class VoiceMapAnalyzer:
             'formant_dispersion': formant_extras['formant_dispersion'],
             'spr':            formant_extras['spr'],
             'gne':            formant_extras['gne'],
-            'voicing_ratio':  integ_values['voicing_ratio'],
-            'duv':            integ_values['duv'],
             'vib_jitter':     vib_jitter_values,
             **{f'mfcc{i+1}': mfcc_values[f'mfcc{i+1}'] for i in range(13)},
             'vibrato_rate':   vib_rate,
@@ -681,7 +674,7 @@ class VoiceMapAnalyzer:
         }
         # Phonation-type cluster uses the already-computed quality metrics
         # as features — must run AFTER them.
-        _step(21)   # "Phonation cluster (cPhon)"
+        _step(20)   # "Phonation cluster (cPhon)"
         base['phon'] = self.phon_calculator.calculate(base)
         return base
 
@@ -783,10 +776,9 @@ class VoiceMapAnalyzer:
         "M1: 频谱矩 + RMS + F0_Hz",          # 16
         "M1: MFCC 1-13",                     # 17
         "M1: 共振峰带宽 + SPR + GNE",        # 18
-        "M1: Voicing + DUV",                 # 19
-        "M1: Vibrato Jitter",                # 20
-        "Phonation cluster (cPhon)",         # 21
-        "写 CSV",                            # 22
+        "M1: Vibrato Jitter",                # 19
+        "Phonation cluster (cPhon)",         # 20
+        "写 CSV",                            # 21
     )
     TOTAL_STAGES = len(_STAGE_LABELS)
 
@@ -899,7 +891,7 @@ class VoiceMapAnalyzer:
         filtered_metrics = self.apply_clarity_filtering(metrics)
 
         logger.info("Valid data points: %d", len(filtered_metrics['midi']))
-        _cb(22)  # "写 CSV"
+        _cb(21)  # "写 CSV"
         csv_result = self.output_vrp_csv(filtered_metrics,
                                           return_df=return_df,
                                           plot_mode=plot_mode,

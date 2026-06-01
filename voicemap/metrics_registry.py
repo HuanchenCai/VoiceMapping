@@ -479,19 +479,8 @@ def _populate_m1_addons():
         description="Glottal-to-Noise Excitation (Michaelis 1997): max cross-band "
                     "Hilbert-envelope correlation. ~1 clean glottal, ~0 noisy."))
 
-    # ── Density / Integrative (whole-recording broadcast) ──
-    register(MetricSpec(
-        key="VoicingRatio", category="Density", label="Voicing Ratio",
-        vmin=0.0, vmax=1.0, unit="",
-        cmap=_plt.get_cmap("viridis"),
-        待验证=True,
-        description="Voiced cycles / total cycles."))
-    register(MetricSpec(
-        key="DUV", category="Density", label="Degree of Unvoiced",
-        vmin=0.0, vmax=100.0, unit="%",
-        cmap=_plt.get_cmap("magma"),
-        待验证=True,
-        description="100 − VoicingRatio·100."))
+    # (Removed: MPT / VoicingRatio / DUV — whole-recording broadcast scalars
+    # with no per-cell meaning. Density category = Total only.)
 
 
 # Display order for `categories(order=…)` callers.

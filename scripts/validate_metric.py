@@ -1947,92 +1947,6 @@ def validate_zcr() -> Report:
     return rep
 
 
-def validate_integrative() -> Report:
-    """Voicing Ratio / DUV — whole-recording integrative metrics,
-    `IntegrativeMetricsCalculator`.
-
-    Pure bookkeeping over the per-cycle voiced flag (`midi_per_cycle > 0`):
-    VoicingRatio = voiced/total, DUV = 100·(1−ratio). Validated by (B) synthetic
-    ground truth — a designed voiced/unvoiced pattern recovers each quantity
-    exactly — plus a (C) real-audio sanity. (MPT was removed — a whole-recording
-    scalar with no per-cell meaning.)
-    """
-    rep = Report("integrative")
-    from voicemap.config import VoiceMapConfig
-    from voicemap.metrics import IntegrativeMetricsCalculator
-    cfg = VoiceMapConfig()
-    sr = cfg.sample_rate
-    P = 220                       # integer cycle period (~200 Hz)
-
-    def _run(pattern):
-        n = len(pattern)
-        idx = np.arange(n + 1) * P            # n+1 triggers → n cycles
-        trig = np.zeros(idx[-1] + 1)
-        trig[idx] = 1.0
-        midi = np.where(np.asarray(pattern) > 0, 57.0, 0.0)
-        out = IntegrativeMetricsCalculator(cfg).calculate(
-            np.zeros(len(trig)), midi, trig)
-        return {k: float(v[0]) for k, v in out.items()}
-
-    # ── (B) designed pattern: 80 voiced / 20 unvoiced (out of 100) ───────────
-    res = _run([1]*30 + [0]*10 + [1]*50 + [0]*10)
-    exp_vr, exp_duv = 80/100, 20.0
-    rep.add("B · VoicingRatio == voiced/total", f"{exp_vr:.3f}",
-            f"{res['voicing_ratio']:.3f}",
-            f"{abs(res['voicing_ratio']-exp_vr):.1e} (atol 1e-9)",
-            abs(res['voicing_ratio']-exp_vr) <= 1e-9)
-    rep.add("B · DUV == 100·(1−ratio)", f"{exp_duv:.2f}%", f"{res['duv']:.2f}%",
-            f"{abs(res['duv']-exp_duv):.1e} (atol 1e-9)",
-            abs(res['duv']-exp_duv) <= 1e-9)
-    rep.add("B · DUV/VoicingRatio identity", "100·(1−VR)", f"{res['duv']:.4f}",
-            f"{abs(res['duv']-100*(1-res['voicing_ratio'])):.1e} (atol 1e-9)",
-            abs(res['duv']-100*(1-res['voicing_ratio'])) <= 1e-9)
-
-    # ── (B) corners ──────────────────────────────────────────────────────────
-    av = _run([1]*100)
-    rep.add("B · all-voiced → ratio 1, DUV 0",
-            "1/0", f"{av['voicing_ratio']:.0f}/{av['duv']:.0f}",
-            "corner", av['voicing_ratio'] == 1.0 and av['duv'] == 0.0)
-    uv = _run([0]*100)
-    rep.add("B · all-unvoiced → ratio 0, DUV 100", "0/100",
-            f"{uv['voicing_ratio']:.0f}/{uv['duv']:.0f}",
-            "corner", uv['voicing_ratio'] == 0.0 and uv['duv'] == 100.0)
-
-    # ── (C) real-audio sanity: sustained voice → VoicingRatio ~ 1 ────────────
-    try:
-        import soundfile as sf
-        from voicemap.metrics import ClarityCalculator
-        audio = os.path.join(AUDIO_DIR, "test_Voice_EGG.wav")
-        if os.path.exists(audio):
-            sig, srr = sf.read(audio)
-            v = (sig[:, 0] if sig.ndim == 2 else sig).astype(np.float64)
-            trig = _cc_trigger_array(v, float(srr))
-            cmidi, _ = ClarityCalculator(cfg).calculate(v, trig)
-            if len(cmidi):
-                out = IntegrativeMetricsCalculator(cfg).calculate(v, cmidi, trig)
-                vr, duv = float(out['voicing_ratio'][0]), float(out['duv'][0])
-                rep.add("C · real voiced recording VoicingRatio ~ 1", ">= 0.95",
-                        f"{vr:.3f}", f"{vr:.3f} (min 0.95)", vr >= 0.95)
-                rep.add("C · DUV identity on real audio", "100·(1−VR)",
-                        f"{duv:.3f}", f"{abs(duv-100*(1-vr)):.1e} (atol 1e-6)",
-                        abs(duv-100*(1-vr)) <= 1e-6)
-            else:
-                rep.note("(C) real-audio sanity skipped — no cc cycle marks "
-                         "(parselmouth missing?).")
-    except ImportError as e:
-        rep.note(f"(C) real-audio sanity skipped — missing dependency: {e.name}")
-
-    rep.note("(B) Synthetic GT: on a designed voiced/unvoiced pattern, "
-             "VoicingRatio = voiced/total and DUV = 100·(1−ratio) recover to "
-             "machine precision; the all-voiced / all-unvoiced corners exact.")
-    rep.note("(§7) VoicingRatio is relative to ANALYSED cycles, which the cc / "
-             "phase-portrait front-end already gates to voiced regions, so it "
-             "mainly flags per-cycle pitch-assignment failures, not silence. "
-             "MPT was removed (whole-recording scalar, no per-cell meaning). "
-             "(C) corpus distribution deferred.")
-    return rep
-
-
 def validate_vibrato_jitter() -> Report:
     """VibratoJitter — sliding-window CV (%) of the vibrato period,
     `VibratoJitterCalculator`.
@@ -2228,7 +2142,6 @@ VALIDATORS: dict[str, Callable[[], Report]] = {
     "hrf": validate_hrf,
     "singer_formant": validate_singer,
     "zcr": validate_zcr,
-    "integrative": validate_integrative,
     "vibrato_jitter": validate_vibrato_jitter,
     "gne": validate_gne,
 }
@@ -2274,8 +2187,6 @@ for _a in ("sfe", "spr", "singer", "singers_formant"):
     VALIDATORS[_a] = validate_singer
 for _a in ("zero_crossing_rate", "zerocrossing", "zero_crossings"):
     VALIDATORS[_a] = validate_zcr
-for _a in ("voicing_ratio", "voicingratio", "duv"):
-    VALIDATORS[_a] = validate_integrative
 for _a in ("vibratojitter", "vibrato_jitter_cv", "vjitter"):
     VALIDATORS[_a] = validate_vibrato_jitter
 for _a in ("glottal_to_noise", "gne_proxy", "glottal_noise_excitation"):

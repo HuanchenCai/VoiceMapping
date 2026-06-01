@@ -350,8 +350,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "metric.desc.SPR":              "歌者功率比。高频段（2-4 kHz）相对低频段（0-2 kHz）的能量比。",
         "metric.desc.VibratoJitter":    "颤音规则性。颤音周期的变异程度，越低代表颤音节奏越稳定。",
         "metric.desc.GNE":              "声门激励信噪比。反映发声噪声成分，值越高代表激励越纯净。",
-        "metric.desc.VoicingRatio":     "浊音段占总分析段的比例。",
-        "metric.desc.DUV":              "无声段（断点、辅音）占总段比例（%），是 VoicingRatio 的反向指标。",
 
         # ── metric tooltips: detailed prose for hover-over the metric
         # name. The Inspector card shows the short `metric.desc.X` (a
@@ -386,7 +384,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "metric.tooltip.SpectralFlatness":  "频谱平坦度（Wiener entropy）：Flatness = exp(mean ln|X[k]|²) / mean(|X[k]|²)，几何平均除以算术平均。纯音极限 → 0；白噪声极限 → 1。0.1–0.3 是有谐波结构的乐音；> 0.5 表明噪声主导。",
         "metric.tooltip.AlphaRatio":        "alpha 比：α = 10·log10(E[50–1000 Hz] / E[1–5 kHz]) (dB)。中低频与中高频能量的对比。值高（正）= 声门松弛，声音偏暗；值低（负）= 声门绷紧，声音偏亮、有压力感。",
         "metric.tooltip.HammarbergIndex":   "Hammarberg 指数（Hammarberg 1980）：H = max|X(f)|_{0–2kHz} − max|X(f)|_{2–5kHz} (dB)。两个频段最大值之差。值高 = 声音偏闷（抑郁倾向相关）；值低 = 紧张/焦虑/激发状态。",
-        "metric.tooltip.VoicingRatio":      "浊音段占比：VoicingRatio = N_voiced / N_total，浊音帧数与总帧数之比。高比例说明被试在持续发声、停顿少；低比例 = 断断续续，辅音多/气声多/喉部疲劳。和 DUV (1 − VoicingRatio) 互补。",
         # ── tooltips for the remaining 40 metrics ──
         "metric.tooltip.Total":             "本网格内分析的发声周期数：Total = count(cycles ∈ cell)。反映采样密度。健康嗓音 VRP 中常见上千周期/格；少于 5 周期的格通常排除（噪声驱动）。",
         "metric.tooltip.SpecBal":           "频谱平衡：SpecBal = 10·log10(E[<1500 Hz] / E[≥1500 Hz]) (dB)。1.5 kHz 以下能量与以上能量的比值。值高 = 低频主导（声音偏暗），值低 = 高频主导（声音偏亮）。临床正常嗓音 ±10 dB。",
@@ -427,7 +424,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "metric.tooltip.SPR":               "歌者功率比：SPR = 10·log10(E[2-4 kHz] / E[0-2 kHz]) (dB)。高频段相对低频段的能量比。受过训练的歌手 > -7 dB（歌者共振峰存在）；普通说话嗓音 -25 至 -15 dB。",
         "metric.tooltip.VibratoJitter":     "颤音规则性：滑动窗内颤音周期长度 T_vib[i] 的变异系数 CV = std(T_vib) / mean(T_vib) (%)。值低 = 颤音节奏稳定；值高 = 颤音忽快忽慢，可能颤抖或紧张。",
         "metric.tooltip.GNE":               "声门激励/噪声比 GNE：先 LPC 逆滤波得到激励信号，再在多个频带的 Hilbert 包络间做互相关，取最大相关系数。GNE ≈ 1 表示纯净激励，≈ 0 表示噪声主导。Michaelis 1997 原生实现。",
-        "metric.tooltip.DUV":               "无声段比例：DUV = 100 · (1 − VoicingRatio) (%)。无声帧（辅音、停顿、断点）占总帧数。和 VoicingRatio 互补。持续发声时 DUV < 15% 为正常。",
     },
     "en": {
         # ── window / status ──
@@ -743,8 +739,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "metric.desc.SPR":              "Singing power ratio. Energy ratio of the 2-4 kHz band to the 0-2 kHz band.",
         "metric.desc.VibratoJitter":    "Vibrato regularity — how steady the cycle period is over time. Lower is steadier.",
         "metric.desc.GNE":              "Glottal-to-noise excitation. Higher = cleaner glottal source, less noise.",
-        "metric.desc.VoicingRatio":     "Fraction of analysed segments that are voiced.",
-        "metric.desc.DUV":              "Unvoiced fraction (%) — gaps and consonants. Inverse of VoicingRatio.",
 
         # ── metric tooltips: detailed prose for hover-over the metric name. ──
         "metric.tooltip.Clarity":           "Pitch-detection confidence (McLeod-Wyvill NSDF): NSDF(τ) = 2·Σ x[i]·x[i+τ] / Σ (x[i]² + x[i+τ]²); Clarity = max NSDF. High = clean signal, distinct harmonics; low = noise contamination or non-voiced. VoiceMap drops cells with Clarity < 0.96 by default.",
@@ -772,7 +766,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "metric.tooltip.SpectralFlatness":    "Spectral flatness (Wiener entropy): Flatness = exp(mean ln|X[k]|²) / mean(|X[k]|²) — geometric mean over arithmetic mean. Pure-tone limit → 0; white-noise limit → 1. 0.1–0.3 is harmonic-structured musical tone; > 0.5 means noise dominates.",
         "metric.tooltip.AlphaRatio":          "Alpha ratio: α = 10·log10(E[50–1000 Hz] / E[1–5 kHz]) (dB). Mid-vs-high-frequency energy contrast. High (positive) = lax glottis, dark voice; low (negative) = tight glottis, bright / pressed voice.",
         "metric.tooltip.HammarbergIndex":     "Hammarberg index (Hammarberg 1980): H = max|X(f)|_{0–2 kHz} − max|X(f)|_{2–5 kHz} (dB). Difference of peak energies in two bands. High = muffled (depression-correlated); low = tense / anxious / aroused state.",
-        "metric.tooltip.VoicingRatio":        "Voicing fraction: VoicingRatio = N_voiced / N_total — voiced frames over total frames. High = sustained phonation, few pauses; low = stop-and-go, many consonants / breathy phonation / vocal fatigue. Complementary to DUV (1 − VoicingRatio).",
         # ── tooltips for the remaining 40 metrics ──
         "metric.tooltip.Total":              "Cycles analysed in this cell: Total = count(cycles ∈ cell). Reflects sampling density. Healthy VRPs commonly hit 1000+ cycles per cell; cells with < 5 cycles are usually excluded (noise-driven).",
         "metric.tooltip.SpecBal":            "Spectral balance: SpecBal = 10·log10(E[<1500 Hz] / E[≥1500 Hz]) (dB). Energy below 1.5 kHz vs above. High = low-freq dominated (dark voice); low = high-freq dominated (bright voice). ±10 dB is clinically normal.",
@@ -813,7 +806,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "metric.tooltip.SPR":                "Singing Power Ratio: SPR = 10·log10(E[2-4 kHz] / E[0-2 kHz]) (dB). Energy ratio of the high band to the low band. Trained singers > -7 dB (singer's formant present); ordinary speech -25 to -15 dB.",
         "metric.tooltip.VibratoJitter":      "Vibrato regularity: coefficient of variation of vibrato cycle length T_vib[i] in a sliding window: CV = std(T_vib) / mean(T_vib) (%). Low = steady vibrato; high = wobbly, possibly tremor or tension.",
         "metric.tooltip.GNE":                "Glottal-to-Noise Excitation: maximum cross-correlation across multiple Hilbert envelopes of the glottal excitation signal. GNE ≈ 1 means clean excitation, ≈ 0 means noise-dominated. Native Michaelis (1997) implementation.",
-        "metric.tooltip.DUV":                "Unvoiced fraction: DUV = 100 · (1 − VoicingRatio) (%). Fraction of frames that are unvoiced (consonants, pauses, gaps). Complementary to VoicingRatio. In sustained phonation, DUV < 15% is normal.",
     },
 }
 

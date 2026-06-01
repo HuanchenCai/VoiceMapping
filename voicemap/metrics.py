@@ -1648,41 +1648,10 @@ class FormantExtrasCalculator(MetricCalculator):
 
 
 # ───────────────────────────────────────────────────────────────────────────
-# Whole-recording integrative metrics — Voicing Ratio, DUV.
-# These produce one scalar per recording, which we then broadcast to every
-# (MIDI, dB) cell so the metric still appears in the VRP grid (uniform
-# colour). For per-VRP-cell analytics they're less useful; for whole-
-# recording reporting (e.g. clinical summary) they're invaluable.
-# (MPT — longest voiced run — was removed: it is a whole-recording scalar with
-# no per-cell meaning, and is not a true clinical Maximum Phonation Time.)
+# (Removed: IntegrativeMetricsCalculator — MPT / VoicingRatio / DUV. They were
+# whole-recording scalars broadcast uniformly to every (MIDI, dB) cell, so they
+# carried no per-cell information as VRP layers. Density now = Total only.)
 # ───────────────────────────────────────────────────────────────────────────
-class IntegrativeMetricsCalculator(MetricCalculator):
-    """Voicing Ratio (0-1), DUV (% unvoiced) — one value broadcast per cycle."""
-
-    KEYS = ("voicing_ratio", "duv")
-
-    def calculate(self, voice: np.ndarray, midi_per_cycle: np.ndarray,
-                  cycle_triggers: np.ndarray) -> Dict[str, np.ndarray]:
-        idx = np.where(cycle_triggers > 0.5)[0]
-        n_cycles = max(len(idx) - 1, 0)
-        if n_cycles == 0:
-            return {k: np.zeros(0) for k in self.KEYS}
-
-        # A cycle is "voiced" if its detected pitch (MIDI) is positive.
-        voiced_cycle = midi_per_cycle > 0
-
-        # Voicing ratio: voiced cycles / total
-        voicing = float(voiced_cycle.mean()) if n_cycles else 0.0
-        # DUV: % of cycles that are unvoiced (within the analysed cycle set)
-        duv = 100.0 * (1.0 - voicing)
-
-        logger.info("  VoicingRatio: %.3f   DUV: %.2f%%", voicing, duv)
-
-        # Broadcast: same value for every cycle so it lands in every cell
-        return {
-            "voicing_ratio":  np.full(n_cycles, voicing, dtype=np.float64),
-            "duv":            np.full(n_cycles, duv,     dtype=np.float64),
-        }
 
 
 # ───────────────────────────────────────────────────────────────────────────

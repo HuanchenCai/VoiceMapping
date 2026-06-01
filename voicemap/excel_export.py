@@ -55,7 +55,7 @@ _METRIC_COLS = [
     "maxCluster", "Cluster 1", "Cluster 2", "Cluster 3", "Cluster 4", "Cluster 5",
     "maxCPhon", "cPhon 1", "cPhon 2", "cPhon 3", "cPhon 4", "cPhon 5",
     # Density
-    "Total", "VoicingRatio", "DUV",
+    "Total",
 ]
 
 
