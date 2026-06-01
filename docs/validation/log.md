@@ -645,4 +645,22 @@ Format per entry:
   unchanged). Open decisions: chunk size, auto-switch threshold, jitter
   per-window vs 2-pass exact, float32 audio.
 
+## 2026-06-01  session=validation-bootstrap  commit=pending  [JITTER/SHIMMER CACHE]
+- Why: user — under chunking jitter/shimmer changed ~15 %; they need it exact.
+  Insight: only a few metrics need a global "cache"; the rest are per-cycle/
+  per-window (chunk-invariant). Confirmed: ONLY jitter (÷ global mean period)
+  and shimmer (÷ global mean amplitude) carry a window-global normaliser.
+- Fix: `mean_period_count` (praat_perturbation) + PerturbationCalculator caches
+  per-chunk mean period / mean amplitude + counts; chunked orchestrator
+  recombines them (Σ(mean·n)/Σn) and rescales jitter/shimmer by
+  chunk_mean/global_mean before clustering (so cPhon sees corrected jitter).
+- Effect (chunk vs whole): jitter 13 % → ~3 % (residual = boundary cycles,
+  →1 % at larger chunks); Entropy/VibratoJitter 8.7/5.1 % → 1.1 %
+  (boundary-only); GNE ~4 %. Shimmer 19 % → ~11 % — mean-amp rescale removes the
+  denominator error but the amplitude-tier ENTRIES differ per chunk when
+  loudness varies, so a ~11 % residual remains; exact shimmer needs deferring
+  the amp tier to one global pass (follow-up). ShimmerDB already exact.
+- Tests: validate_params 49 PASS (whole-signal path stores the cache attrs but
+  is otherwise byte-identical).
+
 <!-- next-session-anchor -->
