@@ -91,6 +91,23 @@ def mean_period(t_points: np.ndarray,
     return (s / n_periods) if n_periods > 0 else float('nan')
 
 
+def mean_period_count(t_points: np.ndarray,
+                      pmin: float, pmax: float,
+                      max_period_factor: float):
+    """Like `mean_period` but also returns the count of qualifying periods,
+    so a chunked pipeline can recombine per-chunk means exactly:
+    global_mean = Σ(meanᵢ · nᵢ) / Σ nᵢ. Returns (mean_or_nan, n_periods)."""
+    if len(t_points) < 2:
+        return float('nan'), 0
+    n_periods = 0
+    s = 0.0
+    for i in range(len(t_points) - 1):
+        if is_period(t_points, i, pmin, pmax, max_period_factor):
+            n_periods += 1
+            s += t_points[i + 1] - t_points[i]
+    return ((s / n_periods) if n_periods > 0 else float('nan')), n_periods
+
+
 # ---------------------------------------------------------------------------
 # Jitter family (VoiceAnalysis.cpp)
 # ---------------------------------------------------------------------------

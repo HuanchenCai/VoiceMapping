@@ -948,6 +948,10 @@ class VoiceMapAnalyzer:
 
         accum: Dict[str, list] = {}
         acc_amps, acc_phases = [], []
+        # Jitter/shimmer global-normaliser recombination (chunk-invariance):
+        # global_mean = Σ(meanᵢ·nᵢ)/Σnᵢ. Track sums + per-core-cycle the chunk's
+        # mean period / mean amplitude, then rescale at the end.
+        mp_sum = mp_cnt = ma_sum = ma_cnt = 0.0
         with sf.SoundFile(file_path) as fh:
             for ci in range(n_chunks):
                 cstart = ci * chunk
@@ -986,12 +990,45 @@ class VoiceMapAnalyzer:
                     if dft is not None:
                         acc_amps.append(dft[0][core])
                         acc_phases.append(dft[1][core])
+                    # this chunk's jitter/shimmer global normalisers
+                    pc = self.perturb_calculator
+                    mp_c = float(getattr(pc, '_last_mp', float('nan')))
+                    ma_c = float(getattr(pc, '_last_ma', float('nan')))
+                    mp_nc = int(getattr(pc, '_last_mp_n', 0))
+                    ma_nc = int(getattr(pc, '_last_ma_n', 0))
+                    n_core = int(core.sum())
+                    accum.setdefault('_mp_c', []).append(np.full(n_core, mp_c))
+                    accum.setdefault('_ma_c', []).append(np.full(n_core, ma_c))
+                    if np.isfinite(mp_c) and mp_nc > 0:
+                        mp_sum += mp_c * mp_nc; mp_cnt += mp_nc
+                    if np.isfinite(ma_c) and ma_nc > 0:
+                        ma_sum += ma_c * ma_nc; ma_cnt += ma_nc
                 if progress_cb:
                     progress_cb(ci + 1, n_chunks, f"chunk {ci+1}/{n_chunks}")
 
         if not accum:
             return {"_duration": total / sr}
         metrics = {k: np.concatenate(v) for k, v in accum.items()}
+
+        # ── Rescale jitter/shimmer to the GLOBAL normalisers ─────────────────
+        # Per-chunk value = local |Δ| / chunk-mean; multiply by chunk-mean /
+        # global-mean → local |Δ| / global-mean = whole-signal value. (ShimmerDB
+        # is a log-ratio with no denominator → already correct, not rescaled.)
+        # Done before clustering so cPhon sees the corrected jitter feature.
+        mp_c_arr = metrics.pop('_mp_c', None)
+        ma_c_arr = metrics.pop('_ma_c', None)
+        mp_g = (mp_sum / mp_cnt) if mp_cnt > 0 else float('nan')
+        ma_g = (ma_sum / ma_cnt) if ma_cnt > 0 else float('nan')
+        if mp_c_arr is not None and np.isfinite(mp_g) and mp_g > 0:
+            f = np.where(np.isfinite(mp_c_arr), mp_c_arr / mp_g, 1.0)
+            for k in ('jitter', 'jitter_rap', 'jitter_ppq5'):
+                if k in metrics:
+                    metrics[k] = metrics[k] * f
+        if ma_c_arr is not None and np.isfinite(ma_g) and ma_g > 0:
+            f = np.where(np.isfinite(ma_c_arr), ma_c_arr / ma_g, 1.0)
+            for k in ('shimmer', 'shimmer_apq3', 'shimmer_apq5', 'shimmer_apq11'):
+                if k in metrics:
+                    metrics[k] = metrics[k] * f
 
         # ── Global clustering (fit ONCE on the accumulated features) ─────────
         if acc_amps:

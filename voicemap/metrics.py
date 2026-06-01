@@ -2105,6 +2105,19 @@ class PerturbationCalculator(MetricCalculator):
             t_points, voice, fs,
             self.PMIN_S, self.PMAX_S, self.PERIOD_FACTOR_MAX)
 
+        # Cache the two window-global normalisers (jitter ÷ mean period,
+        # shimmer ÷ mean amplitude) + their counts. The chunked pipeline reads
+        # these per chunk, recombines them (global = Σ(meanᵢ·nᵢ)/Σnᵢ), and
+        # rescales jitter/shimmer so they are chunk-invariant (whole-signal
+        # exact) — only the denominator is window-global; the numerators are
+        # purely local. (ShimmerDB is a log-ratio with no denominator, so it is
+        # already chunk-invariant.)
+        self._last_mp, self._last_mp_n = _ppt.mean_period_count(
+            t_points, self.PMIN_S, self.PMAX_S, self.PERIOD_FACTOR_MAX)
+        self._last_ma = (float(np.mean(amp_v[:-1])) if len(amp_v) >= 2
+                         else float('nan'))
+        self._last_ma_n = max(len(amp_v) - 1, 0)
+
         out = {k: np.zeros(n, dtype=np.float64) for k in self.KEYS}
 
         # EGG cycle centres in seconds (the indexing the rest of the
