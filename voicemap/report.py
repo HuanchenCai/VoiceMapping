@@ -98,12 +98,6 @@ _THRESHOLDS: Dict[str, List[Tuple[float, float, str, str]]] = {
         (0.4,    0.7,   "开商正常，模态",                       "normal"),
         (0.7,   1e9,    "开商高，气声型",                       "watch"),
     ],
-    # Density / 整曲级
-    "VoicingRatio": [
-        (0.0,    0.5,   "偏低",                                "watch"),
-        (0.5,    0.85,  "正常",                                "normal"),
-        (0.85,  1e9,    "高比例浊音",                          "good"),
-    ],
     # ── batch 2: extra reference ranges per user spec ──
     # Crest factor: 1.4-2.0 typical for speech, < 1.5 = saturated /
     # over-compressed, > 3 = transient-heavy. Cite: Boersma & Weenink
@@ -145,13 +139,6 @@ _THRESHOLDS: Dict[str, List[Tuple[float, float, str, str]]] = {
         (-1e9,   10.0,  "压制 / 紧张",                          "watch"),
         (10.0,   30.0,  "正常",                                "normal"),
         (30.0,  1e9,    "气声 / 低沉",                          "watch"),
-    ],
-    # DUV (% unvoiced): inverse of VoicingRatio. < 15% normal sustained
-    # phonation; > 50% suggests breathy / interrupted phonation.
-    "DUV": [
-        (0.0,    15.0,  "正常",                                "normal"),
-        (15.0,   50.0,  "中度断点",                            "watch"),
-        (50.0,  1e9,    "高度断点 / 气声",                      "abnormal"),
     ],
     # Entropy (sample-entropy on EGG harmonics): 0 = perfectly
     # repeating, > 1.5 = chaotic. Healthy voice 0.3-1.0.
@@ -342,7 +329,7 @@ def generate_report(grouped_df: pd.DataFrame,
     a("")
 
     _emit_section(lines, "一、总览", df,
-                  ("F0_Hz", "VoicingRatio"))
+                  ("F0_Hz",))
     _emit_section(lines, "二、嗓音质量（声学）", df,
                   ("HNR", "NHR", "CPP", "CPPS",
                    "Jitter", "JitterRAP", "JitterPPQ5",

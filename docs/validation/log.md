@@ -588,4 +588,20 @@ Format per entry:
   unit tests (test_i18n / test_metric_descriptions / test_report_thresholds) OK;
   validate_params 52 → **51 PASS / 0 WARN / 0 FAIL** (MPT range-check removed).
 
+## 2026-06-01  session=validation-bootstrap  commit=pending  [VoicingRatio/DUV REMOVED]
+- Touched: voicemap/metrics.py (IntegrativeMetricsCalculator fully removed),
+  analyzer.py (calculator + step renumber 22→21 stages), csv_writer.py,
+  excel_export.py, metrics_registry.py, i18n.py, gui/theme.py, report.py,
+  scripts/validate_metric.py (validate_integrative deleted), tests/
+  validate_params.py, docs/validation/metrics/integrative.md (deleted),
+  docs/validation/regression/e2e_baseline.json (regenerated)
+- Why: user — like MPT, VoicingRatio + DUV are whole-recording scalars
+  broadcast uniformly to every (MIDI,dB) cell → no per-cell meaning as VRP
+  layers. Audited the rest: jitter/shimmer are per-cycle by default
+  (STRATEGY='per_cycle'; 'global' broadcast is non-default), all other metrics
+  are genuinely per-cycle → VoicingRatio/DUV were the only remaining broadcast
+  ones. The whole IntegrativeMetricsCalculator is now gone; Density = Total only.
+- Tests: imports OK; consistency unit tests OK; e2e baseline 237→231 columns
+  (3 modes ran clean); validate_params 51 → **49 PASS / 0 WARN / 0 FAIL**.
+
 <!-- next-session-anchor -->

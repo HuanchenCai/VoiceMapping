@@ -231,8 +231,6 @@ def run_validation(wav_path: str):
         ("FormantDispersion", 0.0,  3000.0),
         ("SPR",            -50.0,  30.0),
         ("GNE",             0.0,  1.0),
-        ("VoicingRatio",    0.0,  1.0),
-        ("DUV",             0.0,  100.0),
         ("VibratoJitter",   0.0,  100.0),
     ]
     for col, lo, hi in range_checks:
