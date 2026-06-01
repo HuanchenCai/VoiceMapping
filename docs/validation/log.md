@@ -663,4 +663,33 @@ Format per entry:
 - Tests: validate_params 49 PASS (whole-signal path stores the cache attrs but
   is otherwise byte-identical).
 
+## 2026-06-01  session=validation-bootstrap  commit=pending  [JITTER/SHIMMER DEFERRAL (option 甲)]
+- Why: user — "甲吧". Rescale (above) left shimmer ~11 % because it corrected only
+  the global denominator, not the per-chunk amplitude-tier entries. Go for exact:
+  defer the WHOLE per-cycle decomposition to one global pass.
+- Refactor: `PerturbationCalculator` split into `compute_marks(voice)` → (t_points,
+  amp_t, amp_v) and `perturb_from_marks(t_points, amp_t, amp_v, egg_centres)` →
+  pure decomposition. `calculate()` just orchestrates them (whole-signal path
+  byte-identical, e2e 0-drift). Removed the now-dead rescale cache
+  (`_last_mp/_last_ma`) + `mean_period_count`.
+- Chunked: `calculate_all_metrics(skip_perturbation=True)` stashes each chunk's
+  marks (chunk-local s) in `self._last_pp`, emits zeros; `_compute_metrics_chunked`
+  offsets marks to global time, de-dups overlap by core-interval, runs
+  `perturb_from_marks` ONCE on the accumulated marks (before clustering, so cPhon
+  sees real jitter). New parity harness `scripts/compare_chunked_vs_whole.py`.
+- Effect: numerator EXACT — ShimmerDB (local log-ratio, no denominator) 0.1 %
+  chunk-vs-whole. The remaining diff is the global denominators, and its ROOT
+  CAUSE is now pinned: per-chunk `sound_to_pitch` over-detects ~10 % low-amp /
+  long-period pulses vs a whole-signal pass (n_tp 8574→9484 at chunk_s=30 →
+  mean_amp −8.6 % → shimmer +9.5 %, mean_period +2.8 % → jitter +2.8 %). Intrinsic
+  to chunking (global Viterbi path unreconstructable from chunks); hits every
+  per-cycle metric, shimmer most (amplitude denominator). SHRINKS with chunk size:
+  Shimmer/Jitter = 1.3 %/0.2 % @60 s, 9.5 %/2.8 % @30 s, 14.7 %/4.1 % @15 s. Default
+  chunk_s=120 → ≈1 %; chunked is only for long files where whole-signal can't run.
+- Verdict: better than rescale (numerator exact, no systematic denom-recombine
+  error) and the residual is a documented pitch-tracking floor, not an algorithm
+  bug. Bit-exact would need one global voice-pitch pass feeding chunk-consistent
+  marks (block-processable, marks are O(cycles)) — noted as follow-up, not done.
+- Tests: validate_params 49 PASS · e2e_regression 0-drift across 3 modes.
+
 <!-- next-session-anchor -->

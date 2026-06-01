@@ -12,7 +12,7 @@
 - ✅ **Phase 1 — P0 指标 (12/12 PASS, 完成)**：1 ✅ Jitter；2 ✅ Shimmer；3 ✅ F0/Clarity；4 ✅ HNR/NHR；5 ✅ CPP/CPPS；6 ✅ Formants；7 ✅ B1/B2/B3；8 ✅ Spectral moments；9 ✅ Alpha/Hammarberg；10 ✅ Vibrato (rate+extent,已修)；11 ✅ PPE (VOICED 语料 AUC 0.73)；12 ✅ MFCC。**全部 P0 完成,A/B/C 按适用性各就位**
 - ✅ **Phase 2 — P1 EGG + 次要 acoustic (完成)**：Crest / CSE / SPL / SpecBal / H1-H2,H1-H3 / cPhon / OQ,SPQ,CIQ / Qcontact,dEGGmax,Icontact / HRFegg / SFE,SPR —— 全部 PASS（A 或 B 各就位）。EGG 全族已验；SFE/SPR/EGG 的 (C) 语料判别待 SVD/歌手语料。
 - ✅ **Phase 3 — 待验证 metrics (完成)**：ZCR ✅、VibratoJitter ✅、cPhon ✅（Phase 2 已验）、**GNE ✅**。GNE 原是带对称比、与真 GNE 反相关 r=−0.98；用户解冻后已**换成原生 Michaelis GNE**（与 SNR 正相关 +0.94、与 Praat +0.59），转 PASS（metrics/gne.md）。**MPT/VoicingRatio/DUV 已删**（广播标量、无 per-cell 意义）。
-- 🟡 **Phase 4 — 端到端 + 性能 (进行中)**：4.1 ✅ 三 mode CSV 回归（scripts/e2e_regression.py + baseline，0 漂移）；4.2 ✅ 性能 benchmark（wall 线性 O(N) ~0.3× 实时；内存线性 ~20MB/音频秒）；4.3 ⚠ 跨平台（Win 已验，Linux 待 CI 接线，Mac 推迟，±1e-9 达不到用容差版）；4.4 ✅ 批量稳定性（30 跑 0 crash/0 NaN/无泄漏）。docs/validation/phase4.md。
+- 🟡 **Phase 4 — 端到端 + 性能 (进行中)**：4.1 ✅ 三 mode CSV 回归（scripts/e2e_regression.py + baseline，0 漂移）；4.2 ✅ 性能 benchmark（wall 线性 O(N) ~0.3× 实时）+ **内存解耦**：block-processing（5 个 calculator）把 60s 峰值 1522→797MB，再加**分块流水线** `analyze_and_output_vrp_chunked`（工作集与时长无关，1 小时 ≈1.2-1.5GB vs ~35GB）。jitter/shimmer 走**全延迟**（`compute_marks`+`perturb_from_marks`，分块累积 marks 末尾一次算）→ 分子精确（ShimmerDB 0.1%），残差是 per-chunk 音高检测偏差（随 chunk 增大收敛，默认 120s ≈1%）。parity harness `scripts/compare_chunked_vs_whole.py`；4.3 ⚠ 跨平台（Win 已验，Linux 待 CI 接线，Mac 推迟，±1e-9 达不到用容差版）；4.4 ✅ 批量稳定性（30 跑 0 crash/0 NaN/无泄漏）。docs/validation/phase4.md。
 
 ---
 
