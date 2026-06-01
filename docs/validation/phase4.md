@@ -47,14 +47,25 @@
 - **Fix:** process frames in fixed-size blocks (peak ≈ `BLOCK × nfft`,
   independent of audio length) — math identical, guarded by the 4.1 e2e
   baseline (0 drift).
-  - `SpectralMomentsCalculator` done (BLOCK=512): 60 s peak 1522 → 1137 MB; the
-    peak moved off it (now HNR). Remaining calculators to block-process: HNR,
-    MFCC, Burg formants, FormantExtras, Cluster.
-- **Persistent floor:** even after the transient FFT peaks are capped, the
-  audio is held as float64 (+ filtered copies) and the per-cycle dict is O(N),
-  so a 1-hour clip still needs several GB. Fully flat memory needs a chunked
-  pipeline (process N-second blocks, merge VRP histograms + shared cluster
-  centroids) — a larger change, pending a scope decision.
+  - Done (BLOCK 512–1024, all e2e 0-drift): SpectralMoments, HNR, MFCC,
+    FormantExtras-SPR, FormantCalculator-SFE. (Burg formants were already
+    chunked.) **60 s peak 1522 → 797 MB (−48 %).** The peak has moved to the
+    SPL/Clarity/CPP stage.
+- **Diminishing returns + rising risk on the tail.** The next peak is
+  `ClarityCalculator` (NSDF) — also a per-window FFT matrix, but it is complex
+  (octave correction + fallback) and feeds F0/MIDI, which drives all cell
+  binning, so block-processing it is riskier. Beyond it the per-cycle DFT /
+  entropy / perturbation calculators are smaller.
+- **The persistent floor is the real wall for 1 hour.** Even with every
+  transient FFT capped, the audio is held as float64 (+ filtered copies) and
+  the per-cycle dict is O(N), so a 1-hour clip still needs several GB and the
+  summed transients still scale. **Block-processing reduces the peak ~2× but
+  does NOT bound 1-hour memory.**
+- **Definitive fix = chunked pipeline.** Process the audio in N-second blocks
+  (bounded per-block memory), accumulate the small per-cycle records, then
+  cluster ONCE and aggregate the VRP at the end. The user's observation that
+  clustering can run as a single final pass removes the only hard part
+  (cross-chunk label consistency). Recommended as a dedicated follow-up.
 
 ## 4.3 — Cross-platform reproducibility ⚠ (partial)
 - Determinism by design: K-means uses `random_state=0`; the only stochastic
