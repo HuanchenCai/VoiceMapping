@@ -475,7 +475,8 @@ class VoiceMapAnalyzer:
     def calculate_all_metrics(self, voice_signal, egg_signal,
                                cycle_triggers,
                                progress_cb=None,
-                               partial_cb=None) -> Dict[str, np.ndarray]:
+                               partial_cb=None,
+                               skip_clustering: bool = False) -> Dict[str, np.ndarray]:
         """
         progress_cb(step, total, label) — per-stage progress.
         partial_cb(metrics_phase_a)     — fires after the first 4 stages
@@ -508,6 +509,9 @@ class VoiceMapAnalyzer:
         if len(_idx) >= 2 and not mono:
             from voicemap.metrics import _compute_cycle_dft
             _dft = _compute_cycle_dft(egg_signal, _idx, _dft_n)
+        # Expose the per-cycle EGG DFT so the chunked pipeline can accumulate it
+        # across chunks and fit the EGG-shape K-means once at the end.
+        self._last_dft = _dft
 
         _step(5)   # "SPL / Clarity / CPP"
         spl_values                           = self.spl_calculator.calculate(voice_signal, cycle_triggers)
@@ -558,8 +562,9 @@ class VoiceMapAnalyzer:
             })
 
         _step(8)   # "EGG 波形聚类"
-        if mono:
-            logger.info("单声道模式 — 跳过 EGG 波形聚类")
+        if mono or skip_clustering:
+            if skip_clustering and not mono:
+                logger.info("skip_clustering — EGG cluster deferred to a global fit")
             cluster_values = np.zeros(n_cycles)
         else:
             # Tell the user which path the calculator is taking. centroids_
@@ -675,7 +680,8 @@ class VoiceMapAnalyzer:
         # Phonation-type cluster uses the already-computed quality metrics
         # as features — must run AFTER them.
         _step(20)   # "Phonation cluster (cPhon)"
-        base['phon'] = self.phon_calculator.calculate(base)
+        base['phon'] = (np.zeros(n_cycles, dtype=np.int32) if skip_clustering
+                        else self.phon_calculator.calculate(base))
         return base
 
     def apply_clarity_filtering(self, metrics: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
@@ -909,6 +915,127 @@ class VoiceMapAnalyzer:
         logger.info("Total wall time: %.2fs  (audio: %.1fs  ratio: %.1fx)",
                          time.perf_counter() - t0, duration,
                          duration / max(time.perf_counter() - t0, 1e-9))
+        if return_df:
+            return filtered_metrics, out_file, grouped_df
+        return filtered_metrics, out_file
+
+    # ------------------------------------------------------------------
+    # Chunked pipeline — bounded memory regardless of recording length.
+    # Processes the audio in `chunk_s`-second blocks (with `overlap_s`
+    # margin so per-cycle metrics near a block edge still see full context
+    # and filter transients settle). Per-cycle metrics for the cycles whose
+    # ONSET falls in the block's core region are accumulated; the two
+    # K-means clusterings (EGG-shape + cPhon) are deferred and fit ONCE on
+    # the accumulated features at the end (so labels are globally consistent
+    # — the user's "cluster once at the end" insight). Peak memory ≈ one
+    # block, not the whole recording. Output is identical to the whole-signal
+    # path within the e2e tolerance (boundary cycles aside).
+    # ------------------------------------------------------------------
+    def _compute_metrics_chunked(self, file_path, chunk_s=120.0,
+                                 overlap_s=1.0, progress_cb=None):
+        info = sf.info(file_path)
+        sr = int(info.samplerate)
+        total = int(info.frames)
+        channels = int(info.channels)
+        mode = getattr(self.config, 'analysis_mode', 'auto')
+        mono = (channels < 2) or (mode == 'acoustic')
+        chunk = max(1, int(chunk_s * sr))
+        ov    = max(0, int(overlap_s * sr))
+        n_chunks = max(1, (total + chunk - 1) // chunk)
+        logger.info("Chunked analysis: %d chunk(s) of %.0fs (+%.1fs overlap), "
+                    "%.1fs total, mono=%s", n_chunks, chunk_s, overlap_s,
+                    total / sr, mono)
+
+        accum: Dict[str, list] = {}
+        acc_amps, acc_phases = [], []
+        with sf.SoundFile(file_path) as fh:
+            for ci in range(n_chunks):
+                cstart = ci * chunk
+                rstart = max(0, cstart - ov)
+                rend   = min(total, cstart + chunk + ov)
+                fh.seek(rstart)
+                block = fh.read(rend - rstart, dtype="float64", always_2d=True)
+                voice = block[:, 0]
+                egg   = None if mono else (block[:, 1] if block.shape[1] > 1 else None)
+
+                voice_p = self.preprocess_voice(voice)
+                egg_p   = None if egg is None else self.preprocess_egg(egg)
+                if egg_p is None:
+                    self._glottal_flow = None
+                    self._glottal_flow_derivative = None
+                    trig = self.voice_only_cycle_detection(voice_p)
+                else:
+                    trig = self.phase_portrait_cycle_detection(egg_p)
+
+                base = self.calculate_all_metrics(voice_p, egg_p, trig,
+                                                  skip_clustering=True)
+                dft  = self._last_dft
+
+                cyc = np.where(trig > 0.5)[0]
+                if len(cyc) < 2:
+                    if progress_cb:
+                        progress_cb(ci + 1, n_chunks, f"chunk {ci+1}/{n_chunks}")
+                    continue
+                starts = cyc[:-1]
+                gpos   = rstart + starts                 # global onset sample
+                core_end = total if ci == n_chunks - 1 else (cstart + chunk)
+                core = (gpos >= cstart) & (gpos < core_end)
+                if core.any():
+                    for k, v in base.items():
+                        accum.setdefault(k, []).append(np.asarray(v)[core])
+                    if dft is not None:
+                        acc_amps.append(dft[0][core])
+                        acc_phases.append(dft[1][core])
+                if progress_cb:
+                    progress_cb(ci + 1, n_chunks, f"chunk {ci+1}/{n_chunks}")
+
+        if not accum:
+            return {"_duration": total / sr}
+        metrics = {k: np.concatenate(v) for k, v in accum.items()}
+
+        # ── Global clustering (fit ONCE on the accumulated features) ─────────
+        if acc_amps:
+            amps   = np.concatenate(acc_amps)
+            phases = np.concatenate(acc_phases)
+            n = len(amps)
+            self.cluster_calculator.centroids_ = None        # force a fresh fit
+            synth_trig = np.ones(n + 1)                       # n+1 consecutive marks
+            metrics['cluster'] = self.cluster_calculator.calculate(
+                np.zeros(n + 1), synth_trig, dft=(amps, phases))
+        metrics['phon'] = self.phon_calculator.calculate(metrics)
+        metrics['_duration'] = total / sr
+        logger.info("Chunked: accumulated %d cycles across %d chunk(s)",
+                    len(metrics['midi']), n_chunks)
+        return metrics
+
+    def analyze_and_output_vrp_chunked(self, file_path=None, chunk_s=120.0,
+                                       overlap_s=1.0, return_df=False,
+                                       plot_mode="per-metric", export_plots=None,
+                                       progress_cb=None):
+        """Bounded-memory variant of analyze_and_output_vrp (see above)."""
+        audio_file = file_path or self.config.audio_file
+        t0 = time.perf_counter()
+        metrics = self._compute_metrics_chunked(audio_file, chunk_s, overlap_s,
+                                                 progress_cb=progress_cb)
+        duration = metrics.pop('_duration', 0.0)
+        if 'midi' not in metrics:
+            raise ValueError("chunked analysis produced no cycles")
+
+        filtered_metrics = self.apply_clarity_filtering(metrics)
+        logger.info("Valid data points: %d", len(filtered_metrics['midi']))
+        csv_result = self.output_vrp_csv(filtered_metrics, return_df=return_df,
+                                         plot_mode=plot_mode,
+                                         export_plots=export_plots)
+        if return_df:
+            out_file, grouped_df = csv_result
+        else:
+            out_file = csv_result
+        if self.config.cycle_log and out_file:
+            from voicemap.csv_writer import write_cycle_log
+            write_cycle_log(self.config, filtered_metrics, out_file)
+        logger.info("Total wall time: %.2fs  (audio: %.1fs  ratio: %.1fx)",
+                    time.perf_counter() - t0, duration,
+                    duration / max(time.perf_counter() - t0, 1e-9))
         if return_df:
             return filtered_metrics, out_file, grouped_df
         return filtered_metrics, out_file

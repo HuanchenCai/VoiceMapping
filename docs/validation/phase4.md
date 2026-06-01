@@ -61,11 +61,27 @@
   the per-cycle dict is O(N), so a 1-hour clip still needs several GB and the
   summed transients still scale. **Block-processing reduces the peak ~2× but
   does NOT bound 1-hour memory.**
-- **Definitive fix = chunked pipeline.** Process the audio in N-second blocks
-  (bounded per-block memory), accumulate the small per-cycle records, then
-  cluster ONCE and aggregate the VRP at the end. The user's observation that
-  clustering can run as a single final pass removes the only hard part
-  (cross-chunk label consistency). Recommended as a dedicated follow-up.
+- **Definitive fix = chunked pipeline (IMPLEMENTED).**
+  `VoiceMapAnalyzer.analyze_and_output_vrp_chunked` (+ `_compute_metrics_chunked`,
+  + a `skip_clustering` hook on `calculate_all_metrics`). Reads the audio in
+  N-second blocks (with overlap so per-cycle metrics see full context + filters
+  settle), runs the existing per-cycle calculators per block with clustering
+  deferred, keeps the cycles whose onset is in the block's core, and fits the
+  two K-means clusterings ONCE on the accumulated features at the end (the
+  "cluster once at the end" insight removes the cross-chunk label problem).
+  Existing whole-signal path untouched (opt-in).
+  - **Memory bounded:** working set +593 MB at 60 s → +600 MB at 180 s (flat),
+    vs whole-signal +593 → +1717 MB (linear). 180 s peak 2024 → 1074 MB; same
+    wall time. 1-hour: ~1–1.5 GB vs ~35 GB.
+  - **Output parity:** cell grid + cycle count match (510 vs 509 cells, 12523 vs
+    12494 cycles); all per-cycle metrics match the whole-signal path **except
+    jitter/shimmer** (median ~15 % diff) and GNE (~6 %). Jitter/shimmer
+    decompose a *window-global* Praat scalar (per-cycle = local |ΔT| ÷
+    window-mean-period), so a chunk window ≠ the whole window — inherent, since
+    making it chunk-invariant would change the (Praat-validated) definition.
+    For 1-hour recordings the whole-signal path cannot run anyway, so chunked
+    per-window perturbation is the natural/only option; larger chunks shrink the
+    gap. A 2-pass global-mean prepass could make it exact if required.
 
 ## 4.3 — Cross-platform reproducibility ⚠ (partial)
 - Determinism by design: K-means uses `random_state=0`; the only stochastic
