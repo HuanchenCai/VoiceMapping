@@ -70,9 +70,11 @@
   two K-means clusterings ONCE on the accumulated features at the end (the
   "cluster once at the end" insight removes the cross-chunk label problem).
   Existing whole-signal path untouched (opt-in).
-  - **Memory bounded:** working set +593 MB at 60 s → +600 MB at 180 s (flat),
-    vs whole-signal +593 → +1717 MB (linear). 180 s peak 2024 → 1074 MB; same
-    wall time. 1-hour: ~1–1.5 GB vs ~35 GB.
+  - **Memory bounded:** the working set is flat in audio length — +629 / +613 /
+    +634 MB at 120 / 300 / 600 s (chunk_s=60), vs whole-signal +593 (60 s) →
+    +1717 MB (180 s, linear). 180 s peak 2024 → 1074 MB at the same wall time
+    (chunking overhead negligible). A real 1-hour run projects to ~1.2–1.5 GB
+    (≈ one chunk + the ~400 MB accumulated per-cycle table) vs ~35 GB.
   - **Output parity:** cell grid + cycle count match (510 vs 509 cells, 12523 vs
     12494 cycles); all per-cycle metrics match the whole-signal path **except
     jitter/shimmer** (median ~15 % diff) and GNE (~6 %). Jitter/shimmer
