@@ -481,12 +481,6 @@ def _populate_m1_addons():
 
     # ── Density / Integrative (whole-recording broadcast) ──
     register(MetricSpec(
-        key="MPT", category="Density", label="Maximum Phonation Time",
-        vmin=0.0, vmax=30.0, unit="s",
-        cmap=_plt.get_cmap("viridis"),
-        待验证=True,
-        description="Longest contiguous voiced run in seconds."))
-    register(MetricSpec(
         key="VoicingRatio", category="Density", label="Voicing Ratio",
         vmin=0.0, vmax=1.0, unit="",
         cmap=_plt.get_cmap("viridis"),

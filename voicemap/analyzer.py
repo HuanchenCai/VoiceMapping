@@ -611,7 +611,7 @@ class VoiceMapAnalyzer:
         _step(18)  # "M1: 共振峰带宽 + SPR + GNE"
         formant_extras                       = self.formant_extras_calculator.calculate(voice_signal, cycle_triggers)
 
-        _step(19)  # "M1: MPT + Voicing + DUV"
+        _step(19)  # "M1: Voicing + DUV"
         integ_values                         = self.integrative_calculator.calculate(
                                                     voice_signal, midi_values, cycle_triggers)
 
@@ -663,7 +663,6 @@ class VoiceMapAnalyzer:
             'formant_dispersion': formant_extras['formant_dispersion'],
             'spr':            formant_extras['spr'],
             'gne':            formant_extras['gne'],
-            'mpt':            integ_values['mpt'],
             'voicing_ratio':  integ_values['voicing_ratio'],
             'duv':            integ_values['duv'],
             'vib_jitter':     vib_jitter_values,
@@ -784,7 +783,7 @@ class VoiceMapAnalyzer:
         "M1: 频谱矩 + RMS + F0_Hz",          # 16
         "M1: MFCC 1-13",                     # 17
         "M1: 共振峰带宽 + SPR + GNE",        # 18
-        "M1: MPT + Voicing + DUV",           # 19
+        "M1: Voicing + DUV",                 # 19
         "M1: Vibrato Jitter",                # 20
         "Phonation cluster (cPhon)",         # 21
         "写 CSV",                            # 22

@@ -1648,16 +1648,18 @@ class FormantExtrasCalculator(MetricCalculator):
 
 
 # ───────────────────────────────────────────────────────────────────────────
-# Whole-recording integrative metrics — MPT, Voicing Ratio, DUV.
+# Whole-recording integrative metrics — Voicing Ratio, DUV.
 # These produce one scalar per recording, which we then broadcast to every
 # (MIDI, dB) cell so the metric still appears in the VRP grid (uniform
 # colour). For per-VRP-cell analytics they're less useful; for whole-
 # recording reporting (e.g. clinical summary) they're invaluable.
+# (MPT — longest voiced run — was removed: it is a whole-recording scalar with
+# no per-cell meaning, and is not a true clinical Maximum Phonation Time.)
 # ───────────────────────────────────────────────────────────────────────────
 class IntegrativeMetricsCalculator(MetricCalculator):
-    """MPT (s), Voicing Ratio (0-1), DUV (% unvoiced) — one value broadcast per cycle."""
+    """Voicing Ratio (0-1), DUV (% unvoiced) — one value broadcast per cycle."""
 
-    KEYS = ("mpt", "voicing_ratio", "duv")
+    KEYS = ("voicing_ratio", "duv")
 
     def calculate(self, voice: np.ndarray, midi_per_cycle: np.ndarray,
                   cycle_triggers: np.ndarray) -> Dict[str, np.ndarray]:
@@ -1666,36 +1668,20 @@ class IntegrativeMetricsCalculator(MetricCalculator):
         if n_cycles == 0:
             return {k: np.zeros(0) for k in self.KEYS}
 
-        sr  = self.sample_rate
         # A cycle is "voiced" if its detected pitch (MIDI) is positive.
         voiced_cycle = midi_per_cycle > 0
-
-        # Maximum Phonation Time = longest contiguous run of voiced cycles
-        # converted from sample-count to seconds.
-        T = np.diff(idx).astype(np.float64) / sr   # cycle durations in s
-        max_run_sec = 0.0
-        cur = 0.0
-        for i in range(n_cycles):
-            if voiced_cycle[i]:
-                cur += T[i]
-                if cur > max_run_sec:
-                    max_run_sec = cur
-            else:
-                cur = 0.0
 
         # Voicing ratio: voiced cycles / total
         voicing = float(voiced_cycle.mean()) if n_cycles else 0.0
         # DUV: % of cycles that are unvoiced (within the analysed cycle set)
         duv = 100.0 * (1.0 - voicing)
 
-        logger.info("  MPT: %.2f s   VoicingRatio: %.3f   DUV: %.2f%%",
-                    max_run_sec, voicing, duv)
+        logger.info("  VoicingRatio: %.3f   DUV: %.2f%%", voicing, duv)
 
         # Broadcast: same value for every cycle so it lands in every cell
         return {
-            "mpt":            np.full(n_cycles, max_run_sec, dtype=np.float64),
-            "voicing_ratio":  np.full(n_cycles, voicing,    dtype=np.float64),
-            "duv":            np.full(n_cycles, duv,        dtype=np.float64),
+            "voicing_ratio":  np.full(n_cycles, voicing, dtype=np.float64),
+            "duv":            np.full(n_cycles, duv,     dtype=np.float64),
         }
 
 

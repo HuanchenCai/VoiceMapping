@@ -130,6 +130,6 @@ _METRIC_SECTIONS: list = [
         "maxCluster", "Cluster 1", "Cluster 2", "Cluster 3", "Cluster 4", "Cluster 5",
         "maxCPhon",   "cPhon 1",   "cPhon 2",   "cPhon 3",   "cPhon 4",   "cPhon 5",
     ]),
-    ("密度 · Density", ["Total", "MPT", "VoicingRatio", "DUV"]),
+    ("密度 · Density", ["Total", "VoicingRatio", "DUV"]),
 ]
 _DEFAULT_METRIC_CHAIN = ["CPP", "Clarity", "SpecBal", "Crest"]

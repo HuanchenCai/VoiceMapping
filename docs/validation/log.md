@@ -571,4 +571,21 @@ Format per entry:
 - Tests: cphon harness 3/3; validate_params 52/0/0. Metric code changed
   (DEFAULT_KEYS) → full regression re-run green.
 
+## 2026-06-01  session=validation-bootstrap  commit=pending  [MPT REMOVED]
+- Touched: voicemap/metrics.py (IntegrativeMetricsCalculator), analyzer.py,
+  csv_writer.py, excel_export.py, metrics_registry.py, i18n.py, gui/theme.py,
+  report.py, scripts/validate_metric.py (validate_integrative), tests/
+  validate_params.py, metrics/integrative.md
+- Why: user — MPT is a whole-recording scalar broadcast uniformly to every
+  (MIDI,dB) cell; it has NO per-cell meaning and is not a true clinical Maximum
+  Phonation Time. Removed across the whole pipeline.
+- What: dropped MPT from the calculator (KEYS/compute/return), the analyzer
+  base dict + step label, CSV columns + aggregation + standard_columns, Excel
+  export, registry, i18n (desc+tooltip zh/en, reworded the DUV tooltips that
+  referenced MPT), GUI Density section, report thresholds + overview grouping,
+  the validator, and the validate_params range-check. Kept VoicingRatio + DUV.
+- Tests: integrative harness 7/7 (was 9/9 — the 2 MPT rows gone); consistency
+  unit tests (test_i18n / test_metric_descriptions / test_report_thresholds) OK;
+  validate_params 52 → **51 PASS / 0 WARN / 0 FAIL** (MPT range-check removed).
+
 <!-- next-session-anchor -->

@@ -99,11 +99,6 @@ _THRESHOLDS: Dict[str, List[Tuple[float, float, str, str]]] = {
         (0.7,   1e9,    "开商高，气声型",                       "watch"),
     ],
     # Density / 整曲级
-    "MPT": [
-        (0.0,   10.0,   "短",                                  "watch"),
-        (10.0,  20.0,   "中等",                                "normal"),
-        (20.0,  1e9,    "良好",                                "good"),
-    ],
     "VoicingRatio": [
         (0.0,    0.5,   "偏低",                                "watch"),
         (0.5,    0.85,  "正常",                                "normal"),
@@ -347,7 +342,7 @@ def generate_report(grouped_df: pd.DataFrame,
     a("")
 
     _emit_section(lines, "一、总览", df,
-                  ("F0_Hz", "MPT", "VoicingRatio"))
+                  ("F0_Hz", "VoicingRatio"))
     _emit_section(lines, "二、嗓音质量（声学）", df,
                   ("HNR", "NHR", "CPP", "CPPS",
                    "Jitter", "JitterRAP", "JitterPPQ5",
