@@ -69,7 +69,14 @@
   deferred, keeps the cycles whose onset is in the block's core, and fits the
   two K-means clusterings ONCE on the accumulated features at the end (the
   "cluster once at the end" insight removes the cross-chunk label problem).
-  Existing whole-signal path untouched (opt-in).
+  Existing whole-signal path untouched.
+  - **Auto-wired (no longer opt-in).** `analyze_and_output_vrp_auto` probes
+    duration via `sf.info` and routes files longer than `config.chunk_threshold_s`
+    (default 180 s) to the chunked path, shorter ones to the exact whole-signal
+    path; both return the same shape. CLI (`_run_one`) and the GUI worker call it,
+    so a 1-hour batch run no longer OOMs. `config.auto_chunk=False` forces the
+    whole-signal path. The chunked path has no progressive first-pass heatmap, so
+    the GUI `partial_cb` is skipped for long files.
   - **Memory bounded:** the working set is flat in audio length — +629 / +613 /
     +634 MB at 120 / 300 / 600 s (chunk_s=60), vs whole-signal +593 (60 s) →
     +1717 MB (180 s, linear). 180 s peak 2024 → 1074 MB at the same wall time
