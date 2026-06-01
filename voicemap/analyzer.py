@@ -1112,6 +1112,43 @@ class VoiceMapAnalyzer:
             return filtered_metrics, out_file, grouped_df
         return filtered_metrics, out_file
 
+    def analyze_and_output_vrp_auto(self, file_path=None, return_df=False,
+                                    plot_mode="per-metric", export_plots=None,
+                                    progress_cb=None, partial_cb=None):
+        """Route long recordings to the bounded-memory chunked path, short ones
+        to the exact whole-signal path. Threshold + chunk size come from config
+        (auto_chunk / chunk_threshold_s / chunk_s / chunk_overlap_s). Both paths
+        return the same shape, so callers need not care which ran. The chunked
+        path has no progressive first pass, so `partial_cb` is ignored there."""
+        audio_file = file_path or self.config.audio_file
+        use_chunked = False
+        thr = getattr(self.config, 'chunk_threshold_s', 0.0) or 0.0
+        if getattr(self.config, 'auto_chunk', False) and thr > 0:
+            try:
+                info = sf.info(audio_file)
+                dur = info.frames / float(info.samplerate)
+                if dur > thr:
+                    use_chunked = True
+                    logger.info("Auto-chunk: %.0fs audio > %.0fs threshold "
+                                "→ bounded-memory chunked path", dur, thr)
+            except Exception:
+                logger.exception("Auto-chunk duration probe failed; "
+                                 "falling back to whole-signal path")
+        if use_chunked:
+            if partial_cb is not None:
+                logger.info("Chunked path has no progressive first pass; "
+                            "partial_cb will not fire")
+            return self.analyze_and_output_vrp_chunked(
+                audio_file,
+                chunk_s=getattr(self.config, 'chunk_s', 120.0),
+                overlap_s=getattr(self.config, 'chunk_overlap_s', 1.0),
+                return_df=return_df, plot_mode=plot_mode,
+                export_plots=export_plots, progress_cb=progress_cb)
+        return self.analyze_and_output_vrp(
+            audio_file, return_df=return_df, plot_mode=plot_mode,
+            export_plots=export_plots, progress_cb=progress_cb,
+            partial_cb=partial_cb)
+
 
 def main():
     setup_logger("voicemap", level=logging.INFO)

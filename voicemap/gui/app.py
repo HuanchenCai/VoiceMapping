@@ -2213,7 +2213,10 @@ class VoiceMapApp(_TkBase):
 
                 import time as _time
                 _t0 = _time.perf_counter()
-                data, out_file, grouped = analyzer.analyze_and_output_vrp(
+                # Auto-route: long recordings take the bounded-memory chunked
+                # path (no progressive first pass); short ones the exact whole
+                # path with the early partial heatmap.
+                data, out_file, grouped = analyzer.analyze_and_output_vrp_auto(
                     audio, return_df=True, plot_mode=plot_mode_snap,
                     progress_cb=prog, partial_cb=partial)
                 self._msg_q.put(("done", True, {
