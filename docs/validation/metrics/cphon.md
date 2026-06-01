@@ -5,9 +5,12 @@
 > clustering of the other metrics — so it is validated as an **ML pipeline**.
 
 ## 1. Implementation
-- File: `voicemap/metrics.py` → `PhonClusterCalculator` (lines 2646–2730+).
-- Features: per-cycle `clarity, cpp, specbal, crest, entropy, qcontact,
-  deggmax, icontact, hrf` stacked → `(n_cycles, 9)`; non-finite rows dropped.
+- File: `voicemap/metrics.py` → `PhonClusterCalculator` (lines 2735+).
+- Features (`DEFAULT_KEYS`, **6**): per-cycle `cpp, qcontact, spq, jitter, hnr,
+  crest` stacked → `(n_cycles, 6)`; non-finite rows dropped. One interpretable
+  representative per independent variance direction (spectral / EGG-contact /
+  EGG-timing / frequency-perturbation / noise / waveform-shape), chosen by a
+  PCA + correlation analysis (§7) that retired the old, redundant 9-feature set.
 - Normalisation: **z-score** `z = (x − mean) / std` (population std, floored at
   1e-12) — i.e. `sklearn.preprocessing.StandardScaler`.
 - Clustering: `sklearn.cluster.KMeans(n_clusters=5, n_init=10,
@@ -24,8 +27,10 @@
 
 ## 3. Test Signals
 Synthetic feature matrices (in-harness, seeded): random vectors for the
-normalisation check; 5 well-separated Gaussian blobs in 9-D (60 points each)
-with known labels for the recovery check.
+normalisation check; 5 well-separated Gaussian blobs in `len(DEFAULT_KEYS)`-D
+(60 points each) with known labels for the recovery check. Real per-cycle
+features for the feature-selection analysis come from `audio/test_Voice_EGG.wav`
+via `--cycle-log`.
 
 ## 4. Validation Method
 - **(A) Normalisation parity** — `(x − μ)/σ` matches
@@ -69,12 +74,36 @@ python scripts/validate_metric.py cphon
   rescued solution is not the raw sklearn optimum. Documented; do not "simplify"
   it away (CLAUDE.md §8.7).
 - **Centroid physical meaning is a research question** — whether cluster k
-  corresponds to "pressed / modal / breathy" is out of P1 scope (frozen).
-- **Feature set is fixed** to the 9 DEFAULT_KEYS; changing it changes the
-  clustering. EGG-derived features (qcontact, deggmax, icontact, hrf) are 0 on
-  mono recordings, reducing the effective feature space.
+  corresponds to "pressed / modal / breathy" is out of P1 scope.
+- **Phonation quality is a continuum, so k is a descriptive choice, not a
+  discovered truth.** On the reference recording the cluster-validity indices
+  (silhouette / Calinski-Harabasz / Davies-Bouldin) all favour the *coarsest*
+  split (k=2), while the Gap statistic rises monotonically with no peak — the
+  signature of a continuous gradient rather than discrete clusters. k=1 is ruled
+  out (the data is clearly more structured than uniform noise), but there is no
+  objectively "correct" k; **k=5 is a deliberate granularity** (5 bins along the
+  quality gradient), not a natural cluster count.
+- **Feature set = 6 fixed `DEFAULT_KEYS`** (`cpp, qcontact, spq, jitter, hnr,
+  crest`). The previous 9-feature set was heavily redundant (max |r| 0.91; e.g.
+  `Icontact == log10(dEGGmax)·Qcontact`, collinear with `dEGGmax`+`qcontact`),
+  which over-weighted the EGG-contact axis and left one cluster at ~2% (so
+  `maxCPhon` never reached label 5). PCA on all 62 per-cycle features showed
+  ~10–21 effective dimensions; one interpretable representative per direction
+  gives a de-correlated 6 (max |r| ~0.69) that clusters as cleanly
+  (silhouette ~0.27) **and** balances the clusters (smallest ~9% → all 5
+  `maxCPhon` labels present). A fixed subset (vs per-recording PCA) keeps the
+  features comparable across recordings. Of the 6, `qcontact` + `spq` are
+  EGG-derived → on mono recordings the effective space drops to 4.
 
 ## 8. Change Log
+- 2026-06-01 — **Feature set 9 → 6** (`cpp, qcontact, spq, jitter, hnr, crest`).
+  PCA + correlation analysis on the reference recording's 62 per-cycle features
+  found the old 9 were redundant (max |r| 0.91, Icontact collinear) which left
+  cluster 5 at ~2% and missing from `maxCPhon`. The de-correlated 6 (max |r|
+  ~0.69) cluster as cleanly (silhouette 0.27 vs 0.31) and balance the clusters
+  (smallest ~9%) → all 5 `maxCPhon` labels present; `validate_params` 51→**52
+  PASS / 0 WARN**. Gap statistic confirmed phonation is a continuum (no natural
+  k; k=5 is descriptive). cphon validator stays 3/3 (feature-count-agnostic).
 - 2026-05-31 — Created 8-section doc; wired `validate_metric.py cphon`.
   z-score normalisation byte-identical to sklearn StandardScaler (Δ 0);
   recovers 5 separable blobs at Adjusted Rand 1.0; deterministic under fixed

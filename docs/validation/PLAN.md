@@ -195,7 +195,7 @@ def validate(metric_name, *, references=['praat'], signals=['all'],
 | GNE ✅ | **PASS（已修复）**：旧 proxy 是带对称比、与真 GNE 反相关 r=−0.98；2026-06-01 用户解冻后**换成原生 Michaelis GNE**（降采样→LPC 逆滤波→各带 Hilbert 包络→跨带互相关取 max，clip[0,1]，~3s/70s）。现与 SNR 正相关 +0.94（GNE 本质）、与 Praat GNE 正相关 +0.59；§7 记 Praat 绝对值相关中等（稀疏带）；metrics/gne.md |
 | MPT / VoicingRatio / DUV ✅ | PASS：(B) 合成 grid 机器精度恢复（MPT=最长 voiced run×T、VR=voiced/total、DUV=100·(1−VR)）+ (C) 真实录音 VR=1.0/MPT 67s；§7 记非临床 MPT；metrics/integrative.md |
 | VibratoJitter ✅ | PASS：(B) 公式 GT（constant→0%、交替 p0(1±δ)→CV=100δ 精确）+ 端到端 steady 0.18% vs wobbly 7.2%（40× 分离）；§7 记真实 vibrato magnitude 被压缩；metrics/vibrato_jitter.md |
-| cPhon ✅ | 已在 Phase 2 验证（z-score==StandardScaler + 合成簇 ARI=1.0）；metrics/cphon.md |
+| cPhon ✅ | 已在 Phase 2 验证（z-score==StandardScaler + 合成簇 ARI=1.0）；2026-06-01 特征集 9→6（去冗余，PCA+相关分析：cpp/qcontact/spq/jitter/hnr/crest），修好"缺类5"，validate_params 52/0/0；metrics/cphon.md |
 
 ---
 

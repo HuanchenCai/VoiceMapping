@@ -2726,18 +2726,34 @@ class ClusterCalculator:
 # ---------------------------------------------------------------------------
 # Phonation-type clustering (cPhon 1..5) — quality-metric K-means.
 #
-# Independent of EGG shape clustering. Takes the already-computed per-cycle
-# quality metrics (clarity, CPP, specbal, crest, entropy, qcontact, deggmax,
-# icontact, hrf) and clusters cycles by overall voice quality profile. Because
-# these metrics have wildly different native ranges, z-score normalise first.
-# Returns 1..k per cycle (0 for invalid).
+# Independent of EGG shape clustering. Takes a small, de-correlated set of
+# per-cycle quality metrics and clusters cycles by overall voice-quality
+# profile. Because the metrics have wildly different native ranges, z-score
+# normalise first. Returns 1..k per cycle (0 for invalid).
+#
+# Feature set (DEFAULT_KEYS) — 6 features, one interpretable representative per
+# independent variance direction. Chosen by a PCA / correlation analysis on the
+# reference recording (docs/validation/metrics/cphon.md): the previous 9-feature
+# set was heavily redundant (max |r| 0.91 — e.g. Icontact == log10(dEGGmax)·
+# Qcontact, collinear with two other features) which over-weighted the EGG-
+# contact axis and left one cluster at ~2% (the "missing maxCPhon label"). The
+# 6-feature set is de-correlated (max |r| ~0.69), clusters as cleanly
+# (silhouette ~0.27 vs ~0.31) and balances the clusters (smallest ~9% vs ~2%).
+# Each feature covers a distinct dimension:
+#   cpp      — periodicity / breathiness (proxies the spectral-tilt group)
+#   qcontact — EGG contact quotient
+#   spq      — EGG speed quotient (glottal opening/closing)
+#   jitter   — frequency perturbation
+#   hnr      — harmonics-to-noise ratio
+#   crest    — waveform peakiness
+# (Old 9-feature set, kept for reference: clarity, cpp, specbal, crest, entropy,
+#  qcontact, deggmax, icontact, hrf.)
 # ---------------------------------------------------------------------------
 class PhonClusterCalculator:
     """K-means over z-scored quality-metric vectors (one row per cycle)."""
 
     DEFAULT_KEYS = (
-        "clarity", "cpp", "specbal", "crest", "entropy",
-        "qcontact", "deggmax", "icontact", "hrf",
+        "cpp", "qcontact", "spq", "jitter", "hnr", "crest",
     )
 
     def __init__(self, config: VoiceMapConfig,
