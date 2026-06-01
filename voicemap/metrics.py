@@ -964,7 +964,7 @@ class MFCCCalculator(MetricCalculator):
 # P3: Open Quotient / Speed Quotient / Contact Index Quotient.
 #
 # Three glottal-timing descriptors derived from within-cycle EGG events.
-# FonaDyn's existing Qcontact uses an SC-specific integral formula; these
+# The existing Qcontact uses an SC-specific integral formula; these
 # use the classical Howard / Baken derivative-peak definitions which are
 # what most EGG papers cite.
 #
@@ -2543,7 +2543,7 @@ class HNRCalculator(MetricCalculator):
 # ---------------------------------------------------------------------------
 # EGG cycle clustering (Cluster 1..5) — harmonic-shape K-means.
 #
-# Mirrors FonaDyn's VRPSDCluster.sc feature recipe:
+# Mirrors the reference SuperCollider VRPSDCluster.sc feature recipe:
 #   per-cycle DFT at n harmonics →
 #   feature vector = [ Δamp_dB[1..n], cos(Δφ[1..n]), sin(Δφ[1..n]) ]   (3n dims)
 #   where Δamp_dB[k] = 20·log10(|X[k]| / |X[0]|)
