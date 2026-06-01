@@ -2061,6 +2061,86 @@ class PerturbationCalculator(MetricCalculator):
     PMIN_S = 1e-4
     PMAX_S = 0.02
 
+    def compute_marks(self, voice: np.ndarray):
+        """cc cycle marks (native Sound_to_Pitch → PointProcess cc) + the
+        amplitude tier — the per-chunk inputs the chunked pipeline accumulates.
+        Returns (t_points, amp_t, amp_v), or None if there are too few marks."""
+        import voicemap.praat_perturbation as _ppt
+        from voicemap.praat_pitch import sound_to_pitch
+        fs = float(self.config.sample_rate)
+        cfg = self.config
+        pitch_contour = sound_to_pitch(
+            voice, fs, pitch_floor=cfg.pitch_floor_hz,
+            pitch_ceiling=cfg.pitch_ceiling_hz)
+        t_points = _ppt.sound_pitch_to_pointprocess_cc(voice, fs, pitch_contour)
+        if len(t_points) < 3:
+            return None
+        amp_t, amp_v = _ppt.point_process_to_amplitude_tier(
+            t_points, voice, fs, self.PMIN_S, self.PMAX_S, self.PERIOD_FACTOR_MAX)
+        return t_points, amp_t, amp_v
+
+    def perturb_from_marks(self, t_points, amp_t, amp_v, egg_centres_t):
+        """Per-cycle Praat jitter/shimmer decomposition mapped onto
+        `egg_centres_t`. A PURE function of the supplied marks/tier, so the
+        chunked pipeline can accumulate marks across chunks and call this ONCE
+        on the whole-recording marks → bit-identical to the whole-signal path.
+        Each EGG cycle takes the contribution of its nearest cc cycle (within
+        NEAREST_TOL_S), else 0; the per-cell mean recovers the Praat scalar."""
+        import voicemap.praat_perturbation as _ppt
+        n = len(egg_centres_t)
+        out = {k: np.zeros(n, dtype=np.float64) for k in self.KEYS}
+        if n == 0 or len(t_points) < 3:
+            return out
+
+        jl_pc = _ppt.jitter_local_per_cycle(
+            t_points, self.PMIN_S, self.PMAX_S, self.PERIOD_FACTOR_MAX)
+        jr_pc = _ppt.jitter_rap_per_cycle(
+            t_points, self.PMIN_S, self.PMAX_S, self.PERIOD_FACTOR_MAX)
+        jp_pc = _ppt.jitter_ppq5_per_cycle(
+            t_points, self.PMIN_S, self.PMAX_S, self.PERIOD_FACTOR_MAX)
+        sl_pc = _ppt.shimmer_local_per_cycle(
+            amp_t, amp_v, self.PMIN_S, self.PMAX_S, self.AMPLITUDE_FACTOR_MAX)
+        sd_pc = _ppt.shimmer_local_dB_per_cycle(
+            amp_t, amp_v, self.PMIN_S, self.PMAX_S, self.AMPLITUDE_FACTOR_MAX)
+        s3_pc = _ppt.shimmer_apq3_per_cycle(
+            amp_t, amp_v, self.PMIN_S, self.PMAX_S, self.AMPLITUDE_FACTOR_MAX)
+        s5_pc = _ppt.shimmer_apq5_per_cycle(
+            amp_t, amp_v, self.PMIN_S, self.PMAX_S, self.AMPLITUDE_FACTOR_MAX)
+        s11_pc = _ppt.shimmer_apq11_per_cycle(
+            amp_t, amp_v, self.PMIN_S, self.PMAX_S, self.AMPLITUDE_FACTOR_MAX)
+
+        def _nearest_map(source_t, values):
+            if len(source_t) == 0:
+                return np.zeros(n, dtype=np.float64)
+            ins = np.searchsorted(source_t, egg_centres_t)
+            left = np.clip(ins - 1, 0, len(source_t) - 1)
+            right = np.clip(ins, 0, len(source_t) - 1)
+            d_left = np.abs(egg_centres_t - source_t[left])
+            d_right = np.abs(egg_centres_t - source_t[right])
+            nearest_idx = np.where(d_left <= d_right, left, right)
+            nearest_dist = np.where(d_left <= d_right, d_left, d_right)
+            return np.where(nearest_dist <= self.NEAREST_TOL_S,
+                            values[nearest_idx] * 100.0, 0.0)
+
+        out["jitter_local"] = _nearest_map(t_points, jl_pc)
+        out["jitter_rap"]   = _nearest_map(t_points, jr_pc)
+        out["jitter_ppq5"]  = _nearest_map(t_points, jp_pc)
+        out["shimmer_local"] = _nearest_map(amp_t, sl_pc)
+        if len(amp_t) > 0:               # ShimmerDB is already dB → no ×100
+            ins = np.searchsorted(amp_t, egg_centres_t)
+            left = np.clip(ins - 1, 0, len(amp_t) - 1)
+            right = np.clip(ins, 0, len(amp_t) - 1)
+            d_left = np.abs(egg_centres_t - amp_t[left])
+            d_right = np.abs(egg_centres_t - amp_t[right])
+            nearest_idx = np.where(d_left <= d_right, left, right)
+            nearest_dist = np.where(d_left <= d_right, d_left, d_right)
+            out["shimmer_db"] = np.where(nearest_dist <= self.NEAREST_TOL_S,
+                                         sd_pc[nearest_idx], 0.0)
+        out["shimmer_apq3"]  = _nearest_map(amp_t, s3_pc)
+        out["shimmer_apq5"]  = _nearest_map(amp_t, s5_pc)
+        out["shimmer_apq11"] = _nearest_map(amp_t, s11_pc)
+        return out
+
     def calculate(self, voice: np.ndarray,
                   cycle_triggers: np.ndarray) -> Dict[str, np.ndarray]:
         import voicemap.praat_perturbation as _ppt
@@ -2081,131 +2161,24 @@ class PerturbationCalculator(MetricCalculator):
             return {k: z() for k in self.KEYS}
 
         fs = float(self.config.sample_rate)
-        # Generate cycle marks the same way Praat's `To PointProcess (cc)`
-        # does it: native Sound_to_Pitch (autocorrelation + Viterbi) →
-        # Sound_Pitch_to_PointProcess_cc (bidirectional walking from each
-        # voiced interval's midpoint). The EGG-trigger seed path was
-        # accurate per-cycle but kept the EGG cycle COUNT, which differs
-        # from Praat's voice-derived count on dynamic phonation (戏腔
-        # over-detects by ~50 %). Now both count and position match Praat.
-        from voicemap.praat_pitch import sound_to_pitch
-        cfg = self.config
-        pitch_contour = sound_to_pitch(
-            voice, fs,
-            pitch_floor=cfg.pitch_floor_hz,
-            pitch_ceiling=cfg.pitch_ceiling_hz)
-        t_points = _ppt.sound_pitch_to_pointprocess_cc(
-            voice, fs, pitch_contour)
-        if len(t_points) < 3:
+        marks = self.compute_marks(voice)
+        if marks is None:
             return {k: z() for k in self.KEYS}
+        t_points, amp_t, amp_v = marks
 
-        # Pre-compute the amplitude tier ONCE on the full signal.
-        # The shimmer functions then operate on subsets of this tier.
-        amp_t, amp_v = _ppt.point_process_to_amplitude_tier(
-            t_points, voice, fs,
-            self.PMIN_S, self.PMAX_S, self.PERIOD_FACTOR_MAX)
-
-        # Cache the two window-global normalisers (jitter ÷ mean period,
-        # shimmer ÷ mean amplitude) + their counts. The chunked pipeline reads
-        # these per chunk, recombines them (global = Σ(meanᵢ·nᵢ)/Σnᵢ), and
-        # rescales jitter/shimmer so they are chunk-invariant (whole-signal
-        # exact) — only the denominator is window-global; the numerators are
-        # purely local. (ShimmerDB is a log-ratio with no denominator, so it is
-        # already chunk-invariant.)
-        self._last_mp, self._last_mp_n = _ppt.mean_period_count(
-            t_points, self.PMIN_S, self.PMAX_S, self.PERIOD_FACTOR_MAX)
-        self._last_ma = (float(np.mean(amp_v[:-1])) if len(amp_v) >= 2
-                         else float('nan'))
-        self._last_ma_n = max(len(amp_v) - 1, 0)
-
-        out = {k: np.zeros(n, dtype=np.float64) for k in self.KEYS}
-
-        # EGG cycle centres in seconds (the indexing the rest of the
-        # pipeline uses — SPL, Clarity, CPP all output one value per EGG
-        # cycle, so jitter/shimmer must too).
+        # EGG cycle centres in seconds (one value per EGG cycle, matching the
+        # rest of the pipeline — SPL/Clarity/CPP also output per-cycle).
         egg_centres_t = (idx[:-1].astype(np.float64) +
                          idx[1:].astype(np.float64)) * 0.5 / fs
 
-        # ── Per-cycle path (default) ──
-        # Decompose each Praat global formula into per-cycle contributions
-        # on the Praat-cc cycle marks, then nearest-neighbour-map each EGG
-        # cycle to its closest Praat-cc cycle (within NEAREST_TOL_S).
-        # Mean of all non-zero EGG-mapped values ≈ global Praat scalar.
-        # Mean per VRP cell ≈ Praat scalar for that (MIDI, dB) region.
+        # ── Per-cycle path (default) — delegated to perturb_from_marks, which
+        # is a pure function of the marks/tier. The chunked pipeline accumulates
+        # marks across chunks and calls it ONCE on the whole-recording marks, so
+        # jitter/shimmer are bit-identical to this whole-signal path.
         if self.STRATEGY == 'per_cycle':
-            # Jitter contributions are indexed by Praat-cc cycle marks
-            jl_pc = _ppt.jitter_local_per_cycle(
-                t_points, self.PMIN_S, self.PMAX_S, self.PERIOD_FACTOR_MAX)
-            jr_pc = _ppt.jitter_rap_per_cycle(
-                t_points, self.PMIN_S, self.PMAX_S, self.PERIOD_FACTOR_MAX)
-            jp_pc = _ppt.jitter_ppq5_per_cycle(
-                t_points, self.PMIN_S, self.PMAX_S, self.PERIOD_FACTOR_MAX)
-            # Shimmer contributions are indexed by the AMPLITUDE TIER
-            # (a subset of Praat-cc marks that passed the period gate)
-            sl_pc = _ppt.shimmer_local_per_cycle(
-                amp_t, amp_v, self.PMIN_S, self.PMAX_S, self.AMPLITUDE_FACTOR_MAX)
-            sd_pc = _ppt.shimmer_local_dB_per_cycle(
-                amp_t, amp_v, self.PMIN_S, self.PMAX_S, self.AMPLITUDE_FACTOR_MAX)
-            s3_pc = _ppt.shimmer_apq3_per_cycle(
-                amp_t, amp_v, self.PMIN_S, self.PMAX_S, self.AMPLITUDE_FACTOR_MAX)
-            s5_pc = _ppt.shimmer_apq5_per_cycle(
-                amp_t, amp_v, self.PMIN_S, self.PMAX_S, self.AMPLITUDE_FACTOR_MAX)
-            s11_pc = _ppt.shimmer_apq11_per_cycle(
-                amp_t, amp_v, self.PMIN_S, self.PMAX_S, self.AMPLITUDE_FACTOR_MAX)
+            return self.perturb_from_marks(t_points, amp_t, amp_v, egg_centres_t)
 
-            def _nearest_map(source_t, values):
-                """For each egg_centres_t entry, return values[nearest source]
-                if the nearest is within NEAREST_TOL_S, else 0."""
-                if len(source_t) == 0:
-                    return np.zeros(n, dtype=np.float64)
-                ins = np.searchsorted(source_t, egg_centres_t)
-                left = np.clip(ins - 1, 0, len(source_t) - 1)
-                right = np.clip(ins, 0, len(source_t) - 1)
-                d_left = np.abs(egg_centres_t - source_t[left])
-                d_right = np.abs(egg_centres_t - source_t[right])
-                nearest_idx = np.where(d_left <= d_right, left, right)
-                nearest_dist = np.where(d_left <= d_right, d_left, d_right)
-                vals_mapped = values[nearest_idx] * 100.0
-                return np.where(nearest_dist <= self.NEAREST_TOL_S,
-                                 vals_mapped, 0.0)
-
-            # Jitter: map from t_points (Praat-cc) to EGG cycles
-            out["jitter_local"] = _nearest_map(t_points, jl_pc)
-            out["jitter_rap"]   = _nearest_map(t_points, jr_pc)
-            out["jitter_ppq5"]  = _nearest_map(t_points, jp_pc)
-            # Shimmer: map from amp_t (subset of Praat-cc) to EGG cycles
-            # Note: ShimmerDB is already in dB so no ×100 — handle separately
-            out["shimmer_local"]  = _nearest_map(amp_t, sl_pc)
-            # ShimmerDB: replace the ×100 with pass-through (sd_pc is already dB)
-            if len(amp_t) > 0:
-                ins = np.searchsorted(amp_t, egg_centres_t)
-                left = np.clip(ins - 1, 0, len(amp_t) - 1)
-                right = np.clip(ins, 0, len(amp_t) - 1)
-                d_left = np.abs(egg_centres_t - amp_t[left])
-                d_right = np.abs(egg_centres_t - amp_t[right])
-                nearest_idx = np.where(d_left <= d_right, left, right)
-                nearest_dist = np.where(d_left <= d_right, d_left, d_right)
-                out["shimmer_db"] = np.where(nearest_dist <= self.NEAREST_TOL_S,
-                                              sd_pc[nearest_idx], 0.0)
-            out["shimmer_apq3"]  = _nearest_map(amp_t, s3_pc)
-            out["shimmer_apq5"]  = _nearest_map(amp_t, s5_pc)
-            out["shimmer_apq11"] = _nearest_map(amp_t, s11_pc)
-
-            # Summary log: mean over nonzero values per metric (= local
-            # Praat scalar). Outside this whole-file scope, csv_writer's
-            # per-cell mean recovers per-region values.
-            def _mean_nz(a):
-                m = a > 0
-                return float(a[m].mean()) if m.any() else 0.0
-            logger.info("  Jitter local=%.3f%%  RAP=%.3f%%  PPQ5=%.3f%%",
-                        _mean_nz(out["jitter_local"]),
-                        _mean_nz(out["jitter_rap"]),
-                        _mean_nz(out["jitter_ppq5"]))
-            logger.info("  Shimmer local=%.3f%%  dB=%.3f  APQ11=%.3f%%",
-                        _mean_nz(out["shimmer_local"]),
-                        _mean_nz(out["shimmer_db"]),
-                        _mean_nz(out["shimmer_apq11"]))
-            return out
+        out = {k: np.zeros(n, dtype=np.float64) for k in self.KEYS}
 
         # ── Whole-recording path (Praat-exact scalar broadcast) ──
         if self.STRATEGY == 'global' or self.WINDOW_S is None or self.WINDOW_S <= 0:
