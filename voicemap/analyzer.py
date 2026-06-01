@@ -190,7 +190,7 @@ class VoiceMapAnalyzer:
     #   "# VoiceMap cluster centroids  k=<k>  n_harm=<n>  dim=<3n>"
     # Then one row per centroid: cluster_id;feat_0;feat_1;...;feat_{dim-1}
     # NOTE: load_centroids() is permissive on the comment line (only parses
-    # n_harm=N), so legacy files with "# FonaDyn cluster centroids" header
+    # n_harm=N), so legacy centroid files written with an older/foreign header
     # still load fine.
     # ------------------------------------------------------------------
     def save_centroids(self, path: str) -> None:
@@ -822,7 +822,8 @@ class VoiceMapAnalyzer:
                                 plot_mode: str = "per-metric",
                                 export_plots: Optional[bool] = None,
                                 progress_cb=None,
-                                partial_cb=None):
+                                partial_cb=None,
+                                write_disk: bool = True):
         """
         progress_cb(step, total, label) — called at each pipeline stage.
         partial_cb(grouped_df)          — fires after the first-pass
@@ -923,7 +924,8 @@ class VoiceMapAnalyzer:
         csv_result = self.output_vrp_csv(filtered_metrics,
                                           return_df=return_df,
                                           plot_mode=plot_mode,
-                                          export_plots=export_plots)
+                                          export_plots=export_plots,
+                                          write_disk=write_disk)
         if return_df:
             out_file, grouped_df = csv_result
         else:
@@ -1083,7 +1085,7 @@ class VoiceMapAnalyzer:
     def analyze_and_output_vrp_chunked(self, file_path=None, chunk_s=120.0,
                                        overlap_s=1.0, return_df=False,
                                        plot_mode="per-metric", export_plots=None,
-                                       progress_cb=None):
+                                       progress_cb=None, write_disk=True):
         """Bounded-memory variant of analyze_and_output_vrp (see above)."""
         audio_file = file_path or self.config.audio_file
         t0 = time.perf_counter()
@@ -1097,7 +1099,8 @@ class VoiceMapAnalyzer:
         logger.info("Valid data points: %d", len(filtered_metrics['midi']))
         csv_result = self.output_vrp_csv(filtered_metrics, return_df=return_df,
                                          plot_mode=plot_mode,
-                                         export_plots=export_plots)
+                                         export_plots=export_plots,
+                                         write_disk=write_disk)
         if return_df:
             out_file, grouped_df = csv_result
         else:
@@ -1114,7 +1117,8 @@ class VoiceMapAnalyzer:
 
     def analyze_and_output_vrp_auto(self, file_path=None, return_df=False,
                                     plot_mode="per-metric", export_plots=None,
-                                    progress_cb=None, partial_cb=None):
+                                    progress_cb=None, partial_cb=None,
+                                    write_disk=True):
         """Route long recordings to the bounded-memory chunked path, short ones
         to the exact whole-signal path. Threshold + chunk size come from config
         (auto_chunk / chunk_threshold_s / chunk_s / chunk_overlap_s). Both paths
@@ -1143,11 +1147,12 @@ class VoiceMapAnalyzer:
                 chunk_s=getattr(self.config, 'chunk_s', 120.0),
                 overlap_s=getattr(self.config, 'chunk_overlap_s', 1.0),
                 return_df=return_df, plot_mode=plot_mode,
-                export_plots=export_plots, progress_cb=progress_cb)
+                export_plots=export_plots, progress_cb=progress_cb,
+                write_disk=write_disk)
         return self.analyze_and_output_vrp(
             audio_file, return_df=return_df, plot_mode=plot_mode,
             export_plots=export_plots, progress_cb=progress_cb,
-            partial_cb=partial_cb)
+            partial_cb=partial_cb, write_disk=write_disk)
 
 
 def main():
