@@ -928,24 +928,27 @@ class MFCCCalculator(MetricCalculator):
 
         n_frames = 1 + (len(v_pe) - win) // hop
         starts   = np.arange(n_frames) * hop
-        frames   = sliding_window_view(v_pe, win)[starts]
-        frames_w = (frames - frames.mean(axis=1, keepdims=True)) * np.hamming(win)
+        view     = sliding_window_view(v_pe, win)
+        ham      = np.hamming(win)
 
         nfft = 1
         while nfft < 2 * win:
             nfft *= 2
-        X    = np.fft.rfft(frames_w, nfft, axis=1)
-        psd  = (np.abs(X)) ** 2
-
-        # Mel filterbank → log → DCT-II truncated to n_mfcc
-        fb       = _build_mel_filterbank(sr, nfft, self.n_mels,
-                                          self.f_min, self.f_max)
-        mel_pow  = psd @ fb.T                                # (n_frames, n_mels)
-        log_mel  = np.log(np.maximum(mel_pow, 1e-15))
-
-        # DCT-II type, orthogonal-norm
+        # Mel filterbank computed once; frames processed in fixed blocks so the
+        # (BLOCK × nfft) FFT matrix doesn't scale with audio length (Phase 4.2).
+        fb = _build_mel_filterbank(sr, nfft, self.n_mels, self.f_min, self.f_max)
         from scipy.fft import dct as _dct
-        mfcc = _dct(log_mel, type=2, axis=1, norm="ortho")[:, :self.n_mfcc]
+
+        mfcc = np.zeros((n_frames, self.n_mfcc))
+        BLOCK = 1024
+        for b0 in range(0, n_frames, BLOCK):
+            b1 = min(b0 + BLOCK, n_frames)
+            frames   = view[starts[b0:b1]]
+            frames_w = (frames - frames.mean(axis=1, keepdims=True)) * ham
+            X   = np.fft.rfft(frames_w, nfft, axis=1)
+            psd = (np.abs(X)) ** 2                            # (blk, nfft/2+1)
+            log_mel = np.log(np.maximum(psd @ fb.T, 1e-15))   # (blk, n_mels)
+            mfcc[b0:b1] = _dct(log_mel, type=2, axis=1, norm="ortho")[:, :self.n_mfcc]
 
         # Assign per cycle
         cycle_starts = idx[:-1]
@@ -1421,23 +1424,28 @@ class FormantCalculator(MetricCalculator):
             return {k: z() for k in keys}
         f1, f2, f3 = F[:, 0], F[:, 1], F[:, 2]
 
-        # --- Singer's Formant Energy: FFT power ratio (dB), original sr ---
+        # --- Singer's Formant Energy: FFT power ratio (dB), block-processed ---
         win = int(self.win_ms * 0.001 * sr)
         sfe_db = np.zeros(n_frames)
         if len(voice) >= win:
             v = np.asarray(voice, dtype=np.float64)
             v_pe = v.copy()
             v_pe[1:] -= 0.97 * v[:-1]
-            nf       = 1 + (len(v_pe) - win) // hop
-            starts   = np.arange(nf) * hop
-            frames   = sliding_window_view(v_pe, win)[starts]
-            frames_w = (frames - frames.mean(axis=1, keepdims=True)) * np.hamming(win)
-            power     = np.abs(np.fft.rfft(frames_w, 2048, axis=1)) ** 2
+            nf    = 1 + (len(v_pe) - win) // hop
+            view  = sliding_window_view(v_pe, win)
+            ham   = np.hamming(win)
             freqs_sfe = np.fft.rfftfreq(2048, 1.0 / sr)
-            mask      = (freqs_sfe >= self.singer_band[0]) & \
-                        (freqs_sfe <= self.singer_band[1])
-            ratio  = power[:, mask].sum(axis=1) / np.maximum(power.sum(axis=1), 1e-15)
-            sfe_db = 10.0 * np.log10(np.maximum(ratio, 1e-6))
+            mask  = (freqs_sfe >= self.singer_band[0]) & \
+                    (freqs_sfe <= self.singer_band[1])
+            sfe_db = np.zeros(nf)
+            BLOCK = 1024
+            for b0 in range(0, nf, BLOCK):
+                b1 = min(b0 + BLOCK, nf)
+                fr  = view[np.arange(b0, b1) * hop]
+                frw = (fr - fr.mean(axis=1, keepdims=True)) * ham
+                power = np.abs(np.fft.rfft(frw, 2048, axis=1)) ** 2
+                ratio = power[:, mask].sum(axis=1) / np.maximum(power.sum(axis=1), 1e-15)
+                sfe_db[b0:b1] = 10.0 * np.log10(np.maximum(ratio, 1e-6))
 
         # Assign each cycle to its enclosing frame
         cycle_starts = idx[:-1]
@@ -1610,24 +1618,29 @@ class FormantExtrasCalculator(MetricCalculator):
         f_disp = np.where((F[:, 0] > 0) & (F[:, 2] > 0),
                           (F[:, 2] - F[:, 0]) / 2.0, 0.0)
 
-        # --- SPR: FFT power ratios on original-sr frames (unchanged) ---
+        # --- SPR: FFT power ratios on original-sr frames (block-processed) ---
         win = int(self.win_ms * 0.001 * sr)
         spr = np.zeros(n_frames)
         if len(voice) >= win:
             v = np.asarray(voice, dtype=np.float64)
             v_pe = v.copy()
             v_pe[1:] -= 0.97 * v[:-1]
-            nf       = 1 + (len(v_pe) - win) // hop
-            starts   = np.arange(nf) * hop
-            frames   = sliding_window_view(v_pe, win)[starts]
-            frames_w = (frames - frames.mean(axis=1, keepdims=True)) * np.hamming(win)
-            psd   = np.abs(np.fft.rfft(frames_w, 2048, axis=1)) ** 2
+            nf    = 1 + (len(v_pe) - win) // hop
+            view  = sliding_window_view(v_pe, win)
+            ham   = np.hamming(win)
             freqs = np.fft.rfftfreq(2048, 1.0 / sr)
             m_lo = (freqs >= self.spr_lo[0]) & (freqs < self.spr_lo[1])
             m_hi = (freqs >= self.spr_hi[0]) & (freqs <= self.spr_hi[1])
-            spr  = 10.0 * np.log10(
-                np.maximum(psd[:, m_hi].sum(axis=1), 1e-15) /
-                np.maximum(psd[:, m_lo].sum(axis=1), 1e-15))
+            spr = np.zeros(nf)
+            BLOCK = 1024
+            for j0 in range(0, nf, BLOCK):     # j0/j1: b1 is the bandwidth array
+                j1 = min(j0 + BLOCK, nf)
+                fr  = view[np.arange(j0, j1) * hop]
+                frw = (fr - fr.mean(axis=1, keepdims=True)) * ham
+                psd = np.abs(np.fft.rfft(frw, 2048, axis=1)) ** 2
+                spr[j0:j1] = 10.0 * np.log10(
+                    np.maximum(psd[:, m_hi].sum(axis=1), 1e-15) /
+                    np.maximum(psd[:, m_lo].sum(axis=1), 1e-15))
 
         # --- GNE: native Michaelis Glottal-to-Noise Excitation (per ~10 ms) ---
         gne_vals, gne_hop = _compute_gne(voice, sr)
@@ -2495,40 +2508,38 @@ class HNRCalculator(MetricCalculator):
         while nfft < 2 * win:
             nfft *= 2
 
-        # Build all frames at once using sliding_window_view — avoids a
-        # Python loop, drops HNR to well under 100 ms for typical lengths.
         n_frames = 1 + (len(voice) - win) // hop
         starts   = np.arange(n_frames) * hop
-        frames   = sliding_window_view(voice, win)[starts]   # (n_frames, win)
-        # Hann window + zero-mean per frame
         hann     = np.hanning(win)
-        frames_w = (frames - frames.mean(axis=1, keepdims=True)) * hann
+        view     = sliding_window_view(voice, win)
 
-        # FFT-based autocorrelation, batched over frames
-        X   = np.fft.rfft(frames_w, nfft, axis=1)
-        acf = np.fft.irfft(X * np.conj(X), nfft, axis=1)[:, :win]   # (n_frames, win)
-
-        # Praat's compensation: windowing reduces the autocorrelation peak
-        # at non-zero lags because the signal gets tapered. Divide by the
-        # autocorrelation of the window itself to recover the unbiased
-        # signal autocorrelation. Without this the HNR is systematically
-        # underestimated (10-15 dB too low on typical voice).
+        # Praat's window-autocorrelation compensation (computed ONCE): dividing
+        # by the autocorrelation of the window itself recovers the unbiased
+        # signal autocorrelation (without it HNR is 10-15 dB too low).
         W   = np.fft.rfft(hann, nfft)
         win_acf = np.fft.irfft(W * np.conj(W), nfft)[:win]
         win_acf_safe = np.where(np.abs(win_acf) < 1e-15, 1.0, win_acf)
-        acf = acf / win_acf_safe[None, :]
 
-        # Normalise by r(0); guard against silent frames
-        r0  = acf[:, 0:1]
-        bad = (r0[:, 0] <= 0)
-        r0_safe = np.where(bad[:, None], 1.0, r0)
-        acf_n = acf / r0_safe
-
-        # Peak in pitch range → HNR
-        peak = acf_n[:, min_lag:max_lag + 1].max(axis=1)
-        peak = np.clip(peak, 1e-6, 0.9999)
-        hnr_frames = 10.0 * np.log10(peak / (1.0 - peak))
-        hnr_frames[bad] = 0.0
+        # Frames processed in fixed blocks so the (BLOCK × nfft) FFT/ACF
+        # matrices don't scale with audio length (Phase 4.2). Identical math.
+        hnr_frames = np.zeros(n_frames)
+        BLOCK = 1024
+        for b0 in range(0, n_frames, BLOCK):
+            b1 = min(b0 + BLOCK, n_frames)
+            frames   = view[starts[b0:b1]]
+            frames_w = (frames - frames.mean(axis=1, keepdims=True)) * hann
+            X   = np.fft.rfft(frames_w, nfft, axis=1)
+            acf = np.fft.irfft(X * np.conj(X), nfft, axis=1)[:, :win]
+            acf = acf / win_acf_safe[None, :]
+            r0  = acf[:, 0:1]
+            bad = (r0[:, 0] <= 0)
+            r0_safe = np.where(bad[:, None], 1.0, r0)
+            acf_n = acf / r0_safe
+            peak = acf_n[:, min_lag:max_lag + 1].max(axis=1)
+            peak = np.clip(peak, 1e-6, 0.9999)
+            h = 10.0 * np.log10(peak / (1.0 - peak))
+            h[bad] = 0.0
+            hnr_frames[b0:b1] = h
 
         # Assign each cycle to its nearest frame start
         cycle_starts = idx[:-1]
