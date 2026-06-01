@@ -621,4 +621,28 @@ Format per entry:
   → breadth×repetition, not 100 unique voices (documented).
 - Status: 4.1 PASS · 4.2 PASS · 4.3 partial · 4.4 PASS. phase4.md records it.
 
+## 2026-06-01  session=validation-bootstrap  commit=pending  [MEMORY / CHUNKED]
+- Why: user — project must batch-process LARGE audio (single file up to 1 hour);
+  memory must not scale with length.
+- Diagnosis: several frame-based calculators each built a full-length
+  (n_frames × nfft) FFT matrix (~1 GB each at 60 s, → tens of GB at 1 h).
+- Fix 1 (block-processing, e2e 0-drift): SpectralMoments / HNR / MFCC /
+  FormantExtras-SPR / FormantCalculator-SFE process frames in fixed blocks.
+  60 s peak 1522 → 797 MB.
+- Fix 2 (chunked pipeline): analyze_and_output_vrp_chunked + _compute_metrics_
+  chunked + skip_clustering hook. N-second blocks (overlap), defer both
+  K-means to a single global fit at the end (user's "cluster once" insight),
+  accumulate core-cycle records, reuse the existing per-cycle calculators +
+  output path. Whole-signal path untouched (opt-in).
+  · Memory FLAT in length: working set +629/+613/+634 MB at 120/300/600 s
+    (chunk_s=60) vs whole-signal +1717 MB at 180 s. 1-hour ≈ 1.2–1.5 GB vs ~35 GB.
+  · Parity: cells 510↔509, cycles 12523↔12494; all per-cycle metrics match the
+    whole-signal path EXCEPT jitter/shimmer (~15 %) + GNE (~6 %) — jitter/shimmer
+    divide local |ΔT| by the window-global mean period, so a chunk window ≠ the
+    whole window (inherent; making it chunk-invariant would change the
+    Praat-validated definition). Documented in phase4.md §4.2.
+- Tests: e2e 0-drift (block-processing); validate_params 49 PASS (whole path
+  unchanged). Open decisions: chunk size, auto-switch threshold, jitter
+  per-window vs 2-pass exact, float32 audio.
+
 <!-- next-session-anchor -->
