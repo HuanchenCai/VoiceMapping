@@ -1,69 +1,108 @@
 # VoiceMap · 嗓音声学品质多维分析图谱
 
-**Version** 1.0.0 · **License** MIT · **Platform** Windows 10/11 x64
+[![validate](https://github.com/HuanchenCai/VoiceMapping/actions/workflows/validate.yml/badge.svg)](https://github.com/HuanchenCai/VoiceMapping/actions/workflows/validate.yml)
+
+**Version** 1.0.0 · **License** MIT · **Platform** Windows 10/11 x64 (GUI) · CLI runs anywhere Python 3.10+ does
 
 Voice Range Profile (VRP) analyzer for clinical voice screening, singing
 research and pedagogy. Stereo WAV in → 40+ voice-quality metrics aggregated
 onto the (MIDI pitch × SPL) grid, rendered as interactive heatmaps, exported
 to CSV / Excel / Markdown clinical report / PDF figures.
 
-All algorithms re-implement public-domain references (MDVP / KayPENTAX, Praat,
-McLeod-Wyvill NSDF, Hillenbrand CPP, KTH FonaDyn EGG suite). Every cell in
-the output table is a `(pitch, loudness)` bin; each column is one voice-science
+All algorithms re-implement published references (MDVP / KayPENTAX, Praat,
+McLeod-Wyvill NSDF, Hillenbrand CPP, and a SuperCollider VRP toolkit for the
+EGG metrics; attribution in [`LICENSE`](LICENSE)). Every cell in the output
+table is a `(pitch, loudness)` bin; each column is one voice-science
 descriptor computed per glottal cycle and aggregated over the cell.
 
-## Download
+<p align="center">
+  <img src="docs/screenshots/04_hover_cell_value.jpeg" width="90%" alt="CPP heatmap of the bundled test recording; hovering a cell shows pitch 54, 77 dB, CPP 24.38 dB">
+</p>
 
-Pre-built Windows installer: `dist/VoiceMap_v1.0.0_setup.exe`
-(double-click to install; creates Start Menu + Desktop shortcuts).
-
-## Install
+## Quick start
 
 ```bash
 pip install -r requirements.txt
+python main.py audio/test_Voice_EGG.wav          # CLI: CSV + per-metric heatmaps in result/
+python main.py --gui                              # GUI: drop a .wav, see the voice map live
 ```
 
-Required: numpy, scipy, pandas, soundfile, matplotlib, scikit-learn, openpyxl.
-Recommended: numba (~2.4× speedup).
-Optional: tkinterdnd2 (GUI drag-drop), praat-parselmouth (cross-validation).
+The bundled sample `audio/test_Voice_EGG.wav` (70 s, 44.1 kHz, channel 1 =
+microphone, channel 2 = EGG) runs in about 11 s and yields 514 populated
+cells from 12,523 glottal cycles with the default clarity threshold 0.96.
+Windows users can double-click `启动.bat` instead of the second command.
 
-## Run
+More CLI patterns:
 
 ```bash
-# Graphical interface — drop a .wav, see the voice map live
-python main.py --gui
-
-# One-off CLI analysis
-python main.py audio.wav
-
-# Batch everything under a directory
-python main.py --batch corpus/ --plot-mode none
-
-# Custom knobs
+python main.py --batch corpus/ --plot-mode none                 # batch a directory, CSV only
 python main.py audio.wav --clarity 0.97 --cluster-k 6 --plot-mode combined
-
-# Cross-subject label parity
-python main.py --train-centroids cEGG.csv wav1.wav wav2.wav wav3.wav
+python main.py audio.wav --excel --report                       # also .xlsx workbook + Markdown clinical report
+python main.py --train-centroids cEGG.csv wav1.wav wav2.wav     # cross-subject cluster parity
 python main.py new_subject.wav --load-centroids cEGG.csv
-
-# Also write Excel (Summary + Grouped + per-metric heatmap sheets)
-python main.py audio.wav --excel
+python main.py --compare a_VRP.csv b_VRP.csv --compare-metric CPP --compare-out diff.png
 ```
 
 Full flag list: `python main.py --help`.
+
+## Screenshots
+
+| Analysis running, metric sidebar with clinical reference ranges | Compare two recordings: A, B and A − B |
+|---|---|
+| ![](docs/screenshots/03_analysis_running.png) | ![](docs/screenshots/08_compare_two_recordings.png) |
+
+More in [`docs/screenshots/`](docs/screenshots): main window, annotations,
+pitch-trend fit overlay, log panel.
+
+## Example results and validation
+
+- **Bundled real fixture**: `python tests/validate_params.py audio/test_Voice_EGG.wav`
+  compares every metric against Praat (parselmouth) and prints
+  `PASS=49  WARN=0  FAIL=0` on the current baseline. Run it after any metric
+  change.
+- **Per-metric evidence**: each metric has a validation record under
+  [`docs/validation/metrics/`](docs/validation/metrics) (implementation,
+  reference standard, test signals, results, limitations). The harness is
+  `python scripts/validate_metric.py <metric>` and gates on exit code.
+- **Synthetic ground truth**: `python docs/validation/test_signals/make_signals.py`
+  regenerates 12 WAVs with analytically known jitter, shimmer, vibrato,
+  band ratios and EGG closed quotient ([details](docs/validation/test_signals/README.md)).
+- **End-to-end regression**: `python scripts/e2e_regression.py` checks three
+  analysis modes against the committed `docs/validation/regression/e2e_baseline.json`.
+- **CI**: the `validate` workflow runs the signal regeneration, the harness and
+  the Praat-parity unit tests on Python 3.11 and 3.12 on every push.
+
+[`docs/reproducibility.md`](docs/reproducibility.md) lists every one-command
+reproduction with its expected output; [`docs/methodology.md`](docs/methodology.md)
+gives the formula and literature source for each metric.
+
+## Machine-learning use
+
+`voicemap.ml.VoiceFeatureExtractor` turns a recording into a fixed-length
+feature vector that drops straight into a scikit-learn `Pipeline`;
+[`docs/ml_schema.md`](docs/ml_schema.md) is the column contract.
+[`examples/ml_demo.py`](examples/ml_demo.py) is a self-contained end-to-end
+demo (voice → features → classifier) on a synthetic three-class corpus
+(modal / breathy / rough):
+
+```bash
+python examples/ml_demo.py          # 8 samples per class
+python examples/ml_demo.py 12
+```
 
 ## Input
 
 Stereo WAV. **Channel 1 = voice microphone, channel 2 = EGG**
 (electroglottograph). Sample rate is auto-detected; 44.1 kHz / 48 kHz
-are the common values in the test corpora.
+are the common values in the test corpora. Mono (acoustic-only) files are
+accepted; EGG columns are then written as 0.
 
 ## Pipeline
 
 1. **Load** stereo WAV → voice + EGG via soundfile.
 2. **Preprocess**
    - Voice: 2nd-order Butterworth HPF @ 30 Hz (`scipy.signal.filtfilt`)
-   - EGG:   FIR bandpass (matching FonaDyn type=3) + PV-compander expander
+   - EGG:   FIR bandpass + PV-compander expander
 3. **Cycle detection** — phase-portrait method on the EGG channel
    (Dolansky algorithm; numba JIT when available).
 4. **Per-cycle metrics** — see schema below.
@@ -73,12 +112,13 @@ are the common values in the test corpora.
 6. **Grid aggregation** — round MIDI and SPL to integers, group by
    (MIDI, dB) cell, apply per-metric aggregator (see table).
 7. **Output** — semicolon-CSV to `result/`, optional PNG plots, optional
-   .xlsx workbook.
+   .xlsx workbook and Markdown report.
 
 ## Metric schema
 
-40 columns in the CSV, grouped by what they measure. The GUI's Metric
-dropdown uses the same groups.
+The CSV columns, grouped by what they measure. The GUI's Metric dropdown
+uses the same groups; `voicemap/metrics_registry.py` is the single source
+of truth and `docs/ml_schema.md` the generated full list.
 
 ### Identification / density
 
@@ -90,7 +130,7 @@ dropdown uses the same groups.
 
 ### Acoustic (voice mic)
 
-All agg = `mean`. Clarity uses `max` (matches FonaDyn SC reference).
+All agg = `mean`. Clarity uses `max`.
 
 | Column | Units | Typical / Normal | Description |
 |---|---|---|---|
@@ -111,7 +151,7 @@ All agg = `mean`. Clarity uses `max` (matches FonaDyn SC reference).
 
 | Column | Units | Typical | Description |
 |---|---|---|---|
-| Qcontact | — | 0.3–0.6 | FonaDyn integral-based contact quotient (SC reference) |
+| Qcontact | — | 0.3–0.6 | Integral-based contact quotient |
 | Icontact | — | 0–0.7 | Index of contacting: log(dEGGmax)·Qcontact |
 | dEGGmax | slope | 1–20 | Peak amplitude of the EGG derivative (normalized) |
 | HRFegg | dB | − 30 to 10 | Harmonic Richness Factor from per-cycle EGG DFT |
@@ -151,9 +191,8 @@ analysing each subject (`--load-centroids`).
 - **Cycle segmentation** is EGG-based (phase-portrait on the EGG
   channel). Praat-style tools segment on voice autocorrelation. This
   difference is visible in Jitter (EGG tends to pick up true glottal
-  pulses that voice-autocorr smooths), but the EGG version is what
-  FonaDyn's reference uses and it is arguably more accurate for voice
-  science.
+  pulses that voice-autocorr smooths); the EGG version is arguably more
+  accurate for voice science.
 - **HNR**: per-frame 40 ms Hann window, 10 ms hop, with window-autocorr
   compensation (omitting this compensation underestimates HNR by 10–15 dB).
 - **Formants**: LPC via autocorrelation + Levinson-Durbin (order
@@ -161,16 +200,7 @@ analysing each subject (`--load-centroids`).
   Expect ±10–20% divergence from Praat's Burg + root-finding tracker.
 - **Clusters**: the EGG shape K-means operates on a feature vector of
   `[Δamp_dB[1..n-1], cos(Δφ[1..n-1]), sin(Δφ[1..n-1])]` where the
-  fundamental is the reference. Matches FonaDyn's `VRPSDCluster.sc`
-  recipe.
-
-## Validation
-
-`tests/validate_params.py` compares Ours vs Praat (parselmouth) on a
-reference WAV and prints the deltas. Run it after any metric change
-to catch regressions. The documented methodological differences
-(cycle segmentation, HNR silent-frame handling, LPC method) bound
-the expected spread.
+  fundamental is the reference.
 
 ## Output files
 
@@ -179,11 +209,25 @@ the expected spread.
 - `result/plots/<basename>_<metric>.png` — per-metric heatmaps (CLI
   default; GUI skips by default, opt-in via Settings).
 - `result/<basename>.xlsx` — optional Excel workbook with Summary,
-  Grouped, and per-metric pivot sheets.
+  Grouped, and per-metric pivot sheets (`--excel`).
+- `result/<basename>_report.md` — optional clinical narrative (`--report`).
 - `<path>.csv` for EGG cluster centroids (`--save-centroids` /
   `--train-centroids`).
 
+## Building the Windows app
+
+```bat
+build_exe.bat
+```
+
+PyInstaller one-folder build, output `dist\VoiceMap\VoiceMap.exe`.
+`installer.iss` wraps that folder into a setup.exe with Inno Setup (Start Menu
+and Desktop shortcuts). Both scripts look for Python in `VOICEMAP_PYTHON`,
+then the `fonadyn` conda env, then `PATH`.
+
 ## Architecture
+
+![VoiceMap layered architecture](docs/架构图.png)
 
 ```
 main.py                          CLI / GUI entry shim
@@ -195,7 +239,7 @@ voicemap/
 ├── i18n.py                      zh / en string table + tr() helper
 ├── metrics_registry.py          MetricSpec dataclass + REGISTRY (50+ metrics,
 │                                single source of truth for plotter / GUI /
-│                                Excel / report)
+│                                Excel / report / ML schema)
 ├── metrics.py                   One class per metric family (SPL, Clarity,
 │                                CPP, SpecBal, Crest, Qcontact, Entropy,
 │                                HRFegg, Cluster, PhonCluster, Perturbation,
@@ -207,18 +251,23 @@ voicemap/
 ├── plot_overlay.py              Pitch-mean / metric-trend fit overlays
 ├── excel_export.py              .xlsx writer (Summary + Grouped + pivots)
 ├── report.py                    Markdown clinical narrative report
+├── ml.py                        sklearn VoiceFeatureExtractor + read_vrp()
+├── praat_pitch.py / praat_perturbation.py   Praat-parity reference paths
+├── inverse_filtering.py / f0_profile.py     Experimental add-ons
 ├── cli.py                       argparse CLI
 └── gui/
     ├── app.py                   tkinter main window (VoiceMapApp)
     ├── theme.py                 Design tokens (colors, fonts, palettes)
     ├── widgets.py               Reusable widgets (HoverTooltip, MetricPopup,
     │                            QueueHandler, focusable-label factory)
-    ├── modern_menu.py           Custom dark menubar + popup (replaces
-    │                            tk.Menu's Win32 chrome)
+    ├── modern_menu.py           Custom dark menubar + popup
     └── dialogs.py               Settings / Compare / About / Log windows
 
-tests/validate_params.py         Praat cross-validation harness
-docs/用户手册.md                  User manual
-docs/设计说明书.md                Design specification
-软著材料/                          Software copyright registration prep
+tests/                           Unit tests + validate_params.py (Praat cross-validation)
+scripts/                         validate_metric.py, e2e_regression.py, benchmark.py, ...
+docs/methodology.md              Per-metric algorithm and literature reference
+docs/reproducibility.md          One-command reproductions and expected outputs
+docs/api_stability.md            Public API surface and semver promise
+docs/ml_schema.md                Generated column contract
+docs/validation/                 Plan, per-metric records, synthetic signals, regression baseline
 ```
