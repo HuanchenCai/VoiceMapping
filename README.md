@@ -210,7 +210,7 @@ analysing each subject (`--load-centroids`).
   default; GUI skips by default, opt-in via Settings).
 - `result/<basename>.xlsx` — optional Excel workbook with Summary,
   Grouped, and per-metric pivot sheets (`--excel`).
-- `result/<basename>_report.md` — optional clinical narrative (`--report`).
+- `result/<csv name>.report.md` — optional clinical narrative next to the CSV (`--report`).
 - `<path>.csv` for EGG cluster centroids (`--save-centroids` /
   `--train-centroids`).
 
