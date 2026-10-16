@@ -44,7 +44,11 @@ class VoiceMapConfig:
     cpp_low_bin: int = 25
     cpp_high_bin: int = 367
     cpp_dither_amp: float = 1e-6
-    
+
+    # AVQI coefficient set: "03.01" (Barsties & Maryn 2016) or
+    # "02.02" (original Maryn et al. 2010 regression, 0-10 rescaled)
+    avqi_version: str = "03.01"
+
     # SpecBal parameters
     specbal_cutoff_low: int = 1500
     specbal_cutoff_high: int = 2000
