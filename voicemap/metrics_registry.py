@@ -223,6 +223,30 @@ def _populate_builtins():
         vmin=0.0, vmax=35.0, unit="dB",
         cmap="viridis",
         description="Harmonics-to-Noise Ratio (Praat autocorrelation)."))
+
+    # AVQI (Maryn et al. 2010) and its Praat-convention inputs.
+    # validated: docs/validation/metrics/avqi.md
+    register(MetricSpec(
+        key="AVQI", category="Acoustic", label="AVQI - Acoustic Voice Quality Index",
+        vmin=0.0, vmax=8.0, unit="",
+        cmap="viridis",
+        description="Acoustic Voice Quality Index: weighted CPPS, HNR, shimmer "
+                    "(%, dB), LTAS slope and tilt. Higher = more dysphonic."))
+    register(MetricSpec(
+        key="CPPSPraat", category="Acoustic", label="CPPS (Praat scale)",
+        vmin=0.0, vmax=25.0, unit="dB",
+        cmap="fd_cpp",
+        description="Smoothed CPP on the Praat PowerCepstrogram scale (AVQI input)."))
+    register(MetricSpec(
+        key="LTASSlope", category="Acoustic", label="LTAS slope",
+        vmin=-45.0, vmax=-5.0, unit="dB",
+        cmap="viridis",
+        description="Energy 1-10 kHz minus 0-1 kHz of the local LTAS (AVQI input)."))
+    register(MetricSpec(
+        key="LTASTilt", category="Acoustic", label="LTAS tilt",
+        vmin=-20.0, vmax=0.0, unit="dB",
+        cmap="viridis",
+        description="Same band difference on the 1-10 kHz LTAS trend line (AVQI input)."))
     register(MetricSpec(
         key="NHR", category="Acoustic", label="NHR (Noise-to-Harm)",
         vmin=0.0, vmax=0.5, unit="",
