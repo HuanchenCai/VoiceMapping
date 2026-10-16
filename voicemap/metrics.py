@@ -2541,6 +2541,252 @@ class HNRCalculator(MetricCalculator):
 
 
 # ---------------------------------------------------------------------------
+# AVQI — Acoustic Voice Quality Index (Maryn et al. 2010, J Voice 24(5);
+# coefficient set v03.01 from Barsties & Maryn 2016).
+#
+# AVQI is a linear combination of six Praat measures:
+#   CPPS (Praat PowerCepstrogram convention), HNR, shimmer local (%),
+#   shimmer local (dB), LTAS slope and LTAS tilt.
+# HNR / Shimmer / ShimmerDB already exist per cycle (Praat parity), but the
+# project's CPP/CPPS use the SuperCollider cepstrum convention, which is NOT
+# on the Praat scale the AVQI coefficients were fitted to. So this
+# calculator supplies the three Praat-convention inputs that are missing:
+#   cpps_praat - native port of `To PowerCepstrogram 60 0.002 5000 50` +
+#                `Get CPPS no 0.01 0.001 60 330 0.05 Parabolic 0.001 0
+#                Straight Robust` (per frame; Praat's CPPS = frame mean)
+#   ltas_slope - `Ltas: Get slope 0 1000 1000 10000 energy` on a local LTAS
+#   ltas_tilt  - same, on `Compute trend line 1 10000`
+# The index itself is combined per (MIDI, dB) cell from cell-mean inputs
+# (csv_writer). AVQI is linear, so that equals the mean per-cycle AVQI while
+# keeping the shimmer decomposition's zero-fill semantics intact.
+# ---------------------------------------------------------------------------
+AVQI_COEFFS = {
+    # version: (intercept, cpps, hnr, shim%, shim_dB, slope, tilt, scale, offset)
+    # AVQI = (intercept + sum(coef * x)) * scale + offset
+    "03.01": (4.152, -0.177, -0.006, -0.037, 0.941, 0.010, 0.093, 2.8902, 0.0),
+    # Original Maryn et al. (2010) regression, rescaled to 0-10 (script v02.02)
+    "02.02": (3.295, -0.111, -0.073, -0.213, 2.789, -0.032, 0.077, 2.208, 1.797),
+}
+
+
+def avqi_from_components(cpps, hnr, shimmer, shimmer_db, slope, tilt,
+                         version: str = "03.01"):
+    """Combine the six AVQI inputs. Works on scalars or aligned arrays."""
+    if version not in AVQI_COEFFS:
+        raise ValueError(f"Unknown AVQI version {version!r}; "
+                         f"choose from {sorted(AVQI_COEFFS)}")
+    b0, b_cpps, b_hnr, b_sh, b_shdb, b_sl, b_ti, scale, offset = AVQI_COEFFS[version]
+    raw = (b0 + b_cpps * np.asarray(cpps, dtype=np.float64)
+              + b_hnr * np.asarray(hnr, dtype=np.float64)
+              + b_sh * np.asarray(shimmer, dtype=np.float64)
+              + b_shdb * np.asarray(shimmer_db, dtype=np.float64)
+              + b_sl * np.asarray(slope, dtype=np.float64)
+              + b_ti * np.asarray(tilt, dtype=np.float64))
+    return raw * scale + offset
+
+
+def _theil_incomplete(x: np.ndarray, y: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """Row-wise Sen/Theil line fit over the n/2 disjoint pairs (i, i+n/2),
+    as Praat's "Robust" trend fit. y: (rows, n). Returns (slope, intercept)."""
+    h = len(x) // 2
+    slope = np.median((y[:, h:2 * h] - y[:, :h]) / (x[h:2 * h] - x[:h]), axis=1)
+    intercept = np.median(y - slope[:, None] * x[None, :], axis=1)
+    return slope, intercept
+
+
+class AVQICalculator(MetricCalculator):
+    """Per-cycle Praat-convention AVQI inputs: CPPS, LTAS slope, LTAS tilt."""
+
+    KEYS = ("cpps_praat", "ltas_slope", "ltas_tilt")
+
+    # Praat PowerCepstrogram / CPPS settings used by the AVQI script
+    CEPS_PITCH_FLOOR = 60.0
+    CEPS_TIME_STEP = 0.002
+    CEPS_MAX_FREQ = 5000.0
+    CEPS_PREEMPH_HZ = 50.0
+    CPPS_TIME_SMOOTH_S = 0.01
+    CPPS_QUEF_SMOOTH_S = 0.001
+    CPPS_F0_RANGE = (60.0, 330.0)
+    CPPS_FIT_FROM_S = 0.001
+
+    # LTAS bands (Hz): `Get slope 0 1000 1000 10000 energy`
+    LTAS_LOW = (0.0, 1000.0)
+    LTAS_HIGH = (1000.0, 10000.0)
+
+    def __init__(self, config: VoiceMapConfig,
+                 ltas_win_ms: float = 50.0, ltas_hop_ms: float = 10.0,
+                 ltas_avg_frames: int = 9):
+        super().__init__(config)
+        self.ltas_win_ms = float(ltas_win_ms)
+        self.ltas_hop_ms = float(ltas_hop_ms)
+        # Frames averaged into each local LTAS (9 x 10 ms hop ~ 130 ms span)
+        self.ltas_avg_frames = max(1, int(ltas_avg_frames))
+
+    def calculate(self, voice: np.ndarray,
+                  cycle_triggers: np.ndarray) -> Dict[str, np.ndarray]:
+        logger.info("Calculating AVQI inputs (Praat CPPS + LTAS slope/tilt)...")
+        idx = np.where(cycle_triggers > 0.5)[0]
+        n_cycles = max(len(idx) - 1, 0)
+        out = {k: np.zeros(n_cycles) for k in self.KEYS}
+        if n_cycles == 0:
+            return out
+        voice = np.asarray(voice, dtype=np.float64)
+        centres_s = (idx[:-1] + idx[1:]) * 0.5 / self.sample_rate
+
+        cpps_t, cpps_v = self._cpps_frames(voice)
+        if len(cpps_v):
+            out["cpps_praat"] = cpps_v[self._nearest(cpps_t, centres_s)]
+        ltas_t, slope_v, tilt_v = self._ltas_frames(voice)
+        if len(slope_v):
+            k = self._nearest(ltas_t, centres_s)
+            out["ltas_slope"] = slope_v[k]
+            out["ltas_tilt"] = tilt_v[k]
+
+        logger.info("  AVQI inputs: CPPS(Praat) mean=%.2f dB  slope mean=%.2f dB  "
+                    "tilt mean=%.2f dB", out["cpps_praat"].mean(),
+                    out["ltas_slope"].mean(), out["ltas_tilt"].mean())
+        return out
+
+    @staticmethod
+    def _nearest(frame_t: np.ndarray, t: np.ndarray) -> np.ndarray:
+        # Frames are uniformly spaced, so index directly
+        if len(frame_t) == 1:
+            return np.zeros(len(t), dtype=int)
+        dt = frame_t[1] - frame_t[0]
+        return np.clip(np.round((t - frame_t[0]) / dt).astype(int),
+                       0, len(frame_t) - 1)
+
+    # -- CPPS (Praat PowerCepstrogram) --------------------------------------
+    def _cpps_frames(self, voice: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """Per-frame smoothed cepstral peak prominence (dB), Praat convention."""
+        from math import gcd
+        from scipy.signal import resample_poly
+        from scipy.ndimage import uniform_filter1d
+
+        sr = int(self.sample_rate)
+        fs = 2.0 * self.CEPS_MAX_FREQ
+        g = gcd(int(fs), sr)
+        y = resample_poly(voice, int(fs) // g, sr // g)
+        a = np.exp(-2.0 * np.pi * self.CEPS_PREEMPH_HZ / fs)
+        y = np.concatenate([y[:1], y[1:] - a * y[:-1]])
+
+        # Gaussian window spanning 2 x 3 periods of the pitch floor
+        n = int(round(2.0 * 3.0 / self.CEPS_PITCH_FLOOR * fs))
+        dt = self.CEPS_TIME_STEP
+        dur = len(y) / fs
+        if len(y) < n:
+            return np.zeros(0), np.zeros(0)
+        n_frames = int((dur - n / fs) / dt + 1e-9) + 1
+        t1 = 0.5 * (dur - (n_frames - 1) * dt)
+        frame_t = t1 + np.arange(n_frames) * dt
+        starts = np.clip(np.round((frame_t - 0.5 * n / fs) * fs).astype(int),
+                         0, len(y) - n)
+        xx = (np.arange(n) + 0.5) / n - 0.5
+        edge = np.exp(-12.0)
+        window = (np.exp(-48.0 * xx * xx) - edge) / (1.0 - edge)
+        nfft = 1
+        while nfft < n:
+            nfft *= 2
+        nq = nfft // 2 + 1
+        dq = 1.0 / fs
+        q = np.arange(nq) * dq
+
+        k_t = max(1, int(np.floor(self.CPPS_TIME_SMOOTH_S / dt + 1e-9)))
+        k_q = max(1, int(np.floor(self.CPPS_QUEF_SMOOTH_S / dq + 1e-9)))
+        i_fit = int(np.ceil(self.CPPS_FIT_FROM_S / dq))
+        q_fit = q[i_fit:]
+        lo = int(np.ceil(fs / self.CPPS_F0_RANGE[1]))
+        hi = min(int(np.floor(fs / self.CPPS_F0_RANGE[0])), nq - 2)
+
+        view = sliding_window_view(y, n)
+        cpps = np.zeros(n_frames)
+        # Block over frames (with a halo for the time smoothing) so peak
+        # memory stays ~BLOCK x nq regardless of recording length.
+        BLOCK, halo = 2048, k_t
+        for b0 in range(0, n_frames, BLOCK):
+            b1 = min(b0 + BLOCK, n_frames)
+            h0, h1 = max(0, b0 - halo), min(n_frames, b1 + halo)
+            fr = view[starts[h0:h1]]
+            fr = (fr - fr.mean(axis=1, keepdims=True)) * window
+            spec = rfft(fr, nfft, axis=1)
+            log_pow = np.log(spec.real ** 2 + spec.imag ** 2 + 1e-300)
+            ceps = irfft(log_pow, nfft, axis=1)[:, :nq]
+            pc = ceps * ceps
+            if k_t > 1:
+                pc = uniform_filter1d(pc, k_t, axis=0, mode="nearest")
+            if k_q > 1:
+                pc = uniform_filter1d(pc, k_q, axis=1, mode="nearest")
+            pc = pc[b0 - h0: b0 - h0 + (b1 - b0)]
+            db = 10.0 * np.log10(pc + 1e-30)
+
+            slope, icpt = _theil_incomplete(q_fit, db[:, i_fit:])
+            rows = np.arange(len(db))
+            j = db[:, lo:hi + 1].argmax(axis=1) + lo
+            yl, y0, yr = db[rows, j - 1], db[rows, j], db[rows, j + 1]
+            den = yl - 2.0 * y0 + yr
+            safe = np.where(den != 0.0, den, 1.0)
+            off = np.where(den != 0.0, 0.5 * (yl - yr) / safe, 0.0)
+            peak = y0 - 0.25 * (yl - yr) * off
+            cpps[b0:b1] = peak - (slope * (j + off) * dq + icpt)
+        return frame_t, cpps
+
+    # -- LTAS slope / tilt ---------------------------------------------------
+    def _ltas_frames(self, voice: np.ndarray
+                     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Per-frame local-LTAS slope and trend-line tilt (dB)."""
+        from scipy.ndimage import uniform_filter1d
+
+        sr = self.sample_rate
+        win = int(self.ltas_win_ms * 0.001 * sr)
+        hop = int(self.ltas_hop_ms * 0.001 * sr)
+        if len(voice) < win or hop < 1:
+            return np.zeros(0), np.zeros(0), np.zeros(0)
+        n_frames = 1 + (len(voice) - win) // hop
+        frame_t = (np.arange(n_frames) * hop + 0.5 * win) / sr
+        nfft = 1
+        while nfft < win:
+            nfft *= 2
+        freqs = np.fft.rfftfreq(nfft, 1.0 / sr)
+        f_top = min(self.LTAS_HIGH[1], 0.5 * sr)
+        if f_top < self.LTAS_HIGH[1]:
+            logger.warning("AVQI LTAS: sample rate %d Hz caps the high band at "
+                           "%.0f Hz (AVQI expects 10 kHz)", sr, f_top)
+        keep = freqs <= f_top
+        f = freqs[keep]
+        m_low = (f >= self.LTAS_LOW[0]) & (f <= self.LTAS_LOW[1])
+        m_high = (f >= self.LTAS_HIGH[0]) & (f <= f_top)
+        f_trend = f[m_high]
+        x_c = f_trend - f_trend.mean()
+        sxx = max(float((x_c ** 2).sum()), 1e-12)
+        hann = np.hanning(win)
+
+        view = sliding_window_view(voice, win)
+        psd = np.empty((n_frames, len(f)))
+        BLOCK = 1024
+        for b0 in range(0, n_frames, BLOCK):
+            b1 = min(b0 + BLOCK, n_frames)
+            fr = view[np.arange(b0, b1) * hop]
+            fr = (fr - fr.mean(axis=1, keepdims=True)) * hann
+            X = rfft(fr, nfft, axis=1)[:, keep]
+            psd[b0:b1] = X.real ** 2 + X.imag ** 2
+        if self.ltas_avg_frames > 1:
+            psd = uniform_filter1d(psd, self.ltas_avg_frames, axis=0, mode="nearest")
+        psd = np.maximum(psd, 1e-30)
+
+        def _band_slope(p_low, p_high):
+            return 10.0 * np.log10(p_high.mean(axis=1) / p_low.mean(axis=1))
+
+        slope = _band_slope(psd[:, m_low], psd[:, m_high])
+        # Trend line: least-squares dB-vs-Hz over 1-10 kHz, evaluated at every bin
+        db_hi = 10.0 * np.log10(psd[:, m_high])
+        b = (db_hi * x_c).sum(axis=1) / sxx
+        a = db_hi.mean(axis=1) - b * f_trend.mean()
+        line = 10.0 ** ((a[:, None] + b[:, None] * f[None, :]) / 10.0)
+        tilt = _band_slope(line[:, m_low], line[:, m_high])
+        return frame_t, slope, tilt
+
+
+# ---------------------------------------------------------------------------
 # EGG cycle clustering (Cluster 1..5) — harmonic-shape K-means.
 #
 # Mirrors the reference SuperCollider VRPSDCluster.sc feature recipe:
