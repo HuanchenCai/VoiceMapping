@@ -36,6 +36,7 @@ _METRIC_COLS = [
     "Shimmer", "ShimmerDB",
     "ShimmerAPQ3", "ShimmerAPQ5", "ShimmerAPQ11",
     "HNR", "NHR", "PPE", "ZCR",
+    "AVQI", "CPPSPraat", "LTASSlope", "LTASTilt",
     # 扩展声学 / 频谱形态指标
     "RMS", "F0_Hz",
     "SpectralCentroid", "SpectralBandwidth", "SpectralRolloff85",

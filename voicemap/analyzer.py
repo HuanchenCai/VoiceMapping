@@ -22,7 +22,7 @@ from voicemap.metrics import (
     SPLCalculator, ClarityCalculator, CPPCalculator, SpecBalCalculator,
     CrestCalculator, QcontactCalculator, EntropyCalculator, HRFCalculator,
     ClusterCalculator, PhonClusterCalculator,
-    PerturbationCalculator, HNRCalculator,
+    PerturbationCalculator, HNRCalculator, AVQICalculator,
     VibratoCalculator, FormantCalculator, HarmonicDiffCalculator,
     OpenQuotientCalculator,
     # Add-on voice quality metrics (待验证)
@@ -174,6 +174,8 @@ class VoiceMapAnalyzer:
         self.mfcc_calculator           = MFCCCalculator(self.config)
         self.formant_extras_calculator = FormantExtrasCalculator(self.config)
         self.vib_jitter_calculator     = VibratoJitterCalculator(self.config)
+        # AVQI inputs on the Praat scale (CPPS / LTAS slope / LTAS tilt)
+        self.avqi_calculator           = AVQICalculator(self.config)
 
         # Per-analysis transient state — populated by voice_only_cycle_detection()
         # when running on a mono file, consumed by calculate_all_metrics()
@@ -640,6 +642,9 @@ class VoiceMapAnalyzer:
         _step(19)  # "M1: Vibrato Jitter"
         vib_jitter_values                    = self.vib_jitter_calculator.calculate(vib_rate)
 
+        _step(20)  # "AVQI: CPPS (Praat) + LTAS slope/tilt"
+        avqi_inputs                          = self.avqi_calculator.calculate(voice_signal, cycle_triggers)
+
         base = {
             'midi':     midi_values,
             'spl':      spl_values,
@@ -686,6 +691,9 @@ class VoiceMapAnalyzer:
             'spr':            formant_extras['spr'],
             'gne':            formant_extras['gne'],
             'vib_jitter':     vib_jitter_values,
+            'cpps_praat':     avqi_inputs['cpps_praat'],
+            'ltas_slope':     avqi_inputs['ltas_slope'],
+            'ltas_tilt':      avqi_inputs['ltas_tilt'],
             **{f'mfcc{i+1}': mfcc_values[f'mfcc{i+1}'] for i in range(13)},
             'vibrato_rate':   vib_rate,
             'vibrato_extent': vib_extent,
@@ -701,7 +709,7 @@ class VoiceMapAnalyzer:
         }
         # Phonation-type cluster uses the already-computed quality metrics
         # as features — must run AFTER them.
-        _step(20)   # "Phonation cluster (cPhon)"
+        _step(21)   # "Phonation cluster (cPhon)"
         base['phon'] = (np.zeros(n_cycles, dtype=np.int32) if skip_clustering
                         else self.phon_calculator.calculate(base))
         return base
@@ -805,8 +813,9 @@ class VoiceMapAnalyzer:
         "M1: MFCC 1-13",                     # 17
         "M1: 共振峰带宽 + SPR + GNE",        # 18
         "M1: Vibrato Jitter",                # 19
-        "Phonation cluster (cPhon)",         # 20
-        "写 CSV",                            # 21
+        "AVQI: CPPS (Praat) + LTAS",         # 20
+        "Phonation cluster (cPhon)",         # 21
+        "写 CSV",                            # 22
     )
     TOTAL_STAGES = len(_STAGE_LABELS)
 
@@ -920,7 +929,7 @@ class VoiceMapAnalyzer:
         filtered_metrics = self.apply_clarity_filtering(metrics)
 
         logger.info("Valid data points: %d", len(filtered_metrics['midi']))
-        _cb(21)  # "写 CSV"
+        _cb(22)  # "写 CSV"
         csv_result = self.output_vrp_csv(filtered_metrics,
                                           return_df=return_df,
                                           plot_mode=plot_mode,

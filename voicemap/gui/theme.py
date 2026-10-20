@@ -104,6 +104,7 @@ _METRIC_SECTIONS: list = [
         "Shimmer", "ShimmerDB",
         "ShimmerAPQ3", "ShimmerAPQ5", "ShimmerAPQ11",
         "HNR", "NHR",
+        "AVQI", "CPPSPraat", "LTASSlope", "LTASTilt",
         "PPE", "ZCR",
         "RMS", "F0_Hz",
         "SpectralCentroid", "SpectralBandwidth", "SpectralRolloff85",

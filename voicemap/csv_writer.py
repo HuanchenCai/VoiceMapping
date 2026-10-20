@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 
 from voicemap.logger import get_logger
+from voicemap.metrics import avqi_from_components
 from voicemap.plotter import plot_vrp_dataframe, plot_vrp_combined
 
 if TYPE_CHECKING:
@@ -115,6 +116,9 @@ def _build_cycle_dataframe(config, metrics: Dict[str, np.ndarray],
         'SPR':                _pad(metrics.get('spr'),               base_n),
         'GNE':                _pad(metrics.get('gne'),               base_n),
         'VibratoJitter':      _pad(metrics.get('vib_jitter'),        base_n),
+        'CPPSPraat':          _pad(metrics.get('cpps_praat'),        base_n),
+        'LTASSlope':          _pad(metrics.get('ltas_slope'),        base_n),
+        'LTASTilt':           _pad(metrics.get('ltas_tilt'),         base_n),
         **{f'MFCC{i+1}':      _pad(metrics.get(f'mfcc{i+1}'),        base_n)
            for i in range(13)},
         'VibratoRate':   _pad(metrics.get('vibrato_rate'),   base_n),
@@ -218,6 +222,7 @@ def write_vrp(analyzer: "VoiceMapAnalyzer",
         'FormantDispersion': 'mean',
         'SPR': 'mean', 'GNE': 'mean',
         'VibratoJitter': 'mean',
+        'CPPSPraat': 'mean', 'LTASSlope': 'mean', 'LTASTilt': 'mean',
         **{f'MFCC{i+1}': 'mean' for i in range(13)},
         'VibratoRate': 'mean', 'VibratoExtent': 'mean',
         'F1': 'mean', 'F2': 'mean', 'F3': 'mean',
@@ -226,6 +231,19 @@ def write_vrp(analyzer: "VoiceMapAnalyzer",
         'OQ': 'mean', 'SPQ': 'mean', 'CIQ': 'mean',
         'Total': 'sum',
     }).reset_index()
+
+    # AVQI per cell from the cell-mean inputs. The formula is linear, so this
+    # equals the mean of per-cycle AVQI; it also keeps the shimmer
+    # decomposition's zero-filled cycles counted the same way as Shimmer.
+    # First-pass partial renders lack the inputs → 0 like other missing metrics.
+    if 'cpps_praat' in metrics:
+        grouped['AVQI'] = avqi_from_components(
+            grouped['CPPSPraat'], grouped['HNR'],
+            grouped['Shimmer'], grouped['ShimmerDB'],
+            grouped['LTASSlope'], grouped['LTASTilt'],
+            version=getattr(config, 'avqi_version', '03.01'))
+    else:
+        grouped['AVQI'] = 0.0
 
     # Empty-cluster rescue, post-clarity-filter. sklearn KMeans can leave
     # a cluster empty; our in-calculator rescue reassigns a "worst-fit"
@@ -268,6 +286,8 @@ def write_vrp(analyzer: "VoiceMapAnalyzer",
         'Shimmer', 'ShimmerDB',
         'ShimmerAPQ3', 'ShimmerAPQ5', 'ShimmerAPQ11',
         'HNR',
+        # AVQI (Maryn et al. 2010) + its Praat-convention inputs
+        'AVQI', 'CPPSPraat', 'LTASSlope', 'LTASTilt',
         # Add-on voice-quality (待验证)
         'NHR', 'CPPS', 'PPE', 'ZCR',
         # 频谱形态 / 声压 / Vibrato / GNE / 共振峰带宽（待验证）
