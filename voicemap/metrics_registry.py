@@ -228,14 +228,16 @@ def _populate_builtins():
     # validated: docs/validation/metrics/avqi.md
     register(MetricSpec(
         key="AVQI", category="Acoustic", label="AVQI - Acoustic Voice Quality Index",
-        vmin=0.0, vmax=8.0, unit="",
+        # The formula is unbounded: very clean voices go below 0 per cell,
+        # so the colour range extends below zero to keep them distinguishable.
+        vmin=-4.0, vmax=8.0, unit="",
         cmap="viridis",
         description="Acoustic Voice Quality Index: weighted CPPS, HNR, shimmer "
                     "(%, dB), LTAS slope and tilt. Higher = more dysphonic."))
     register(MetricSpec(
         key="CPPSPraat", category="Acoustic", label="CPPS (Praat scale)",
         vmin=0.0, vmax=25.0, unit="dB",
-        cmap="fd_cpp",
+        cmap="viridis",
         description="Smoothed CPP on the Praat PowerCepstrogram scale (AVQI input)."))
     register(MetricSpec(
         key="LTASSlope", category="Acoustic", label="LTAS slope",
